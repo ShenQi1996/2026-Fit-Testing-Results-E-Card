@@ -16,7 +16,6 @@ const EmailForm = () => {
     fieldErrors,
     handleInputChange,
     handleSubmit,
-    handleTestSave,
   } = useEmailForm();
 
   return (
@@ -46,40 +45,8 @@ const EmailForm = () => {
 
       <StatusMessage type={status.type} message={status.message} />
 
-      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="submit-button-container">
         <SubmitButton isLoading={isLoading} />
-        <button 
-          type="button" 
-          onClick={handleTestSave}
-          style={{
-            background: 'linear-gradient(135deg, #20b2aa 0%, #17a2b8 100%)',
-            color: 'white',
-            border: 'none',
-            padding: '14px 32px',
-            fontSize: '16px',
-            fontWeight: '600',
-            borderRadius: '8px',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-            transition: 'all 0.3s ease',
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px',
-            marginTop: '8px',
-            opacity: isLoading ? 0.6 : 1
-          }}
-          disabled={isLoading}
-          onMouseEnter={(e) => {
-            if (!isLoading) {
-              e.target.style.transform = 'translateY(-2px)';
-              e.target.style.boxShadow = '0 6px 20px rgba(32, 178, 170, 0.4)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.transform = 'translateY(0)';
-            e.target.style.boxShadow = 'none';
-          }}
-        >
-          {isLoading ? 'Saving...' : 'Test Save to Firebase'}
-        </button>
       </div>
     </form>
   );

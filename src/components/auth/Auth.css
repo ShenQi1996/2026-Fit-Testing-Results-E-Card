@@ -163,12 +163,81 @@
 
 /* Responsive */
 @media (max-width: 768px) {
+  .auth-container {
+    padding: 15px;
+  }
+
   .auth-card {
     padding: 30px 20px;
+    max-width: 100%;
   }
 
   .auth-title {
-    font-size: 28px;
+    font-size: 26px;
+  }
+
+  .auth-subtitle {
+    font-size: 13px;
+  }
+
+  .auth-form {
+    gap: 16px;
+  }
+
+  .auth-button,
+  .google-button {
+    padding: 14px 24px;
+    font-size: 15px;
+    min-height: 48px; /* Better touch target */
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-container {
+    padding: 10px;
+  }
+
+  .auth-card {
+    padding: 24px 16px;
+    border-radius: 10px;
+  }
+
+  .auth-title {
+    font-size: 22px;
+    margin-bottom: 6px;
+  }
+
+  .auth-subtitle {
+    font-size: 12px;
+    margin-bottom: 24px;
+  }
+
+  .auth-form {
+    gap: 14px;
+  }
+
+  .form-group {
+    gap: 6px;
+  }
+
+  .form-input {
+    padding: 12px 14px;
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+
+  .auth-button,
+  .google-button {
+    padding: 12px 20px;
+    font-size: 14px;
+  }
+
+  .auth-divider {
+    margin: 20px 0;
+  }
+
+  .auth-switch {
+    margin-top: 20px;
+    font-size: 13px;
   }
 }
 

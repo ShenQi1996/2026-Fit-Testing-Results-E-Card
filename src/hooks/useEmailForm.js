@@ -123,52 +123,6 @@ export const useEmailForm = () => {
     setFieldErrors({});
   };
 
-  // Test function: Save directly to Firebase without sending email
-  const handleTestSave = async () => {
-    // Validate form
-    const validation = validateFitTestForm(formData);
-    if (!validation.isValid) {
-      setFieldErrors(validation.fieldErrors);
-      setStatus({ type: 'error', message: validation.error });
-      return;
-    }
-    
-    // Clear field errors if validation passes
-    setFieldErrors({});
-
-    if (!user || !user.uid) {
-      setStatus({ type: 'error', message: 'You must be logged in to save records.' });
-      return;
-    }
-
-    setIsLoading(true);
-    setStatus({ type: '', message: '' });
-
-    try {
-      // Save directly to Firebase (skip email)
-      await saveFitTest(user.uid, formData);
-      console.log('Test: Fit test record saved to Firebase');
-      
-      setStatus({ type: 'success', message: '✅ Test: Record saved to Firebase! Check your Firestore database.' });
-      
-      // Reset form but keep issue date as today and auto-fill fitTester
-      setFormData({
-        ...INITIAL_FORM_DATA,
-        issueDate: getTodayDate(),
-        fitTester: user?.name || '',
-      });
-      setFieldErrors({});
-    } catch (error) {
-      console.error('Error saving to database:', error);
-      setStatus({ 
-        type: 'error', 
-        message: `Failed to save: ${error.message || 'Check Firebase configuration and Firestore rules.'}` 
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   return {
     formData,
     isLoading,
@@ -176,7 +130,6 @@ export const useEmailForm = () => {
     fieldErrors,
     handleInputChange,
     handleSubmit,
-    handleTestSave,
     resetForm,
   };
 };

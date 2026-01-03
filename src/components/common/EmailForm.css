@@ -170,6 +170,14 @@
   border: 1px solid #ffeaa7;
 }
 
+.submit-button-container {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 8px;
+}
+
 /* Responsive design for Email Form */
 @media (max-width: 768px) {
   .email-form {
@@ -178,10 +186,71 @@
 
   .form-row {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .form-section {
     padding: 15px;
+    gap: 12px;
+  }
+
+  .section-title {
+    font-size: 16px;
+  }
+
+  .form-input,
+  .form-textarea {
+    padding: 14px 16px;
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+
+  .submit-button {
+    width: 100%;
+    padding: 16px 24px;
+    font-size: 16px;
+    min-height: 48px; /* Better touch target */
+  }
+}
+
+@media (max-width: 480px) {
+  .email-form {
+    gap: 16px;
+  }
+
+  .form-section {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .section-title {
+    font-size: 15px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+  }
+
+  .form-group {
+    gap: 6px;
+  }
+
+  .form-group label {
+    font-size: 13px;
+  }
+
+  .form-input,
+  .form-textarea {
+    padding: 12px 14px;
+    font-size: 16px;
+    border-radius: 6px;
+  }
+
+  .submit-button {
+    padding: 14px 20px;
+    font-size: 15px;
+  }
+
+  .status-message {
+    padding: 10px 12px;
+    font-size: 13px;
   }
 }
 

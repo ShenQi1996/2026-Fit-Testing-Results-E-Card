@@ -14,6 +14,7 @@ const AppContent = () => {
   const { isAuthenticated, loading } = useAuth();
   const [showSignup, setShowSignup] = useState(false);
   const [currentPage, setCurrentPage] = useState('form'); // 'form', 'results', or 'editAccount'
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   if (loading) {
     return (
@@ -39,9 +40,21 @@ const AppContent = () => {
 
   return (
     <div className="app">
-      <Header onEditAccount={() => setCurrentPage('editAccount')} />
+      <Header 
+        onEditAccount={() => setCurrentPage('editAccount')} 
+        onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
+        sidebarOpen={sidebarOpen}
+      />
       <div className="app-layout">
-        <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+        <Sidebar 
+          currentPage={currentPage} 
+          onNavigate={(page) => {
+            setCurrentPage(page);
+            setSidebarOpen(false); // Close sidebar on mobile after navigation
+          }}
+          isOpen={sidebarOpen}
+        />
+        {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>}
         <div className="main-content">
           {currentPage === 'editAccount' ? (
             <div className="container">

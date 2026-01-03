@@ -1,9 +1,9 @@
 import React from 'react';
 import './Sidebar.css';
 
-const Sidebar = ({ currentPage, onNavigate }) => {
+const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
       <div className="sidebar-content">
         <h2 className="sidebar-title">Navigation</h2>
         <nav className="sidebar-nav">
