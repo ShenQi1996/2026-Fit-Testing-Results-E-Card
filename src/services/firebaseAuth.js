@@ -12,6 +12,8 @@ import {
   EmailAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
@@ -71,21 +73,55 @@ export const signIn = async (email, password) => {
 
 /**
  * Sign in with Google
+ * Uses popup method first, falls back to redirect if popup is blocked
  * @returns {Promise<object>} User object
  */
 export const signInWithGoogle = async () => {
   try {
     const provider = new GoogleAuthProvider();
-    const userCredential = await signInWithPopup(auth, provider);
-    const user = userCredential.user;
+    
+    // Add additional scopes if needed
+    provider.addScope('profile');
+    provider.addScope('email');
+    
+    // Set custom parameters
+    provider.setCustomParameters({
+      prompt: 'select_account'
+    });
 
-    return {
-      uid: user.uid,
-      email: user.email,
-      name: user.displayName || '',
-      createdAt: user.metadata.creationTime,
-    };
+    try {
+      // Try popup method first (works better in most cases)
+      const userCredential = await signInWithPopup(auth, provider);
+      const user = userCredential.user;
+
+      return {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || '',
+        createdAt: user.metadata.creationTime,
+      };
+    } catch (popupError) {
+      // If popup is blocked or fails, check if we should use redirect
+      if (
+        popupError.code === 'auth/popup-blocked' ||
+        popupError.code === 'auth/popup-closed-by-user' ||
+        popupError.code === 'auth/cancelled-popup-request'
+      ) {
+        // Use redirect method as fallback
+        // Note: This will cause a full page redirect
+        await signInWithRedirect(auth, provider);
+        // The function will return after redirect, so we throw a special error
+        // The actual sign-in will complete after the redirect
+        throw new Error('Redirecting to Google sign-in...');
+      }
+      // Re-throw other errors
+      throw popupError;
+    }
   } catch (error) {
+    // Handle redirect errors or other errors
+    if (error.message === 'Redirecting to Google sign-in...') {
+      throw error; // Let the redirect happen
+    }
     throw new Error(getAuthErrorMessage(error.code));
   }
 };
@@ -190,6 +226,30 @@ export const getCurrentUser = () => {
 export const getAuthInstance = () => auth;
 
 /**
+ * Handle Google sign-in redirect result
+ * Call this when your app loads to check if user is returning from Google sign-in redirect
+ * @returns {Promise<object|null>} User object if redirect was successful, null otherwise
+ */
+export const handleGoogleRedirect = async () => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result && result.user) {
+      return {
+        uid: result.user.uid,
+        email: result.user.email,
+        name: result.user.displayName || '',
+        createdAt: result.user.metadata.creationTime,
+      };
+    }
+    return null;
+  } catch (error) {
+    // If there's an error, it means no redirect happened or it failed
+    // This is normal if user didn't use redirect method
+    return null;
+  }
+};
+
+/**
  * Convert Firebase error codes to user-friendly messages
  * @param {string} errorCode - Firebase error code
  * @returns {string} User-friendly error message
@@ -208,7 +268,9 @@ const getAuthErrorMessage = (errorCode) => {
     'auth/requires-recent-login': 'Please log out and log back in to change your email or password.',
     'auth/popup-closed-by-user': 'Sign-in popup was closed. Please try again.',
     'auth/cancelled-popup-request': 'Only one popup request is allowed at a time.',
-    'auth/popup-blocked': 'Popup was blocked by your browser. Please allow popups and try again.',
+    'auth/popup-blocked': 'Popup was blocked by your browser. The page will redirect to Google sign-in instead.',
+    'auth/unauthorized-domain': 'This domain is not authorized for OAuth operations. Please add your domain to Firebase authorized domains.',
+    'auth/operation-not-allowed': 'Google sign-in is not enabled. Please enable it in Firebase Console.',
   };
 
   return errorMessages[errorCode] || 'An error occurred. Please try again.';

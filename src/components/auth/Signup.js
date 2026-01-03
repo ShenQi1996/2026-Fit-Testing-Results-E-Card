@@ -163,9 +163,9 @@ const Signup = ({ onSwitchToLogin }) => {
           Sign up with Google
         </button>
         
-        {/* <div className="auth-switch">
+        <div className="auth-switch">
           <p>Already have an account? <button type="button" onClick={onSwitchToLogin} className="auth-link">Login</button></p>
-        </div> */}
+        </div>
       </div>
     </div>
   );

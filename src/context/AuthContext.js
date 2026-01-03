@@ -9,6 +9,7 @@ import {
   onAuthStateChange,
   getCurrentUser,
   getAuthInstance,
+  handleGoogleRedirect,
 } from '../services/firebaseAuth';
 
 const AuthContext = createContext(null);
@@ -30,6 +31,19 @@ export const AuthProvider = ({ children }) => {
   // STEP 1: On app load, check if user is already logged in
   // Firebase automatically handles session persistence
   useEffect(() => {
+    // Check for Google redirect result first (if user is returning from Google sign-in)
+    const checkRedirect = async () => {
+      try {
+        await handleGoogleRedirect();
+        // If redirect was successful, onAuthStateChange will update the user
+      } catch (error) {
+        // No redirect or redirect failed, continue normally
+        console.log('No Google redirect detected');
+      }
+    };
+    
+    checkRedirect();
+
     // Listen to authentication state changes
     const unsubscribe = onAuthStateChange((firebaseUser) => {
       setUser(firebaseUser);
