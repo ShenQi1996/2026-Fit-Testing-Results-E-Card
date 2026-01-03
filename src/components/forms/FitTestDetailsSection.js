@@ -38,6 +38,11 @@ const RESULT_OPTIONS = [
 ];
 
 const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) => {
+  // Check if current respiratorMfg value is a custom "Other" value
+  const isCustomMfg = formData.respiratorMfg && !RESPIRATOR_MFG_OPTIONS.find(opt => opt.value === formData.respiratorMfg);
+  const showOtherInput = formData.respiratorMfg === 'Other' || isCustomMfg;
+  const selectValue = isCustomMfg ? 'Other' : formData.respiratorMfg;
+
   return (
     <FormSection title="Fit Test Details">
       <div className="form-row">
@@ -64,16 +69,38 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
       </div>
 
       <div className="form-row">
-        <FormSelect
-          id="respiratorMfg"
-          label="Respirator MFG"
-          value={formData.respiratorMfg}
-          onChange={(e) => onChange('respiratorMfg', e.target.value)}
-          options={RESPIRATOR_MFG_OPTIONS}
-          required
-          disabled={isLoading}
-          error={fieldErrors?.respiratorMfg}
-        />
+        <div className="respirator-mfg-group">
+          <FormSelect
+            id="respiratorMfg"
+            label="Respirator MFG"
+            value={selectValue}
+            onChange={(e) => {
+              const selectedValue = e.target.value;
+              if (selectedValue === 'Other') {
+                onChange('respiratorMfg', 'Other');
+              } else {
+                onChange('respiratorMfg', selectedValue);
+              }
+            }}
+            options={RESPIRATOR_MFG_OPTIONS}
+            required
+            disabled={isLoading}
+            error={fieldErrors?.respiratorMfg}
+          />
+          {showOtherInput && (
+            <FormInput
+              id="respiratorMfgOther"
+              label="Specify Respirator MFG"
+              type="text"
+              value={isCustomMfg ? formData.respiratorMfg : ''}
+              onChange={(e) => onChange('respiratorMfg', e.target.value)}
+              placeholder="Enter manufacturer name"
+              required
+              disabled={isLoading}
+              error={fieldErrors?.respiratorMfg}
+            />
+          )}
+        </div>
         <FormSelect
           id="testingAgent"
           label="Testing Agent"

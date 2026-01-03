@@ -492,17 +492,48 @@ const TestResults = () => {
                           </div>
                           <div className="edit-form-row">
                             <label>Respirator MFG:</label>
-                            <select
-                              className="edit-select"
-                              value={editData.respiratorMfg || '3M'}
-                              onChange={(e) => handleEditChange('respiratorMfg', e.target.value)}
-                            >
-                              <option value="3M">3M</option>
-                              <option value="Honeywell">Honeywell</option>
-                              <option value="Moldex">Moldex</option>
-                              <option value="Kimberly-Clark">Kimberly-Clark</option>
-                              <option value="Other">Other</option>
-                            </select>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <select
+                                className="edit-select"
+                                value={
+                                  editData.respiratorMfg && 
+                                  !['3M', 'Honeywell', 'Moldex', 'Kimberly-Clark', 'Other'].includes(editData.respiratorMfg)
+                                    ? 'Other' 
+                                    : (editData.respiratorMfg || '3M')
+                                }
+                                onChange={(e) => {
+                                  const selectedValue = e.target.value;
+                                  if (selectedValue === 'Other') {
+                                    handleEditChange('respiratorMfg', 'Other');
+                                  } else {
+                                    handleEditChange('respiratorMfg', selectedValue);
+                                  }
+                                }}
+                              >
+                                <option value="3M">3M</option>
+                                <option value="Honeywell">Honeywell</option>
+                                <option value="Moldex">Moldex</option>
+                                <option value="Kimberly-Clark">Kimberly-Clark</option>
+                                <option value="Other">Other</option>
+                              </select>
+                              {(
+                                editData.respiratorMfg === 'Other' || 
+                                (editData.respiratorMfg && !['3M', 'Honeywell', 'Moldex', 'Kimberly-Clark', 'Other'].includes(editData.respiratorMfg))
+                              ) && (
+                                <input
+                                  type="text"
+                                  className="edit-input"
+                                  placeholder="Enter manufacturer name"
+                                  value={
+                                    editData.respiratorMfg && 
+                                    !['3M', 'Honeywell', 'Moldex', 'Kimberly-Clark', 'Other'].includes(editData.respiratorMfg)
+                                      ? editData.respiratorMfg 
+                                      : ''
+                                  }
+                                  onChange={(e) => handleEditChange('respiratorMfg', e.target.value)}
+                                />
+                              )}
+                            </div>
                           </div>
                           <div className="edit-form-row">
                             <label>Testing Agent:</label>

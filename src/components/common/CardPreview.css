@@ -2,7 +2,7 @@
 .card-preview-container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   margin-top: 8px;
 }
 
@@ -29,6 +29,7 @@
   justify-content: center;
   align-items: center;
   transition: background-color 0.3s ease, border-color 0.3s ease;
+  margin-top: 0;
 }
 
 .card-preview-content {
@@ -55,12 +56,14 @@
   font-weight: 500;
   color: var(--text-secondary);
   transition: color 0.3s ease;
+  margin-bottom: 0;
+  padding-bottom: 8px;
 }
 
 /* Responsive design for Card Preview */
 @media (max-width: 768px) {
   .card-preview-container {
-    gap: 10px;
+    gap: 0;
   }
 
   .card-preview-wrapper {
@@ -70,6 +73,7 @@
     border-radius: 8px;
     align-items: center;
     justify-content: center;
+    margin-top: 0;
   }
 
   .card-preview-content {
@@ -78,10 +82,26 @@
     width: 100%;
     max-width: 100%;
     margin: 0 auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
   }
 
   .card-preview-content table {
     margin: 0 auto;
+    display: table;
+  }
+}
+
+/* iPhone 17 and larger mobile devices */
+@media (min-width: 430px) and (max-width: 768px) {
+  .card-preview-wrapper {
+    padding: 24px 16px;
+  }
+
+  .card-preview-content {
+    transform: scale(0.75);
+    transform-origin: center center;
   }
 }
 
@@ -92,6 +112,7 @@
     padding: 15px 8px;
     align-items: center;
     justify-content: center;
+    margin-top: 0;
   }
 
   .card-preview-content {
@@ -99,10 +120,14 @@
     transform-origin: center center;
     width: 100%;
     margin: 0 auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
   }
 
   .card-preview-content table {
     margin: 0 auto;
+    display: table;
   }
 
   .card-preview-placeholder {

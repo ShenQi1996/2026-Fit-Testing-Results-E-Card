@@ -45,6 +45,12 @@
   transition: color 0.3s ease;
 }
 
+.respirator-mfg-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .form-input,
 .form-textarea {
   width: 100%;
