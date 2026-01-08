@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getTodayDate } from '../utils/dateUtils';
 import { validateFitTestForm } from '../utils/validators';
@@ -17,6 +17,7 @@ const INITIAL_FORM_DATA = {
   model: '',
   result: 'Pass',
   fitTester: '',
+  printedName: '', 
 };
 
 export const useEmailForm = () => {
@@ -25,6 +26,8 @@ export const useEmailForm = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState({ type: '', message: '' });
   const [fieldErrors, setFieldErrors] = useState({});
+  const [hasStrokes, setHasStrokes] = useState(false);
+  const signatureCanvasRef = useRef(null);
 
   // Auto-fill fitTester with user's name when user is available
   useEffect(() => {
@@ -57,12 +60,33 @@ export const useEmailForm = () => {
     }
   };
 
+  const handleSignatureStroke = (hasStrokesValue) => {
+    setHasStrokes(hasStrokesValue);
+    // Clear signature error when user starts drawing
+    if (fieldErrors.signature) {
+      setFieldErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors.signature;
+        return newErrors;
+      });
+    }
+  };
+
+  const handleSignatureClear = () => {
+    setHasStrokes(false);
+  };
+
+  const setSignatureCanvasRef = (ref) => {
+    signatureCanvasRef.current = ref;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     // Validate form
-    const validation = validateFitTestForm(formData);
+    const validation = validateFitTestForm(formData, hasStrokes);
     if (!validation.isValid) {
+      setFieldErrors(validation.fieldErrors);
       setStatus({ type: 'error', message: validation.error });
       return;
     }
@@ -71,13 +95,27 @@ export const useEmailForm = () => {
     setStatus({ type: '', message: '' });
 
     try {
+      // Capture signature as data URL
+      let signatureDataUrl = '';
+      if (signatureCanvasRef.current) {
+        const canvas = signatureCanvasRef.current;
+        signatureDataUrl = canvas.toDataURL('image/png');
+      } 
+      // Prepare form data with signature
+      const formDataWithSignature = {
+        ...formData,
+        printedName: formData.printedName.trim(),
+        signatureDataUrl,
+      };
+      
+      console.log('Submitting with signatureDataUrl:', signatureDataUrl ? 'Present' : 'Missing');
       // Step 1: Send email via EmailJS first
-      await sendFitTestCard(formData);
+      await sendFitTestCard(formDataWithSignature);
       
       // Step 2: If email sent successfully, save record to Firebase Firestore
       if (user && user.uid) {
         try {
-          await saveFitTest(user.uid, formData);
+          await saveFitTest(user.uid, formDataWithSignature);
           console.log('Fit test record saved to Firebase');
         } catch (dbError) {
           console.error('Error saving to database:', dbError);
@@ -102,6 +140,12 @@ export const useEmailForm = () => {
         fitTester: user?.name || '',
       });
       setFieldErrors({});
+      setHasStrokes(false);
+      // Clear signature canvas
+      if (signatureCanvasRef.current) {
+        const ctx = signatureCanvasRef.current.getContext('2d');
+        ctx.clearRect(0, 0, signatureCanvasRef.current.width, signatureCanvasRef.current.height);
+      }
     } catch (error) {
       console.error('Error sending email:', error);
       setStatus({ 
@@ -121,6 +165,12 @@ export const useEmailForm = () => {
     });
     setStatus({ type: '', message: '' });
     setFieldErrors({});
+    setHasStrokes(false);
+    // Clear signature canvas
+    if (signatureCanvasRef.current) {
+      const ctx = signatureCanvasRef.current.getContext('2d');
+      ctx.clearRect(0, 0, signatureCanvasRef.current.width, signatureCanvasRef.current.height);
+    }
   };
 
   return {
@@ -128,9 +178,12 @@ export const useEmailForm = () => {
     isLoading,
     status,
     fieldErrors,
+    hasStrokes,
     handleInputChange,
     handleSubmit,
+    handleSignatureStroke,
+    handleSignatureClear,
+    setSignatureCanvasRef,
     resetForm,
   };
 };
-
