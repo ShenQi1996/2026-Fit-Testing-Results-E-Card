@@ -13,4 +13,3 @@ const SubmitButton = ({ isLoading, disabled }) => {
 };
 
 export default SubmitButton;
-

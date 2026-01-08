@@ -619,6 +619,56 @@
   cursor: not-allowed;
 }
 
+/* Signature Display Styles */
+.signature-display-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signature-display {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signature-image-container {
+  display: flex;
+  justify-content: flex-start;
+  padding: 8px 0;
+}
+
+.signature-image {
+  max-width: 100%;
+  max-height: 150px;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  background-color: white;
+  padding: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Responsive adjustments for signature */
+@media (max-width: 768px) {
+  .signature-image {
+    max-height: 120px;
+  }
+}
+
+@media (max-width: 480px) {
+  .signature-image {
+    max-height: 100px;
+  }
+  
+  .signature-display-section {
+    margin-top: 12px;
+    padding-top: 12px;
+  }
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

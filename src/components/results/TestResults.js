@@ -622,6 +622,20 @@ const TestResults = () => {
                             <span className="result-label">Created:</span>
                             <span className="result-value">{formatDate(test.createdAt)}</span>
                           </div>
+                          {test.signatureDataUrl && (
+                            <div className="signature-display-section">
+                              <div className="signature-display">
+                                <span className="result-label">Signature:</span>
+                                <div className="signature-image-container">
+                                  <img 
+                                    src={test.signatureDataUrl} 
+                                    alt="Signature" 
+                                    className="signature-image"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                       <div className="result-card-footer">

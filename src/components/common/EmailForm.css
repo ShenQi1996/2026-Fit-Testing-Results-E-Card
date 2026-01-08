@@ -184,6 +184,104 @@
   margin-top: 8px;
 }
 
+/* Signature Pad Styles */
+.signature-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signature-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color 0.3s ease;
+}
+
+.signature-pad-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signature-canvas {
+  width: 100%;
+  max-width: 600px;
+  height: 200px;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  cursor: crosshair;
+  background-color: white;
+  touch-action: none;
+  transition: border-color 0.3s ease;
+}
+
+.signature-canvas:focus {
+  outline: none;
+  border-color: var(--accent-teal);
+  box-shadow: 0 0 0 3px rgba(32, 178, 170, 0.1);
+}
+
+.signature-canvas:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.signature-clear-button {
+  align-self: flex-start;
+  padding: 8px 16px;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.signature-clear-button:hover:not(:disabled) {
+  background-color: var(--bg-tertiary);
+  border-color: var(--accent-teal);
+}
+
+.signature-clear-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Signature Pad Styles */
+.signature-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Consent Statement Styles */
+.consent-statement {
+  margin: 16px 0;
+  padding: 16px;
+  background-color: var(--bg-secondary);
+  border-left: 4px solid var(--accent-teal);
+  border-radius: 8px;
+}
+
+.consent-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  font-style: italic;
+}
+
+.signature-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color 0.3s ease;
+}
+
+
 /* Responsive design for Email Form */
 @media (max-width: 768px) {
   .email-form {
@@ -215,6 +313,11 @@
     padding: 16px 24px;
     font-size: 16px;
     min-height: 48px; /* Better touch target */
+  }
+
+  .signature-canvas {
+    max-width: 100%;
+    height: 180px;
   }
 }
 
@@ -258,5 +361,8 @@
     padding: 10px 12px;
     font-size: 13px;
   }
-}
 
+  .signature-canvas {
+    height: 150px;
+  }
+}

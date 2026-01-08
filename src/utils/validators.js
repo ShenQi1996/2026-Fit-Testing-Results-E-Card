@@ -13,9 +13,10 @@ export const validateEmail = (email) => {
 /**
  * Validate fit test form data
  * @param {object} formData - Form data to validate
+ * @param {boolean} hasStrokes - Whether signature has strokes
  * @returns {object} { isValid: boolean, error: string, fieldErrors: object }
  */
-export const validateFitTestForm = (formData) => {
+export const validateFitTestForm = (formData, hasStrokes = false) => {
   const fieldErrors = {};
 
   // Validate recipient email
@@ -65,9 +66,18 @@ export const validateFitTestForm = (formData) => {
     fieldErrors.result = 'Please select result.';
   }
 
+  // Validate printed name
+  if (!formData.printedName?.trim()) {
+    fieldErrors.printedName = 'Please enter printed name.';
+  }
+
+  // Validate signature
+  if (!hasStrokes) {
+    fieldErrors.signature = 'Please provide your signature.';
+  }
+
   const isValid = Object.keys(fieldErrors).length === 0;
   const error = isValid ? '' : Object.values(fieldErrors)[0]; // First error message
 
   return { isValid, error, fieldErrors };
 };
-
