@@ -37,6 +37,10 @@ const RESULT_OPTIONS = [
   { value: 'Fail', label: 'Fail' },
 ];
 
+const FIT_TEST_METHOD_OPTIONS = [
+  { value: 'Locked to Qualitative', label: 'Locked to Qualitative' },
+];
+
 const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) => {
   // Check if current respiratorMfg value is a custom "Other" value
   const isCustomMfg = formData.respiratorMfg && !RESPIRATOR_MFG_OPTIONS.find(opt => opt.value === formData.respiratorMfg);
@@ -65,6 +69,18 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           required
           disabled={isLoading}
           error={fieldErrors?.fitTestType}
+        />
+      </div>
+
+      <div className="form-row">
+        <FormSelect
+          id="fitTestMethod"
+          label="Fit test method"
+          value={formData.fitTestMethod || 'Locked to Qualitative'}
+          onChange={() => {}} // Read-only, locked to Qualitative
+          options={FIT_TEST_METHOD_OPTIONS}
+          disabled={false}
+          error={fieldErrors?.fitTestMethod}
         />
       </div>
 
@@ -151,10 +167,10 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           label="Fit Tester"
           type="text"
           value={formData.fitTester}
-          onChange={(e) => onChange('fitTester', e.target.value)}
+          onChange={() => {}} // Read-only, no changes allowed
           placeholder="Enter fit tester name"
           required
-          disabled={isLoading}
+          disabled={true}
           error={fieldErrors?.fitTester}
         />
       </div>

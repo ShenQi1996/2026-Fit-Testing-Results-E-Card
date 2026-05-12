@@ -12,7 +12,7 @@ export const generateFitTestCard = (formData) => {
     model,
     result,
     fitTester,
-    recipientEmail
+    recipientEmail,
   } = formData;
 
   // Generate QR code that links to Secure Fit website

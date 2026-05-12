@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
-import EmailForm from './components/forms/EmailForm';
+import FitTestForm from './components/forms/FitTestForm';
 import Login from './components/auth/Login';
 import Signup from './components/auth/Signup';
 import Header from './components/common/Header';
 import EditAccount from './components/auth/EditAccount';
 import Sidebar from './components/common/Sidebar';
-import TestResults from './components/results/TestResults';
+import FitTestResults from './components/results/FitTestResults';
 import './styles/App.css';
 
 const AppContent = () => {
@@ -61,10 +61,10 @@ const AppContent = () => {
               <EditAccount onBack={() => setCurrentPage('form')} />
             </div>
           ) : currentPage === 'results' ? (
-            <TestResults />
+            <FitTestResults />
           ) : (
             <div className="container">
-              <EmailForm />
+              <FitTestForm />
             </div>
           )}
         </div>

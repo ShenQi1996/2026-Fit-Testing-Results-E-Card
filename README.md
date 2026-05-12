@@ -38,20 +38,24 @@ For detailed information, see [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)
 
 ### Form Features
 - **Complete Fit Test Form**: All required fields for OSHA-compliant documentation
+- **Respiratory Protection Program Verification**: Track schools on file, program administrator information
 - **Auto-Fill Capabilities**: 
   - Issue date defaults to today
   - Fit tester auto-fills with logged-in user's name
   - Date of Birth auto-formats to MM/DD/YYYY
+  - Schools on file checkbox defaults to checked
 - **Live Preview**: See exactly how the e-card will look before sending
 - **Form Validation**: Visual feedback with red borders for required fields
 - **QR Code Generation**: Automatic QR codes linking to rescheduling page
+- **Digital Signature**: Canvas-based signature pad with clear functionality
 
 ### Results Management
-- **Test Results Page**: View all fit test records organized by month
+- **Fit Test Results Page**: View all fit test records organized by month
 - **Inline Editing**: Edit records directly from the results page
 - **Resend E-Cards**: Resend e-cards to clients with updated timestamps
 - **Delete Records**: Remove records with confirmation modal
 - **Sorting**: Results sorted by issue date (newest first)
+- **Calendar View**: Monthly grouping for easy navigation
 
 ### User Features
 - **Account Management**: Edit profile information
@@ -115,15 +119,49 @@ email-form-app/
 ├── src/
 │   ├── components/
 │   │   ├── auth/              # Authentication components
+│   │   │   ├── Login.js
+│   │   │   ├── Signup.js
+│   │   │   ├── EditAccount.js
+│   │   │   ├── Auth.css
+│   │   │   └── EditAccount.css
 │   │   ├── common/            # Reusable components
+│   │   │   ├── Header.js
+│   │   │   ├── Sidebar.js
+│   │   │   ├── CardPreview.js
+│   │   │   ├── FormInput.js
+│   │   │   ├── FormSelect.js
+│   │   │   ├── FormSection.js
+│   │   │   └── StatusMessage.js
 │   │   ├── forms/             # Form section components
+│   │   │   ├── FitTestForm.js         # Main form container
+│   │   │   ├── FitTestForm.css        # Form styles
+│   │   │   ├── RecipientInfoSection.js
+│   │   │   ├── ClientInfoSection.js
+│   │   │   ├── FitTestDetailsSection.js
+│   │   │   ├── RespiratoryProtectionProgramSection.js
+│   │   │   ├── SignatureSection.js
+│   │   │   ├── SignaturePad.js
+│   │   │   └── SubmitButton.js
 │   │   └── results/           # Test results components
+│   │       ├── FitTestResults.js
+│   │       └── FitTestResults.css
 │   ├── context/               # React Context providers
+│   │   ├── AuthContext.js
+│   │   └── ThemeContext.js
 │   ├── hooks/                 # Custom React hooks
+│   │   └── useFitTestForm.js  # Fit test form logic hook
 │   ├── services/              # External service integrations
+│   │   ├── emailService.js
+│   │   ├── firebaseAuth.js
+│   │   └── firebaseDb.js
 │   ├── utils/                 # Utility functions
-│   ├── config/                 # Configuration files
+│   │   ├── dateUtils.js
+│   │   ├── validators.js
+│   │   └── fitTestCardTemplate.js  # E-card HTML templates
+│   ├── config/                # Configuration files
+│   │   └── firebase.js
 │   ├── styles/                # Global styles
+│   │   └── App.css
 │   ├── App.js                 # Main app component
 │   └── index.js               # Entry point
 ├── public/                     # Static files

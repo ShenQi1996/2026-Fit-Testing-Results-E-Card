@@ -1,5 +1,5 @@
 import React from 'react';
-import { generateFitTestCard } from '../../utils/ecardTemplates';
+import { generateFitTestCard } from '../../utils/fitTestCardTemplate';
 import './CardPreview.css';
 
 const CardPreview = ({ formData }) => {

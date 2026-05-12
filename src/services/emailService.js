@@ -1,7 +1,7 @@
 // Email service for sending e-cards via EmailJS
 
 import emailjs from '@emailjs/browser';
-import { generateFitTestCard } from '../utils/ecardTemplates';
+import { generateFitTestCard } from '../utils/fitTestCardTemplate';
 
 // EmailJS Configuration - Replace with your credentials
 // Get these from: https://dashboard.emailjs.com/admin/account

@@ -15,7 +15,7 @@ const FormInput = ({
   return (
     <div className="form-group">
       <label htmlFor={id}>
-        {label} {required && '*'}
+        {label} {required && <span style={{ color: '#dc3545' }}>*</span>}
       </label>
       <input
         type={type}

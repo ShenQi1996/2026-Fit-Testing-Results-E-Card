@@ -73,7 +73,13 @@ After setup, go to **Rules** tab and update to:
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can only read/write their own fit test records
+    // Users collection - users can read/write their own user document
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Fit tests collection - users can only read/write their own fit test records
     match /fitTests/{fitTestId} {
       allow read, write: if request.auth != null && request.auth.uid == resource.data.userId;
       allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
@@ -81,6 +87,10 @@ service cloud.firestore {
   }
 }
 ```
+
+**Important:** These rules allow:
+- Users to read/write their own user document in the `users` collection (for role management)
+- Users to read/write their own fit test records in the `fitTests` collection
 
 Click **"Publish"** to save the rules.
 

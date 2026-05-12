@@ -20,25 +20,28 @@ src/
 │   │   ├── Sidebar.css
 │   │   ├── CardPreview.js
 │   │   ├── CardPreview.css
-│   │   ├── EmailForm.css        # Shared form styles
 │   │   ├── FormInput.js         # Reusable input component
 │   │   ├── FormSelect.js        # Reusable select component
 │   │   ├── FormSection.js       # Reusable section wrapper
 │   │   └── StatusMessage.js     # Status/error message component
 │   ├── forms/                   # Form-specific components
-│   │   ├── EmailForm.js         # Main form container
+│   │   ├── FitTestForm.js       # Main form container
+│   │   ├── FitTestForm.css      # Form styles
 │   │   ├── RecipientInfoSection.js
 │   │   ├── ClientInfoSection.js
 │   │   ├── FitTestDetailsSection.js
+│   │   ├── RespiratoryProtectionProgramSection.js
+│   │   ├── SignatureSection.js
+│   │   ├── SignaturePad.js
 │   │   └── SubmitButton.js
 │   └── results/                 # Test results components
-│       ├── TestResults.js
-│       └── TestResults.css
+│       ├── FitTestResults.js
+│       └── FitTestResults.css
 ├── context/                     # React Context providers
 │   ├── AuthContext.js          # Authentication state management
 │   └── ThemeContext.js         # Dark mode theme management
 ├── hooks/                       # Custom React hooks
-│   └── useEmailForm.js         # Email form logic hook
+│   └── useFitTestForm.js       # Fit test form logic hook
 ├── services/                    # External service integrations
 │   ├── emailService.js         # EmailJS service wrapper
 │   ├── firebaseAuth.js         # Firebase authentication service
@@ -46,7 +49,7 @@ src/
 ├── utils/                       # Utility functions
 │   ├── dateUtils.js            # Date formatting utilities
 │   ├── validators.js           # Form validation functions
-│   └── ecardTemplates.js      # E-card HTML templates
+│   └── fitTestCardTemplate.js  # E-card HTML templates
 ├── config/                      # Configuration files
 │   └── firebase.js             # Firebase configuration
 ├── styles/                      # Global styles
@@ -63,10 +66,10 @@ src/
 - Mixed concerns (UI, logic, services)
 
 ### After Reorganization
-- **EmailForm.js**: ~40 lines (just composition!)
-- **useEmailForm.js**: ~70 lines (form logic)
-- **emailService.js**: ~30 lines (email sending)
-- **Form sections**: ~20-50 lines each (focused components)
+- **FitTestForm.js**: ~80 lines (just composition!)
+- **useFitTestForm.js**: ~193 lines (form logic)
+- **emailService.js**: ~68 lines (email sending)
+- **Form sections**: ~20-80 lines each (focused components)
 
 ## Component Responsibilities
 
@@ -85,15 +88,19 @@ src/
 - **StatusMessage.js**: Success/error messages
 
 ### Form Components (`components/forms/`)
-- **EmailForm.js**: Main form container (orchestrates sections)
+- **FitTestForm.js**: Main form container (orchestrates sections)
+- **FitTestForm.css**: Form styles and responsive design
 - **RecipientInfoSection.js**: Recipient email input
 - **ClientInfoSection.js**: Client name and DOB (with auto-formatting)
 - **FitTestDetailsSection.js**: All fit test fields
+- **RespiratoryProtectionProgramSection.js**: Respiratory protection program verification
+- **SignatureSection.js**: Signature pad and consent statement
+- **SignaturePad.js**: Canvas-based signature component
 - **SubmitButton.js**: Form submit button
 
 ### Results Components (`components/results/`)
-- **TestResults.js**: Display, edit, delete, and resend test results
-- **TestResults.css**: Calendar-style monthly grouping
+- **FitTestResults.js**: Display, edit, delete, and resend test results
+- **FitTestResults.css**: Calendar-style monthly grouping
 
 ## Context (`context/`)
 
@@ -110,13 +117,15 @@ src/
 
 ## Hooks (`hooks/`)
 
-### useEmailForm
+### useFitTestForm
 - Manages form state
 - Handles form submission
 - Validates form data
 - Manages loading/error states
 - Auto-fills fit tester name
 - Handles date formatting
+- Manages signature canvas
+- Resets form state
 
 ## Services (`services/`)
 
@@ -151,9 +160,10 @@ src/
 - Form validation
 - `validateFitTestForm()` - Validates entire form
 
-### ecardTemplates.js
+### fitTestCardTemplate.js
 - HTML e-card template generation
 - `generateFitTestCard()` - Creates HTML card
+- `getCardTemplate()` - Returns template functions
 
 ## Benefits of This Structure
 
@@ -168,20 +178,21 @@ src/
 
 | Component | Before | After |
 |-----------|--------|-------|
-| EmailForm | 321 lines | ~40 lines |
-| Form Logic | Mixed in | 70 lines (hook) |
-| Email Service | Mixed in | 30 lines (service) |
-| Form Sections | Mixed in | 20-50 lines each |
+| FitTestForm | 321 lines | ~80 lines |
+| Form Logic | Mixed in | 193 lines (hook) |
+| Email Service | Mixed in | 68 lines (service) |
+| Form Sections | Mixed in | 20-80 lines each |
 
 ## Adding New Features
 
 ### Add a new form section:
 1. Create component in `components/forms/`
-2. Import and use in `EmailForm.js`
+2. Import and use in `FitTestForm.js`
+3. Add form data fields to `hooks/useFitTestForm.js` if needed
 
 ### Add a new validation:
 1. Add function to `utils/validators.js`
-2. Use in `hooks/useEmailForm.js`
+2. Use in `hooks/useFitTestForm.js`
 
 ### Add a new service:
 1. Create file in `services/`

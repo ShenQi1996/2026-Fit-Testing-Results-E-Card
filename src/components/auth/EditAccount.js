@@ -130,6 +130,27 @@ const EditAccount = ({ onBack }) => {
                 disabled={isLoading}
               />
             </div>
+
+            <div className="form-group">
+              <label htmlFor="role">Account Role</label>
+              <div style={{ 
+                padding: '10px 12px', 
+                backgroundColor: 'var(--bg-secondary, #f5f5f5)', 
+                border: '1px solid var(--border-color, #ddd)',
+                borderRadius: '4px',
+                cursor: 'not-allowed',
+                fontWeight: 500,
+                color: user?.role === 'admin' ? 'var(--accent-blue, #2563eb)' : 'var(--text-secondary, #666)',
+                fontSize: '14px'
+              }}>
+                {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Tester'}
+              </div>
+              <small style={{ display: 'block', marginTop: '4px', color: 'var(--text-secondary, #666)', fontSize: '12px' }}>
+                {user?.role === 'admin' 
+                  ? 'You have admin privileges and can edit/delete test results.' 
+                  : 'You have tester privileges. Contact an admin to change your role.'}
+              </small>
+            </div>
           </div>
 
           <div className="form-section">

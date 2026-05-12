@@ -17,6 +17,7 @@ import {
   GoogleAuthProvider,
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
+import { getUserRole } from './firebaseDb';
 
 /**
  * Sign up a new user
@@ -188,14 +189,29 @@ export const changePassword = async (user, currentPassword, newPassword) => {
  * @returns {function} Unsubscribe function
  */
 export const onAuthStateChange = (callback) => {
-  return onAuthStateChanged(auth, (firebaseUser) => {
+  return onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
-      callback({
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        name: firebaseUser.displayName || '',
-        createdAt: firebaseUser.metadata.creationTime,
-      });
+      try {
+        // Fetch user role from Firestore
+        const role = await getUserRole(firebaseUser.uid);
+        callback({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || '',
+          createdAt: firebaseUser.metadata.creationTime,
+          role, // Add role to user object
+        });
+      } catch (error) {
+        console.error('Error fetching user role:', error);
+        // Default to tester role on error
+        callback({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || '',
+          createdAt: firebaseUser.metadata.creationTime,
+          role: 'tester', // Default to tester on error
+        });
+      }
     } else {
       callback(null);
     }
@@ -204,17 +220,32 @@ export const onAuthStateChange = (callback) => {
 
 /**
  * Get current user
- * @returns {object|null} Current user object or null
+ * @returns {Promise<object|null>} Current user object or null
  */
-export const getCurrentUser = () => {
+export const getCurrentUser = async () => {
   const user = auth.currentUser;
   if (user) {
-    return {
-      uid: user.uid,
-      email: user.email,
-      name: user.displayName || '',
-      createdAt: user.metadata.creationTime,
-    };
+    try {
+      // Fetch user role from Firestore
+      const role = await getUserRole(user.uid);
+      return {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || '',
+        createdAt: user.metadata.creationTime,
+        role, // Add role to user object
+      };
+    } catch (error) {
+      console.error('Error fetching user role:', error);
+      // Default to tester role on error
+      return {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || '',
+        createdAt: user.metadata.creationTime,
+        role: 'tester', // Default to tester on error
+      };
+    }
   }
   return null;
 };

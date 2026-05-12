@@ -136,7 +136,7 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Get updated user info
-      const updatedUser = getCurrentUser();
+      const updatedUser = await getCurrentUser();
       if (updatedUser) {
         setUser(updatedUser);
       }
