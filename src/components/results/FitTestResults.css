@@ -544,6 +544,56 @@
   cursor: not-allowed;
 }
 
+.result-pdf-preview-button {
+  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.result-pdf-preview-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(13, 148, 136, 0.35);
+}
+
+.result-pdf-preview-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.result-pdf-download-button {
+  background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.result-pdf-download-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(15, 118, 110, 0.35);
+}
+
+.result-pdf-download-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .delete-button {
   background: #dc3545;
   color: white;
