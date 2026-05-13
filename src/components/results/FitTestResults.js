@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { getUserFitTests, deleteFitTest, updateFitTest } from '../../services/firebaseDb';
 import { sendFitTestCard } from '../../services/emailService';
 import { formatDateInput, calculateExpirationDate } from '../../utils/dateUtils';
+import { downloadFitTestPdf, previewFitTestPdf } from '../../utils/pdfUtils';
 import './FitTestResults.css';
 
 const FitTestResults = () => {
@@ -19,6 +20,7 @@ const FitTestResults = () => {
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [expandedCards, setExpandedCards] = useState(new Set()); // Track which cards are expanded
+  const [pdfLoading, setPdfLoading] = useState(null); // { id, action: 'preview'|'download' } while generating PDF
 
   useEffect(() => {
     if (user && user.uid) {
@@ -239,6 +241,58 @@ const FitTestResults = () => {
     }
   };
 
+  const getEcardFormDataFromTest = (test) => ({
+    recipientEmail: test.recipientEmail || '',
+    clientName: test.clientName || '',
+    dob: test.dob || '',
+    issueDate: test.issueDate || '',
+    fitTestType: test.fitTestType || '',
+    respiratorMfg: test.respiratorMfg || '',
+    testingAgent: test.testingAgent || '',
+    maskSize: test.maskSize || '',
+    model: test.model || '',
+    result: test.result || '',
+    fitTester: test.fitTester || '',
+  });
+
+  const handlePreviewResultPdf = async (test) => {
+    if (!test.clientName?.trim()) {
+      setError('Cannot preview PDF: client name is missing for this record.');
+      setTimeout(() => setError(''), 4000);
+      return;
+    }
+    try {
+      setPdfLoading({ id: test.id, action: 'preview' });
+      setError('');
+      await previewFitTestPdf(getEcardFormDataFromTest(test));
+    } catch (err) {
+      console.error('Error previewing PDF:', err);
+      setError(err.message || 'Failed to generate PDF preview. Please try again.');
+      setTimeout(() => setError(''), 5000);
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
+  const handleDownloadResultPdf = async (test) => {
+    if (!test.clientName?.trim()) {
+      setError('Cannot download PDF: client name is missing for this record.');
+      setTimeout(() => setError(''), 4000);
+      return;
+    }
+    try {
+      setPdfLoading({ id: test.id, action: 'download' });
+      setError('');
+      await downloadFitTestPdf(getEcardFormDataFromTest(test));
+    } catch (err) {
+      console.error('Error downloading PDF:', err);
+      setError(err.message || 'Failed to download PDF. Please try again.');
+      setTimeout(() => setError(''), 5000);
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
   const handleResend = async (test) => {
     if (!test.recipientEmail) {
       setError('Cannot resend: No recipient email found for this record.');
@@ -252,19 +306,7 @@ const FitTestResults = () => {
       setError('');
 
       // Prepare form data from the CURRENT saved test record (uses latest data)
-      const formData = {
-        recipientEmail: test.recipientEmail,
-        clientName: test.clientName || '',
-        dob: test.dob || '',
-        issueDate: test.issueDate || '',
-        fitTestType: test.fitTestType || '',
-        respiratorMfg: test.respiratorMfg || '',
-        testingAgent: test.testingAgent || '',
-        maskSize: test.maskSize || '',
-        model: test.model || '',
-        result: test.result || '',
-        fitTester: test.fitTester || '',
-      };
+      const formData = getEcardFormDataFromTest(test);
 
       // Send email via EmailJS
       await sendFitTestCard(formData);
@@ -1012,23 +1054,73 @@ const FitTestResults = () => {
                                 <button
                                   onClick={() => handleEditClick(test)}
                                   className="edit-button"
-                                  disabled={deleting || resending === test.id || editing !== null}
+                                  disabled={
+                                    deleting ||
+                                    resending === test.id ||
+                                    editing !== null ||
+                                    (pdfLoading && pdfLoading.id === test.id)
+                                  }
                                 >
                                   ✏️ Edit
                                 </button>
                                 <button
                                   onClick={() => handleDeleteClick(test.id, test.clientName)}
                                   className="delete-button"
-                                  disabled={deleting || resending === test.id || editing !== null}
+                                  disabled={
+                                    deleting ||
+                                    resending === test.id ||
+                                    editing !== null ||
+                                    (pdfLoading && pdfLoading.id === test.id)
+                                  }
                                 >
                                   🗑️ Delete
                                 </button>
                               </>
                             )}
                             <button
+                              type="button"
+                              onClick={() => handlePreviewResultPdf(test)}
+                              className="result-pdf-preview-button"
+                              disabled={
+                                (pdfLoading && pdfLoading.id === test.id) ||
+                                deleting ||
+                                resending === test.id ||
+                                editing !== null ||
+                                !test.clientName?.trim()
+                              }
+                              title={!test.clientName?.trim() ? 'Client name required for PDF' : 'Open PDF preview'}
+                            >
+                              {pdfLoading?.id === test.id && pdfLoading?.action === 'preview'
+                                ? 'Opening...'
+                                : 'Preview PDF'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadResultPdf(test)}
+                              className="result-pdf-download-button"
+                              disabled={
+                                (pdfLoading && pdfLoading.id === test.id) ||
+                                deleting ||
+                                resending === test.id ||
+                                editing !== null ||
+                                !test.clientName?.trim()
+                              }
+                              title={!test.clientName?.trim() ? 'Client name required for PDF' : 'Download e-card as PDF'}
+                            >
+                              {pdfLoading?.id === test.id && pdfLoading?.action === 'download'
+                                ? 'Preparing...'
+                                : 'Download PDF'}
+                            </button>
+                            <button
                               onClick={() => handleResend(test)}
                               className="resend-button"
-                              disabled={resending === test.id || deleting || editing !== null || !test.recipientEmail}
+                              disabled={
+                                resending === test.id ||
+                                deleting ||
+                                editing !== null ||
+                                !test.recipientEmail ||
+                                (pdfLoading && pdfLoading.id === test.id)
+                              }
                               title={!test.recipientEmail ? 'No recipient email available' : 'Resend e-card'}
                             >
                               {resending === test.id ? 'Sending...' : '📧 Resend'}

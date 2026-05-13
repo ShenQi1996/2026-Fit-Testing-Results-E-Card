@@ -12,6 +12,7 @@ import EquipmentHygieneSection from './EquipmentHygieneSection';
 import SignatureSection from './SignatureSection';
 import StatusMessage from '../common/StatusMessage';
 import SubmitButton from './SubmitButton';
+import { downloadFitTestPdf, previewFitTestPdf } from '../../utils/pdfUtils';
 import './FitTestForm.css';
 
 const FitTestForm = () => {
@@ -31,6 +32,14 @@ const FitTestForm = () => {
     setSignatureCanvasRef,
     setTesterSignatureCanvasRef,
   } = useFitTestForm();
+
+  const handleDownloadPdf = async () => {
+    await downloadFitTestPdf(formData);
+  };
+
+  const handlePreviewPdf = async () => {
+    await previewFitTestPdf(formData);
+  };
 
   return (
     <form className="fit-test-form" onSubmit={handleSubmit}>
@@ -122,6 +131,22 @@ const FitTestForm = () => {
       <StatusMessage type={status.type} message={status.message} />
 
       <div className="submit-button-container">
+        <button
+          type="button"
+          className="preview-pdf-button"
+          onClick={handlePreviewPdf}
+          disabled={!formData.clientName?.trim() || isLoading}
+        >
+          Preview PDF
+        </button>
+        <button
+          type="button"
+          className="download-pdf-button"
+          onClick={handleDownloadPdf}
+          disabled={!formData.clientName?.trim() || isLoading}
+        >
+          Download PDF
+        </button>
         <SubmitButton 
           isLoading={isLoading} 
           disabled={
