@@ -21,9 +21,16 @@ const FitTestForm = () => {
     isLoading,
     status,
     fieldErrors,
+    solutionTypeOptions,
+    selectedSolutionOption,
+    setSolutionProfileAsDefault,
+    isLoadingSolutionProfiles,
     hasStrokes,
     hasTesterStrokes,
     handleInputChange,
+    handleSolutionOptionChange,
+    setSetSolutionProfileAsDefault,
+    isAddingNewSolutionProfile,
     handleSubmit,
     handleSignatureStroke,
     handleSignatureClear,
@@ -95,6 +102,13 @@ const FitTestForm = () => {
       <EquipmentHygieneSection
         formData={formData}
         onChange={handleInputChange}
+        solutionTypeOptions={solutionTypeOptions}
+        selectedSolutionOption={selectedSolutionOption}
+        onSolutionOptionChange={handleSolutionOptionChange}
+        setSolutionProfileAsDefault={setSolutionProfileAsDefault}
+        onSetSolutionProfileAsDefaultChange={setSetSolutionProfileAsDefault}
+        isAddingNewSolutionProfile={isAddingNewSolutionProfile}
+        isLoadingSolutionProfiles={isLoadingSolutionProfiles}
         isLoading={isLoading}
         fieldErrors={fieldErrors}
       />

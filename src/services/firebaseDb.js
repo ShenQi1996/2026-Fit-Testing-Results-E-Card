@@ -21,6 +21,7 @@ import { calculateExpirationDate } from '../utils/dateUtils';
 
 const FIT_TESTS_COLLECTION = 'fitTests';
 const USERS_COLLECTION = 'users';
+const SOLUTION_PROFILES_SUBCOLLECTION = 'solutionProfiles';
 
 /**
  * Save a fit test record
@@ -247,6 +248,209 @@ export const setUserRole = async (userId, role) => {
   } catch (error) {
     console.error('Error setting user role:', error);
     throw new Error('Failed to set user role. Please try again.');
+  }
+};
+
+/**
+ * Get all saved solution profiles for a user
+ * @param {string} userId - User ID
+ * @returns {Promise<Array>} Array of solution profiles
+ */
+export const getUserSolutionProfiles = async (userId) => {
+  try {
+    if (!userId) return [];
+
+    const profilesRef = collection(db, USERS_COLLECTION, userId, SOLUTION_PROFILES_SUBCOLLECTION);
+    let querySnapshot;
+    try {
+      // Preferred ordering from Firestore when available.
+      const q = query(profilesRef, orderBy('createdAt', 'desc'));
+      querySnapshot = await getDocs(q);
+    } catch (queryError) {
+      // Fallback to unordered read (then sort in JS) for any query-shape/index issues.
+      querySnapshot = await getDocs(profilesRef);
+      console.warn('Falling back to unordered solution profile fetch:', queryError);
+    }
+
+    const profiles = [];
+
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      profiles.push({
+        id: docSnap.id,
+        ...data,
+        createdAt: data.createdAt?.toDate?.()?.toISOString?.() || null,
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString?.() || null,
+      });
+    });
+
+    // Keep explicit order first, then newest-first as fallback.
+    profiles.sort((a, b) => {
+      const orderA = Number.isInteger(a.orderIndex) ? a.orderIndex : Number.MAX_SAFE_INTEGER;
+      const orderB = Number.isInteger(b.orderIndex) ? b.orderIndex : Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    return profiles;
+  } catch (error) {
+    console.error('Error fetching solution profiles:', error);
+    const message = (error?.message || '').toLowerCase();
+    const code = error?.code || '';
+
+    if (code === 'permission-denied' || message.includes('insufficient permissions')) {
+      throw new Error('Permission denied for saved solution profiles. Please publish Firestore rules for users/{uid}/solutionProfiles.');
+    }
+
+    throw new Error(`Failed to fetch saved solution profiles. ${error?.message || ''}`.trim());
+  }
+};
+
+/**
+ * Save a solution profile for a user
+ * @param {string} userId - User ID
+ * @param {object} profileData - { solutionType, solutionOpenDate, solutionExpirationDate }
+ * @param {boolean} setAsDefault - Whether this profile should be set as default
+ * @returns {Promise<string>} Document ID of the saved profile
+ */
+export const saveUserSolutionProfile = async (userId, profileData, setAsDefault = false) => {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required to save a solution profile.');
+    }
+
+    const solutionType = profileData.solutionType?.trim?.() || '';
+    const solutionOpenDate = profileData.solutionOpenDate?.trim?.() || '';
+    const solutionExpirationDate = profileData.solutionExpirationDate?.trim?.() || '';
+
+    if (!solutionType || !solutionOpenDate || !solutionExpirationDate) {
+      throw new Error('Solution type, open date, and expiration date are required.');
+    }
+
+    const profilesRef = collection(db, USERS_COLLECTION, userId, SOLUTION_PROFILES_SUBCOLLECTION);
+    const profileDocRef = doc(profilesRef);
+    const allProfilesSnapshot = await getDocs(profilesRef);
+    const nextOrderIndex = allProfilesSnapshot.size;
+
+    if (setAsDefault) {
+      const batch = writeBatch(db);
+      const defaultsSnapshot = await getDocs(query(profilesRef, where('isDefault', '==', true)));
+
+      defaultsSnapshot.forEach((docSnap) => {
+        batch.update(docSnap.ref, {
+          isDefault: false,
+          updatedAt: Timestamp.now(),
+        });
+      });
+
+      batch.set(profileDocRef, {
+        solutionType,
+        solutionOpenDate,
+        solutionExpirationDate,
+        orderIndex: nextOrderIndex,
+        isDefault: true,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+
+      await batch.commit();
+    } else {
+      await setDoc(profileDocRef, {
+        solutionType,
+        solutionOpenDate,
+        solutionExpirationDate,
+        orderIndex: nextOrderIndex,
+        isDefault: false,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+    }
+
+    return profileDocRef.id;
+  } catch (error) {
+    console.error('Error saving solution profile:', error);
+    throw new Error(error.message || 'Failed to save solution profile. Please try again.');
+  }
+};
+
+/**
+ * Delete one saved solution profile for a user
+ * @param {string} userId - User ID
+ * @param {string} profileId - Solution profile ID
+ * @returns {Promise<void>}
+ */
+export const deleteUserSolutionProfile = async (userId, profileId) => {
+  try {
+    if (!userId || !profileId) {
+      throw new Error('User ID and profile ID are required.');
+    }
+
+    const profileRef = doc(db, USERS_COLLECTION, userId, SOLUTION_PROFILES_SUBCOLLECTION, profileId);
+    await deleteDoc(profileRef);
+  } catch (error) {
+    console.error('Error deleting solution profile:', error);
+    throw new Error('Failed to delete solution profile. Please try again.');
+  }
+};
+
+/**
+ * Persist profile order for a user
+ * @param {string} userId - User ID
+ * @param {string[]} orderedProfileIds - Profile IDs in desired order (top to bottom)
+ * @returns {Promise<void>}
+ */
+export const reorderUserSolutionProfiles = async (userId, orderedProfileIds) => {
+  try {
+    if (!userId || !Array.isArray(orderedProfileIds)) {
+      throw new Error('User ID and ordered profile IDs are required.');
+    }
+
+    const batch = writeBatch(db);
+    orderedProfileIds.forEach((profileId, index) => {
+      const profileRef = doc(db, USERS_COLLECTION, userId, SOLUTION_PROFILES_SUBCOLLECTION, profileId);
+      batch.update(profileRef, {
+        orderIndex: index,
+        updatedAt: Timestamp.now(),
+      });
+    });
+
+    await batch.commit();
+  } catch (error) {
+    console.error('Error reordering solution profiles:', error);
+    throw new Error('Failed to reorder solution profiles. Please try again.');
+  }
+};
+
+/**
+ * Set one saved solution profile as default for a user
+ * @param {string} userId - User ID
+ * @param {string} profileId - Solution profile document ID
+ * @returns {Promise<void>}
+ */
+export const setDefaultSolutionProfile = async (userId, profileId) => {
+  try {
+    if (!userId || !profileId) {
+      throw new Error('User ID and profile ID are required.');
+    }
+
+    const profilesRef = collection(db, USERS_COLLECTION, userId, SOLUTION_PROFILES_SUBCOLLECTION);
+    const snapshot = await getDocs(profilesRef);
+    const batch = writeBatch(db);
+
+    snapshot.forEach((docSnap) => {
+      batch.update(docSnap.ref, {
+        isDefault: docSnap.id === profileId,
+        updatedAt: Timestamp.now(),
+      });
+    });
+
+    await batch.commit();
+  } catch (error) {
+    console.error('Error setting default solution profile:', error);
+    throw new Error('Failed to set default solution profile. Please try again.');
   }
 };
 

@@ -19,6 +19,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if request.auth != null && request.auth.uid == userId;
+
+      // Saved solution profiles subcollection
+      match /solutionProfiles/{profileId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
     
     // Fit tests collection - users can only read/write their own fit test records
@@ -36,6 +41,7 @@ service cloud.firestore {
 ## What These Rules Do:
 
 - **`users` collection**: Allows authenticated users to read and write their own user document (document ID = their UID). This is needed for role management.
+- **`users/{userId}/solutionProfiles` subcollection**: Allows authenticated users to create/read/update/delete their own saved solution profiles.
 - **`fitTests` collection**: Allows users to read/write only their own fit test records (where `userId` matches their UID).
 
 ## Security Notes:

@@ -2,6 +2,7 @@ import React from 'react';
 import FormSection from '../common/FormSection';
 import FormInput from '../common/FormInput';
 import FormSelect from '../common/FormSelect';
+import { TESTING_AGENT_OPTIONS } from '../../constants/fitTestOptions';
 
 const FIT_TEST_TYPE_OPTIONS = [
   { value: 'N95', label: 'N95' },
@@ -18,12 +19,6 @@ const RESPIRATOR_MFG_OPTIONS = [
   { value: 'Moldex', label: 'Moldex' },
   { value: 'Kimberly-Clark', label: 'Kimberly-Clark' },
   { value: 'Other', label: 'Other' },
-];
-
-const TESTING_AGENT_OPTIONS = [
-  { value: 'Bitrex', label: 'Bitrex' },
-  { value: 'Saccharin', label: 'Saccharin' },
-  { value: 'Isoamyl Acetate', label: 'Isoamyl Acetate' },
 ];
 
 const MASK_SIZE_OPTIONS = [

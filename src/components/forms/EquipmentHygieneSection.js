@@ -9,7 +9,19 @@ const CLEANING_METHOD_OPTIONS = [
   { value: 'Removed from service', label: 'Removed from service' },
 ];
 
-const EquipmentHygieneSection = ({ formData, onChange, isLoading, fieldErrors }) => {
+const EquipmentHygieneSection = ({
+  formData,
+  onChange,
+  solutionTypeOptions,
+  selectedSolutionOption,
+  onSolutionOptionChange,
+  setSolutionProfileAsDefault,
+  onSetSolutionProfileAsDefaultChange,
+  isAddingNewSolutionProfile,
+  isLoadingSolutionProfiles,
+  isLoading,
+  fieldErrors,
+}) => {
   const handleOpenDateChange = (e) => {
     const formattedValue = formatDateInput(e.target.value);
     onChange('solutionOpenDate', formattedValue);
@@ -22,50 +34,89 @@ const EquipmentHygieneSection = ({ formData, onChange, isLoading, fieldErrors })
 
   return (
     <FormSection title="Equipment hygiene and solution control">
-      {/* Solution tracking fields */}
-      <div className="form-row">
-        <FormInput
-          id="solutionType"
-          label="Solution type"
-          type="text"
-          value={formData.solutionType || ''}
-          onChange={(e) => onChange('solutionType', e.target.value)}
-          placeholder="Enter solution type"
-          disabled={isLoading}
-          error={fieldErrors?.solutionType}
-        />
-        <FormInput
-          id="solutionOpenDate"
-          label="Open date"
-          type="text"
-          value={formData.solutionOpenDate || ''}
-          onChange={handleOpenDateChange}
-          placeholder="MM/DD/YYYY"
-          maxLength={10}
-          disabled={isLoading}
-          error={fieldErrors?.solutionOpenDate}
+      {/* Saved and base solution profile selector */}
+      <div className="form-row" style={{ gridTemplateColumns: '1fr' }}>
+        <FormSelect
+          id="solutionProfileSelection"
+          label="Saved solution profiles"
+          value={selectedSolutionOption}
+          onChange={(e) => onSolutionOptionChange(e.target.value)}
+          options={solutionTypeOptions}
+          disabled={isLoading || isLoadingSolutionProfiles}
         />
       </div>
 
+      {isAddingNewSolutionProfile && (
+        <div className="form-row" style={{ marginTop: '-6px' }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label htmlFor="setSolutionProfileAsDefault" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                id="setSolutionProfileAsDefault"
+                checked={setSolutionProfileAsDefault}
+                onChange={(e) => onSetSolutionProfileAsDefaultChange(e.target.checked)}
+                disabled={isLoading}
+                style={{
+                  width: '18px',
+                  height: '18px',
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
+                  accentColor: 'var(--accent-teal)',
+                }}
+              />
+              <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>
+                Set as new default solution
+              </span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {isAddingNewSolutionProfile && (
+        <div className="form-row">
+          <FormInput
+            id="solutionType"
+            label="Solution type"
+            type="text"
+            value={formData.solutionType || ''}
+            onChange={(e) => onChange('solutionType', e.target.value)}
+            placeholder="Enter solution type"
+            disabled={isLoading}
+            error={fieldErrors?.solutionType}
+          />
+          <FormInput
+            id="solutionOpenDate"
+            label="Open date"
+            type="text"
+            value={formData.solutionOpenDate || ''}
+            onChange={handleOpenDateChange}
+            placeholder="MM/DD/YYYY"
+            maxLength={10}
+            disabled={isLoading}
+            error={fieldErrors?.solutionOpenDate}
+          />
+        </div>
+      )}
+
       <div className="form-row">
-        <FormInput
-          id="solutionExpirationDate"
-          label="Expiration date"
-          type="text"
-          value={formData.solutionExpirationDate || ''}
-          onChange={handleExpirationDateChange}
-          placeholder="MM/DD/YYYY"
-          maxLength={10}
-          disabled={isLoading}
-          error={fieldErrors?.solutionExpirationDate}
-        />
+        {isAddingNewSolutionProfile && (
+          <FormInput
+            id="solutionExpirationDate"
+            label="Expiration date"
+            type="text"
+            value={formData.solutionExpirationDate || ''}
+            onChange={handleExpirationDateChange}
+            placeholder="MM/DD/YYYY"
+            maxLength={10}
+            disabled={isLoading}
+            error={fieldErrors?.solutionExpirationDate}
+          />
+        )}
         <FormSelect
           id="cleaningMethod"
           label="Cleaning method"
           value={formData.cleaningMethod || ''}
           onChange={(e) => onChange('cleaningMethod', e.target.value)}
           options={CLEANING_METHOD_OPTIONS}
-          placeholder="Select cleaning method"
           disabled={isLoading}
           error={fieldErrors?.cleaningMethod}
         />

@@ -78,6 +78,99 @@
   margin-bottom: 20px;
 }
 
+.solution-profile-add-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+
+.solution-default-toggle {
+  margin-top: 8px;
+}
+
+.solution-default-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.solution-add-button {
+  background: linear-gradient(135deg, var(--accent-teal) 0%, #17a2b8 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 14px;
+}
+
+.solution-add-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.solution-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.solution-profile-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+}
+
+.solution-profile-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.solution-default-badge {
+  background: #e6f4ff;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.solution-profile-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.solution-profile-actions button {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  min-width: 34px;
+}
+
+.solution-profile-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.solution-empty {
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .edit-account-container {
@@ -107,6 +200,15 @@
 
   .edit-account-form {
     gap: 24px;
+  }
+
+  .solution-profile-add-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .solution-profile-item {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
