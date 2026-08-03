@@ -1,6 +1,7 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -19,6 +20,12 @@ const config = {
         host: 'localhost',
         port: 3000,
         historyApiFallback: true,
+        static: [
+            {
+                directory: path.resolve(__dirname, 'public'),
+                publicPath: '/',
+            },
+        ],
     },
     plugins: [
         new HtmlWebpackPlugin({
@@ -26,6 +33,17 @@ const config = {
             filename: './index.html',
         }),
         new MiniCssExtractPlugin(),
+        new CopyWebpackPlugin({
+            patterns: [
+                {
+                    from: path.resolve(__dirname, 'public'),
+                    to: path.resolve(__dirname, 'dist'),
+                    globOptions: {
+                        ignore: ['**/index.html'],
+                    },
+                },
+            ],
+        }),
     ],
     module: {
         rules: [
@@ -56,4 +74,3 @@ module.exports = () => {
     }
     return config;
 };
-
