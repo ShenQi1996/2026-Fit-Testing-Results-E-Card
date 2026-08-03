@@ -3,16 +3,19 @@ import FormSection from '../common/FormSection';
 import FormInput from '../common/FormInput';
 import FormSelect from '../common/FormSelect';
 
-// List of schools - customize this list with your actual school names
-const SCHOOLS_OPTIONS = [
-  { value: 'Helene College of Nursing', label: 'Helene College of Nursing' },
-  { value: 'School B', label: 'School B' },
-  { value: 'School C', label: 'School C' },
-  { value: 'School D', label: 'School D' },
-  { value: 'Other', label: 'Other' },
-];
-
-const RespiratoryProtectionProgramSection = ({ formData, onChange, isLoading, fieldErrors }) => {
+const RespiratoryProtectionProgramSection = ({
+  formData,
+  onChange,
+  schoolOptions = [],
+  selectedSchoolOption,
+  onSchoolOptionChange,
+  setSchoolProfileAsDefault,
+  onSetSchoolProfileAsDefaultChange,
+  isAddingNewSchoolProfile,
+  isLoadingSchoolProfiles,
+  isLoading,
+  fieldErrors,
+}) => {
   return (
     <FormSection title="Written Respiratory Protection Program Verification">
       <div className="form-group">
@@ -39,14 +42,53 @@ const RespiratoryProtectionProgramSection = ({ formData, onChange, isLoading, fi
 
       <FormSelect
         id="schoolsList"
-        label="List of Schools Clients"
-        value={formData.schoolsList || ''}
-        onChange={(e) => onChange('schoolsList', e.target.value)}
-        options={SCHOOLS_OPTIONS}
-        placeholder="Helene College of Nursing"
-        disabled={isLoading}
+        label="School / Client"
+        value={selectedSchoolOption || ''}
+        onChange={(e) => onSchoolOptionChange(e.target.value)}
+        options={schoolOptions}
+        disabled={isLoading || isLoadingSchoolProfiles}
         error={fieldErrors?.schoolsList}
       />
+
+      {isAddingNewSchoolProfile && (
+        <>
+          <FormInput
+            id="schoolsListOther"
+            label="Specify School Name"
+            type="text"
+            value={formData.schoolsList || ''}
+            onChange={(e) => onChange('schoolsList', e.target.value)}
+            placeholder="Enter school name"
+            required
+            disabled={isLoading}
+            error={fieldErrors?.schoolsList}
+          />
+
+          <div className="form-group" style={{ marginTop: '-6px' }}>
+            <label
+              htmlFor="setSchoolProfileAsDefault"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+            >
+              <input
+                type="checkbox"
+                id="setSchoolProfileAsDefault"
+                checked={setSchoolProfileAsDefault}
+                onChange={(e) => onSetSchoolProfileAsDefaultChange(e.target.checked)}
+                disabled={isLoading}
+                style={{
+                  width: '18px',
+                  height: '18px',
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
+                  accentColor: 'var(--accent-teal)',
+                }}
+              />
+              <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>
+                Save as new default school
+              </span>
+            </label>
+          </div>
+        </>
+      )}
 
       <div className="form-row">
         <FormInput

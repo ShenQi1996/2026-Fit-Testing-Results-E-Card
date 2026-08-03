@@ -11,8 +11,8 @@
 
 .results-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 16px;
   margin-bottom: 30px;
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -20,6 +20,15 @@
   border-radius: 12px;
   box-shadow: 0 2px 8px var(--shadow);
   transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.results-header-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
 }
 
 .results-title {
@@ -31,8 +40,53 @@
   transition: color 0.3s ease;
 }
 
+.results-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.results-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.results-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.results-filter select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.results-filter-count {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding-bottom: 10px;
+  white-space: nowrap;
+}
+
+.export-csv-button,
 .refresh-button {
-  background: linear-gradient(135deg, #20b2aa 0%, #17a2b8 100%);
   color: white;
   border: none;
   padding: 10px 20px;
@@ -43,9 +97,32 @@
   transition: all 0.3s ease;
 }
 
+.export-csv-button {
+  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+}
+
+.refresh-button {
+  background: linear-gradient(135deg, #20b2aa 0%, #17a2b8 100%);
+}
+
+.export-csv-button:hover,
 .refresh-button:hover {
   transform: translateY(-2px);
+}
+
+.export-csv-button:hover {
+  box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);
+}
+
+.refresh-button:hover {
   box-shadow: 0 4px 12px rgba(32, 178, 170, 0.3);
+}
+
+.export-csv-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .loading-message,
@@ -808,22 +885,38 @@
   }
 
   .results-header {
-    flex-direction: column;
     gap: 12px;
-    align-items: flex-start;
     padding: 16px;
     margin-bottom: 20px;
+  }
+
+  .results-header-main {
+    width: 100%;
   }
 
   .results-title {
     font-size: 22px;
   }
 
+  .results-header-actions {
+    width: 100%;
+  }
+
+  .export-csv-button,
   .refresh-button {
     width: 100%;
     padding: 12px 20px;
     font-size: 15px;
     min-height: 44px;
+  }
+
+  .results-filter {
+    min-width: 100%;
+  }
+
+  .results-filter-count {
+    margin-left: 0;
+    padding-bottom: 0;
   }
 
   .results-grid {

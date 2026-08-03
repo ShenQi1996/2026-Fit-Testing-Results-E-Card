@@ -7,14 +7,16 @@ import {
   saveFitTest,
   getUserSolutionProfiles,
   saveUserSolutionProfile,
-  setDefaultSolutionProfile,
+  getUserSchoolProfiles,
+  saveUserSchoolProfile,
 } from '../services/firebaseDb';
-import { TESTING_AGENT_OPTIONS } from '../constants/fitTestOptions';
+import { TESTING_AGENT_OPTIONS, SCHOOLS_OPTIONS } from '../constants/fitTestOptions';
 
 const INITIAL_FORM_DATA = {
   recipientEmail: '',
   clientName: '',
   dob: '',
+  testLocation: 'Harlem',
   issueDate: getTodayDate(),
   fitTestType: 'N95',
   fitTestMethod: 'Locked to Qualitative', 
@@ -26,7 +28,7 @@ const INITIAL_FORM_DATA = {
   fitTester: '',
   printedName: '', 
   schoolsOnFile: true,
-  schoolsList: '',
+  schoolsList: SCHOOLS_OPTIONS[0]?.value || '',
   programAdministratorName: '',
   programAdministratorContact: '',
   // Fit test invalidation conditions
@@ -64,8 +66,12 @@ const INITIAL_FORM_DATA = {
 const NEW_SOLUTION_PROFILE_OPTION = '__new_solution_profile__';
 const BASE_SOLUTION_OPTION_PREFIX = 'base:';
 const PROFILE_SOLUTION_OPTION_PREFIX = 'profile:';
+const NEW_SCHOOL_PROFILE_OPTION = '__new_school_profile__';
+const BASE_SCHOOL_OPTION_PREFIX = 'school-base:';
+const PROFILE_SCHOOL_OPTION_PREFIX = 'school-profile:';
 
 const getDefaultBaseSolutionType = () => TESTING_AGENT_OPTIONS[0]?.value || '';
+const getDefaultBaseSchool = () => SCHOOLS_OPTIONS[0]?.value || '';
 
 export const useFitTestForm = () => {
   const { user } = useAuth();
@@ -83,6 +89,13 @@ export const useFitTestForm = () => {
   const [selectedSolutionOption, setSelectedSolutionOption] = useState(`${BASE_SOLUTION_OPTION_PREFIX}${getDefaultBaseSolutionType()}`);
   const [setSolutionProfileAsDefault, setSetSolutionProfileAsDefault] = useState(false);
   const [isLoadingSolutionProfiles, setIsLoadingSolutionProfiles] = useState(false);
+  const [schoolProfiles, setSchoolProfiles] = useState([]);
+  const [schoolOptions, setSchoolOptions] = useState([]);
+  const [selectedSchoolOption, setSelectedSchoolOption] = useState(
+    `${BASE_SCHOOL_OPTION_PREFIX}${getDefaultBaseSchool()}`
+  );
+  const [setSchoolProfileAsDefault, setSetSchoolProfileAsDefault] = useState(false);
+  const [isLoadingSchoolProfiles, setIsLoadingSchoolProfiles] = useState(false);
 
   const buildSolutionTypeOptions = (profiles) => {
     const savedProfileOptions = profiles.map((profile) => ({
@@ -162,6 +175,80 @@ export const useFitTestForm = () => {
     }
   };
 
+  const buildSchoolOptions = (profiles) => {
+    const savedProfileOptions = profiles.map((profile) => ({
+      value: `${PROFILE_SCHOOL_OPTION_PREFIX}${profile.id}`,
+      label: `Saved: ${profile.schoolName}${profile.isDefault ? ' (Default)' : ''}`,
+    }));
+
+    const baseOptions = SCHOOLS_OPTIONS.map((option) => ({
+      value: `${BASE_SCHOOL_OPTION_PREFIX}${option.value}`,
+      label: option.label,
+    }));
+
+    return [
+      ...savedProfileOptions,
+      ...baseOptions,
+      { value: NEW_SCHOOL_PROFILE_OPTION, label: 'Other / Add new school' },
+    ];
+  };
+
+  const applySchoolSelection = (optionValue, profilesToUse = schoolProfiles) => {
+    setSelectedSchoolOption(optionValue);
+
+    if (optionValue === NEW_SCHOOL_PROFILE_OPTION) {
+      setFormData((prev) => ({
+        ...prev,
+        schoolsList: '',
+      }));
+      return;
+    }
+
+    if (optionValue.startsWith(BASE_SCHOOL_OPTION_PREFIX)) {
+      const baseValue = optionValue.replace(BASE_SCHOOL_OPTION_PREFIX, '');
+      setFormData((prev) => ({
+        ...prev,
+        schoolsList: baseValue,
+      }));
+      return;
+    }
+
+    if (optionValue.startsWith(PROFILE_SCHOOL_OPTION_PREFIX)) {
+      const profileId = optionValue.replace(PROFILE_SCHOOL_OPTION_PREFIX, '');
+      const profile = profilesToUse.find((item) => item.id === profileId);
+      if (profile) {
+        setFormData((prev) => ({
+          ...prev,
+          schoolsList: profile.schoolName || '',
+        }));
+      }
+    }
+  };
+
+  const loadSchoolProfiles = async (userId) => {
+    if (!userId) {
+      setSchoolProfiles([]);
+      setSchoolOptions(buildSchoolOptions([]));
+      return [];
+    }
+
+    setIsLoadingSchoolProfiles(true);
+    try {
+      const profiles = await getUserSchoolProfiles(userId);
+      setSchoolProfiles(profiles);
+      setSchoolOptions(buildSchoolOptions(profiles));
+      return profiles;
+    } catch (error) {
+      console.error('Error loading school profiles:', error);
+      setStatus({ type: 'warning', message: error?.message || 'Could not load saved school profiles.' });
+      setSchoolProfiles([]);
+      setSchoolOptions(buildSchoolOptions([]));
+      return [];
+    } finally {
+      setIsLoadingSchoolProfiles(false);
+    }
+  };
+
   // Always set fitTester to logged-in user's name (read-only field)
   useEffect(() => {
     if (user && user.name) {
@@ -193,6 +280,30 @@ export const useFitTestForm = () => {
     };
 
     initializeSolutionProfiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
+
+  // Load saved school profiles and apply user's default school
+  useEffect(() => {
+    const initializeSchoolProfiles = async () => {
+      if (!user?.uid) {
+        setSchoolProfiles([]);
+        setSchoolOptions(buildSchoolOptions([]));
+        applySchoolSelection(`${BASE_SCHOOL_OPTION_PREFIX}${getDefaultBaseSchool()}`, []);
+        return;
+      }
+
+      const profiles = await loadSchoolProfiles(user.uid);
+      const defaultProfile = profiles.find((profile) => profile.isDefault);
+
+      if (defaultProfile) {
+        applySchoolSelection(`${PROFILE_SCHOOL_OPTION_PREFIX}${defaultProfile.id}`, profiles);
+      } else {
+        applySchoolSelection(`${BASE_SCHOOL_OPTION_PREFIX}${getDefaultBaseSchool()}`, profiles);
+      }
+    };
+
+    initializeSchoolProfiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
@@ -313,6 +424,7 @@ export const useFitTestForm = () => {
 
     // Creating a new solution profile always requires full details.
     const shouldSaveProfile = selectedSolutionOption === NEW_SOLUTION_PROFILE_OPTION;
+    const shouldSaveSchoolProfile = selectedSchoolOption === NEW_SCHOOL_PROFILE_OPTION;
 
     if (shouldSaveProfile) {
       const profileFieldErrors = {};
@@ -333,6 +445,15 @@ export const useFitTestForm = () => {
       }
     }
 
+    if (shouldSaveSchoolProfile && !formData.schoolsList?.trim()) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        schoolsList: 'Please enter the school name.',
+      }));
+      setStatus({ type: 'error', message: 'Please enter the school name.' });
+      return;
+    }
+
     // Validate form
     const validation = validateFitTestForm(formData, hasStrokes, hasTesterStrokes);
     if (!validation.isValid) {
@@ -346,8 +467,9 @@ export const useFitTestForm = () => {
 
     try {
       let latestSolutionProfiles = solutionProfiles;
+      let latestSchoolProfiles = schoolProfiles;
 
-      // Persist solution profile preferences before submitting the e-card.
+      // Persist solution/school profile preferences before submitting the e-card.
       if (user?.uid) {
         if (selectedSolutionOption === NEW_SOLUTION_PROFILE_OPTION) {
           const savedProfileId = await saveUserSolutionProfile(
@@ -363,6 +485,18 @@ export const useFitTestForm = () => {
           const refreshedProfiles = await loadSolutionProfiles(user.uid);
           latestSolutionProfiles = refreshedProfiles;
           applySolutionSelection(`${PROFILE_SOLUTION_OPTION_PREFIX}${savedProfileId}`, refreshedProfiles);
+        }
+
+        if (selectedSchoolOption === NEW_SCHOOL_PROFILE_OPTION) {
+          const savedSchoolProfileId = await saveUserSchoolProfile(
+            user.uid,
+            { schoolName: formData.schoolsList },
+            setSchoolProfileAsDefault
+          );
+
+          const refreshedSchoolProfiles = await loadSchoolProfiles(user.uid);
+          latestSchoolProfiles = refreshedSchoolProfiles;
+          applySchoolSelection(`${PROFILE_SCHOOL_OPTION_PREFIX}${savedSchoolProfileId}`, refreshedSchoolProfiles);
         }
       }
 
@@ -385,6 +519,7 @@ export const useFitTestForm = () => {
       const cleanedFormData = {
         ...formData,
         printedName: formData.printedName.trim(),
+        testLocation: formData.testLocation?.trim() || '',
         // Always set fitTester to logged-in user's name (read-only field)
         fitTester: user?.name || formData.fitTester || '',
         // Always set fitTestMethod to Locked to Qualitative (locked field)
@@ -404,7 +539,6 @@ export const useFitTestForm = () => {
         expirationDate, // Add expiration date (issueDate + 1 year)
       };
       
-      console.log('Submitting with signatureDataUrl:', signatureDataUrl ? 'Present' : 'Missing');
       // Step 1: Send email via EmailJS first
       await sendFitTestCard(formDataWithSignature);
       
@@ -412,7 +546,6 @@ export const useFitTestForm = () => {
       if (user && user.uid) {
         try {
           await saveFitTest(user.uid, formDataWithSignature);
-          console.log('Fit test record saved to Firebase');
         } catch (dbError) {
           console.error('Error saving to database:', dbError);
           // Email was sent but DB save failed - show warning
@@ -431,6 +564,7 @@ export const useFitTestForm = () => {
       
       // Reset form but keep issue date as today and auto-fill fitTester
       const defaultProfile = latestSolutionProfiles.find((profile) => profile.isDefault);
+      const defaultSchoolProfile = latestSchoolProfiles.find((profile) => profile.isDefault);
       setFormData({
         ...INITIAL_FORM_DATA,
         issueDate: getTodayDate(),
@@ -438,13 +572,20 @@ export const useFitTestForm = () => {
         solutionType: defaultProfile?.solutionType || getDefaultBaseSolutionType(),
         solutionOpenDate: defaultProfile?.solutionOpenDate || '',
         solutionExpirationDate: defaultProfile?.solutionExpirationDate || '',
+        schoolsList: defaultSchoolProfile?.schoolName || getDefaultBaseSchool(),
       });
       setSelectedSolutionOption(
         defaultProfile
           ? `${PROFILE_SOLUTION_OPTION_PREFIX}${defaultProfile.id}`
           : `${BASE_SOLUTION_OPTION_PREFIX}${getDefaultBaseSolutionType()}`
       );
+      setSelectedSchoolOption(
+        defaultSchoolProfile
+          ? `${PROFILE_SCHOOL_OPTION_PREFIX}${defaultSchoolProfile.id}`
+          : `${BASE_SCHOOL_OPTION_PREFIX}${getDefaultBaseSchool()}`
+      );
       setSetSolutionProfileAsDefault(false);
+      setSetSchoolProfileAsDefault(false);
       setFieldErrors({});
       setHasStrokes(false);
       setHasTesterStrokes(false);
@@ -472,6 +613,7 @@ export const useFitTestForm = () => {
 
   const resetForm = () => {
     const defaultProfile = solutionProfiles.find((profile) => profile.isDefault);
+    const defaultSchoolProfile = schoolProfiles.find((profile) => profile.isDefault);
     setFormData({
       ...INITIAL_FORM_DATA,
       issueDate: getTodayDate(),
@@ -479,13 +621,20 @@ export const useFitTestForm = () => {
       solutionType: defaultProfile?.solutionType || getDefaultBaseSolutionType(),
       solutionOpenDate: defaultProfile?.solutionOpenDate || '',
       solutionExpirationDate: defaultProfile?.solutionExpirationDate || '',
+      schoolsList: defaultSchoolProfile?.schoolName || getDefaultBaseSchool(),
     });
     setSelectedSolutionOption(
       defaultProfile
         ? `${PROFILE_SOLUTION_OPTION_PREFIX}${defaultProfile.id}`
         : `${BASE_SOLUTION_OPTION_PREFIX}${getDefaultBaseSolutionType()}`
     );
+    setSelectedSchoolOption(
+      defaultSchoolProfile
+        ? `${PROFILE_SCHOOL_OPTION_PREFIX}${defaultSchoolProfile.id}`
+        : `${BASE_SCHOOL_OPTION_PREFIX}${getDefaultBaseSchool()}`
+    );
     setSetSolutionProfileAsDefault(false);
+    setSetSchoolProfileAsDefault(false);
     setStatus({ type: '', message: '' });
     printedNameManuallyEdited.current = false; // Reset manual edit flag
     setFieldErrors({});
@@ -512,6 +661,10 @@ export const useFitTestForm = () => {
     selectedSolutionOption,
     setSolutionProfileAsDefault,
     isLoadingSolutionProfiles,
+    schoolOptions,
+    selectedSchoolOption,
+    setSchoolProfileAsDefault,
+    isLoadingSchoolProfiles,
     hasStrokes,
     hasTesterStrokes,
     handleInputChange,
@@ -519,8 +672,14 @@ export const useFitTestForm = () => {
       setSetSolutionProfileAsDefault(false);
       applySolutionSelection(optionValue);
     },
+    handleSchoolOptionChange: (optionValue) => {
+      setSetSchoolProfileAsDefault(false);
+      applySchoolSelection(optionValue);
+    },
     setSetSolutionProfileAsDefault,
+    setSetSchoolProfileAsDefault,
     isAddingNewSolutionProfile: selectedSolutionOption === NEW_SOLUTION_PROFILE_OPTION,
+    isAddingNewSchoolProfile: selectedSchoolOption === NEW_SCHOOL_PROFILE_OPTION,
     handleSubmit,
     handleSignatureStroke,
     handleSignatureClear,

@@ -6,6 +6,11 @@ import {
   deleteUserSolutionProfile,
   reorderUserSolutionProfiles,
   setDefaultSolutionProfile,
+  getUserSchoolProfiles,
+  saveUserSchoolProfile,
+  deleteUserSchoolProfile,
+  reorderUserSchoolProfiles,
+  setDefaultSchoolProfile,
   getPendingUsers,
   updateUserApprovalStatus,
 } from '../../services/firebaseDb';
@@ -35,6 +40,15 @@ const EditAccount = ({ onBack }) => {
   const [solutionProfileSaving, setSolutionProfileSaving] = useState(false);
   const [solutionProfilesError, setSolutionProfilesError] = useState('');
   const [solutionProfilesSuccess, setSolutionProfilesSuccess] = useState('');
+  const [schoolProfiles, setSchoolProfiles] = useState([]);
+  const [schoolProfileData, setSchoolProfileData] = useState({
+    schoolName: '',
+    setAsDefault: false,
+  });
+  const [schoolProfilesLoading, setSchoolProfilesLoading] = useState(false);
+  const [schoolProfileSaving, setSchoolProfileSaving] = useState(false);
+  const [schoolProfilesError, setSchoolProfilesError] = useState('');
+  const [schoolProfilesSuccess, setSchoolProfilesSuccess] = useState('');
   const [pendingUsers, setPendingUsers] = useState([]);
   const [pendingUsersLoading, setPendingUsersLoading] = useState(false);
   const [pendingUsersError, setPendingUsersError] = useState('');
@@ -55,6 +69,21 @@ const EditAccount = ({ onBack }) => {
     }
   };
 
+  const loadSchoolProfiles = async () => {
+    if (!user?.uid) return;
+
+    setSchoolProfilesLoading(true);
+    setSchoolProfilesError('');
+    try {
+      const profiles = await getUserSchoolProfiles(user.uid);
+      setSchoolProfiles(profiles);
+    } catch (err) {
+      setSchoolProfilesError(err.message || 'Failed to load saved school profiles.');
+    } finally {
+      setSchoolProfilesLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (user) {
       setFormData({
@@ -69,6 +98,7 @@ const EditAccount = ({ onBack }) => {
 
   useEffect(() => {
     loadSolutionProfiles();
+    loadSchoolProfiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
@@ -210,6 +240,103 @@ const EditAccount = ({ onBack }) => {
       await loadSolutionProfiles();
     } catch (err) {
       setSolutionProfilesError(err.message || 'Failed to set default solution profile.');
+    }
+  };
+
+  const handleSchoolProfileChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setSchoolProfileData((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+    }));
+    setSchoolProfilesError('');
+    setSchoolProfilesSuccess('');
+  };
+
+  const handleAddSchoolProfile = async (e) => {
+    e.preventDefault();
+    if (!user?.uid) return;
+
+    setSchoolProfilesError('');
+    setSchoolProfilesSuccess('');
+
+    if (!schoolProfileData.schoolName.trim()) {
+      setSchoolProfilesError('Please enter school name.');
+      return;
+    }
+
+    setSchoolProfileSaving(true);
+    try {
+      await saveUserSchoolProfile(
+        user.uid,
+        { schoolName: schoolProfileData.schoolName.trim() },
+        schoolProfileData.setAsDefault
+      );
+
+      setSchoolProfileData({
+        schoolName: '',
+        setAsDefault: false,
+      });
+      setSchoolProfilesSuccess('Saved school profile added.');
+      await loadSchoolProfiles();
+    } catch (err) {
+      setSchoolProfilesError(err.message || 'Failed to add school profile.');
+    } finally {
+      setSchoolProfileSaving(false);
+    }
+  };
+
+  const handleDeleteSchoolProfile = async (profileId) => {
+    if (!user?.uid) return;
+    setSchoolProfilesError('');
+    setSchoolProfilesSuccess('');
+
+    try {
+      await deleteUserSchoolProfile(user.uid, profileId);
+      setSchoolProfilesSuccess('School profile deleted.');
+      await loadSchoolProfiles();
+    } catch (err) {
+      setSchoolProfilesError(err.message || 'Failed to delete school profile.');
+    }
+  };
+
+  const handleMoveSchoolProfile = async (currentIndex, direction) => {
+    if (!user?.uid) return;
+    const nextIndex = currentIndex + direction;
+    if (nextIndex < 0 || nextIndex >= schoolProfiles.length) return;
+
+    const reordered = [...schoolProfiles];
+    const temp = reordered[currentIndex];
+    reordered[currentIndex] = reordered[nextIndex];
+    reordered[nextIndex] = temp;
+
+    setSchoolProfiles(reordered);
+    setSchoolProfilesError('');
+    setSchoolProfilesSuccess('');
+
+    try {
+      await reorderUserSchoolProfiles(
+        user.uid,
+        reordered.map((profile) => profile.id)
+      );
+      setSchoolProfilesSuccess('School profile order updated.');
+    } catch (err) {
+      setSchoolProfilesError(err.message || 'Failed to reorder school profiles.');
+      await loadSchoolProfiles();
+    }
+  };
+
+  const handleSetDefaultSchoolProfile = async (profileId) => {
+    if (!user?.uid) return;
+
+    setSchoolProfilesError('');
+    setSchoolProfilesSuccess('');
+    try {
+      await setDefaultSchoolProfile(user.uid, profileId);
+      setSchoolProfilesSuccess('Default school profile updated.');
+      await loadSchoolProfiles();
+    } catch (err) {
+      setSchoolProfilesError(err.message || 'Failed to set default school profile.');
     }
   };
 
@@ -515,6 +642,106 @@ const EditAccount = ({ onBack }) => {
                       <button
                         type="button"
                         onClick={() => handleDeleteSolutionProfile(profile.id)}
+                        disabled={isLoading}
+                        title="Delete"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="form-section">
+            <h3 className="section-title">Saved School / Client Profiles</h3>
+            <p className="section-description">
+              Add, reorder, set default, or delete schools/clients used on the fit test form.
+            </p>
+
+            {schoolProfilesError && <div className="auth-error">{schoolProfilesError}</div>}
+            {schoolProfilesSuccess && <div className="auth-success">{schoolProfilesSuccess}</div>}
+
+            <div className="solution-profile-add-grid school-profile-add-grid">
+              <div className="form-group">
+                <label htmlFor="schoolName">School Name</label>
+                <input
+                  type="text"
+                  id="schoolName"
+                  name="schoolName"
+                  className="form-input"
+                  placeholder="Enter school name"
+                  value={schoolProfileData.schoolName}
+                  onChange={handleSchoolProfileChange}
+                  disabled={schoolProfileSaving || isLoading}
+                />
+              </div>
+            </div>
+
+            <div className="form-group solution-default-toggle">
+              <label htmlFor="schoolSetAsDefault">
+                <input
+                  type="checkbox"
+                  id="schoolSetAsDefault"
+                  name="setAsDefault"
+                  checked={schoolProfileData.setAsDefault}
+                  onChange={handleSchoolProfileChange}
+                  disabled={schoolProfileSaving || isLoading}
+                />
+                Set as new default school
+              </label>
+            </div>
+
+            <button
+              type="button"
+              className="solution-add-button"
+              onClick={handleAddSchoolProfile}
+              disabled={schoolProfileSaving || isLoading}
+            >
+              {schoolProfileSaving ? 'Saving...' : '+ Add School Profile'}
+            </button>
+
+            <div className="solution-profile-list">
+              {schoolProfilesLoading ? (
+                <div className="solution-empty">Loading saved schools...</div>
+              ) : schoolProfiles.length === 0 ? (
+                <div className="solution-empty">No saved school profiles yet.</div>
+              ) : (
+                schoolProfiles.map((profile, index) => (
+                  <div key={profile.id} className="solution-profile-item">
+                    <div className="solution-profile-details">
+                      <strong>{profile.schoolName}</strong>
+                      {profile.isDefault && <span className="solution-default-badge">Default</span>}
+                    </div>
+                    <div className="solution-profile-actions">
+                      <button
+                        type="button"
+                        onClick={() => handleMoveSchoolProfile(index, -1)}
+                        disabled={index === 0 || isLoading}
+                        title="Move up"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleMoveSchoolProfile(index, 1)}
+                        disabled={index === schoolProfiles.length - 1 || isLoading}
+                        title="Move down"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSetDefaultSchoolProfile(profile.id)}
+                        disabled={profile.isDefault || isLoading}
+                        title="Set as default"
+                      >
+                        ⭐
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSchoolProfile(profile.id)}
                         disabled={isLoading}
                         title="Delete"
                       >

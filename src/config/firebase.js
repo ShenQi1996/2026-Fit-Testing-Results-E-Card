@@ -8,7 +8,7 @@ import { getFirestore } from 'firebase/firestore';
 
 // Your web app's Firebase configuration
 // TODO: Replace with your Firebase project config
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyDb-yI2sKaNHNUWLVAL6begbfYajW0dXIQ",
   authDomain: "fit-test-result-e-card-2026.firebaseapp.com",
   projectId: "fit-test-result-e-card-2026",

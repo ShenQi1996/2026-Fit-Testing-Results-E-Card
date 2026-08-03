@@ -2,7 +2,7 @@ import React from 'react';
 import FormSection from '../common/FormSection';
 import FormInput from '../common/FormInput';
 import FormSelect from '../common/FormSelect';
-import { TESTING_AGENT_OPTIONS } from '../../constants/fitTestOptions';
+import { TESTING_AGENT_OPTIONS, TEST_LOCATION_OPTIONS } from '../../constants/fitTestOptions';
 
 const FIT_TEST_TYPE_OPTIONS = [
   { value: 'N95', label: 'N95' },
@@ -42,9 +42,40 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
   const showOtherInput = formData.respiratorMfg === 'Other' || isCustomMfg;
   const selectValue = isCustomMfg ? 'Other' : formData.respiratorMfg;
 
+  const isCustomLocation =
+    formData.testLocation &&
+    !TEST_LOCATION_OPTIONS.find((opt) => opt.value === formData.testLocation);
+  const showLocationOtherInput = formData.testLocation === 'Other' || isCustomLocation;
+  const locationSelectValue = isCustomLocation ? 'Other' : formData.testLocation;
+
   return (
     <FormSection title="Fit Test Details">
       <div className="form-row">
+        <div className="respirator-mfg-group">
+          <FormSelect
+            id="testLocation"
+            label="Test Location"
+            value={locationSelectValue || ''}
+            onChange={(e) => onChange('testLocation', e.target.value)}
+            options={TEST_LOCATION_OPTIONS}
+            required
+            disabled={isLoading}
+            error={fieldErrors?.testLocation}
+          />
+          {showLocationOtherInput && (
+            <FormInput
+              id="testLocationOther"
+              label="Specify Test Location"
+              type="text"
+              value={isCustomLocation ? formData.testLocation : ''}
+              onChange={(e) => onChange('testLocation', e.target.value)}
+              placeholder="Enter location"
+              required
+              disabled={isLoading}
+              error={fieldErrors?.testLocation}
+            />
+          )}
+        </div>
         <FormInput
           id="issueDate"
           label="Issue Date"
@@ -55,6 +86,9 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           disabled={isLoading}
           error={fieldErrors?.issueDate}
         />
+      </div>
+
+      <div className="form-row">
         <FormSelect
           id="fitTestType"
           label="Fit Test Type"

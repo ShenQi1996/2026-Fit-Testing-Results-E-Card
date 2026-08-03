@@ -22,8 +22,44 @@ import { calculateExpirationDate } from '../utils/dateUtils';
 const FIT_TESTS_COLLECTION = 'fitTests';
 const USERS_COLLECTION = 'users';
 const SOLUTION_PROFILES_SUBCOLLECTION = 'solutionProfiles';
-const USER_STATUS_PENDING = 'pending';
-const USER_STATUS_APPROVED = 'approved';
+const SCHOOL_PROFILES_SUBCOLLECTION = 'schoolProfiles';
+export const USER_STATUS_PENDING = 'pending';
+export const USER_STATUS_APPROVED = 'approved';
+export const USER_STATUS_REJECTED = 'rejected';
+export const USER_ROLES = ['tester', 'admin'];
+export const USER_STATUSES = [
+  USER_STATUS_PENDING,
+  USER_STATUS_APPROVED,
+  USER_STATUS_REJECTED,
+];
+
+const assertAdmin = async (adminUserId) => {
+  const adminRole = await getUserRole(adminUserId);
+  if (adminRole !== 'admin') {
+    const error = new Error('Only admin users can manage users.');
+    error.code = 'PERMISSION_DENIED';
+    throw error;
+  }
+};
+
+const toIso = (value) => value?.toDate?.()?.toISOString?.() || null;
+
+const serializeUserDoc = (docSnap) => {
+  const data = docSnap.data() || {};
+  return {
+    id: docSnap.id,
+    email: data.email || '',
+    name: data.name || '',
+    role: data.role || 'tester',
+    status: data.status || USER_STATUS_APPROVED,
+    provider: data.provider || 'unknown',
+    requestedAt: toIso(data.requestedAt),
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
+    approvedAt: toIso(data.approvedAt),
+    approvedBy: data.approvedBy || null,
+  };
+};
 
 /**
  * Save a fit test record
@@ -95,6 +131,32 @@ export const getUserFitTests = async (userId) => {
     }
     
     throw new Error('Failed to fetch fit test records. Please try again.');
+  }
+};
+
+/**
+ * Admin-only: count fit test results grouped by owning userId
+ * @param {string} adminUserId
+ * @returns {Promise<Record<string, number>>}
+ */
+export const getFitTestCountsByUser = async (adminUserId) => {
+  try {
+    await assertAdmin(adminUserId);
+
+    const querySnapshot = await getDocs(collection(db, FIT_TESTS_COLLECTION));
+    const counts = {};
+
+    querySnapshot.forEach((docSnap) => {
+      const ownerId = docSnap.data()?.userId;
+      if (!ownerId) return;
+      counts[ownerId] = (counts[ownerId] || 0) + 1;
+    });
+
+    return counts;
+  } catch (error) {
+    console.error('Error counting fit tests by user:', error);
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    throw new Error('Failed to count test results. Please try again.');
   }
 };
 
@@ -294,12 +356,7 @@ export const getUserAccessProfile = async (userId) => {
  */
 export const getPendingUsers = async (adminUserId) => {
   try {
-    const adminRole = await getUserRole(adminUserId);
-    if (adminRole !== 'admin') {
-      const error = new Error('Only admin users can view pending approvals.');
-      error.code = 'PERMISSION_DENIED';
-      throw error;
-    }
+    await assertAdmin(adminUserId);
 
     const pendingQuery = query(
       collection(db, USERS_COLLECTION),
@@ -309,14 +366,7 @@ export const getPendingUsers = async (adminUserId) => {
 
     const users = [];
     querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      users.push({
-        id: docSnap.id,
-        ...data,
-        requestedAt: data.requestedAt?.toDate?.()?.toISOString?.() || null,
-        createdAt: data.createdAt?.toDate?.()?.toISOString?.() || null,
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString?.() || null,
-      });
+      users.push(serializeUserDoc(docSnap));
     });
 
     users.sort((a, b) => {
@@ -334,23 +384,46 @@ export const getPendingUsers = async (adminUserId) => {
 };
 
 /**
- * Admin-only: approve or reject a user
- * @param {string} adminUserId - Current admin user ID
- * @param {string} targetUserId - Target user ID to update
- * @param {'approved'|'rejected'} nextStatus - New status
- * @returns {Promise<void>}
+ * Admin-only: list all user profiles
+ * @param {string} adminUserId
+ * @returns {Promise<Array>}
  */
-export const updateUserApprovalStatus = async (adminUserId, targetUserId, nextStatus) => {
+export const getAllUsers = async (adminUserId) => {
   try {
-    const adminRole = await getUserRole(adminUserId);
-    if (adminRole !== 'admin') {
-      const error = new Error('Only admin users can update approval status.');
-      error.code = 'PERMISSION_DENIED';
-      throw error;
-    }
+    await assertAdmin(adminUserId);
 
-    if (nextStatus !== 'approved' && nextStatus !== 'rejected') {
-      throw new Error('Invalid status. Must be approved or rejected.');
+    const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
+    const users = [];
+    querySnapshot.forEach((docSnap) => {
+      users.push(serializeUserDoc(docSnap));
+    });
+
+    users.sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    return users;
+  } catch (error) {
+    console.error('Error fetching all users:', error);
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    throw new Error('Failed to fetch users. Please try again.');
+  }
+};
+
+/**
+ * Admin-only: update editable user profile fields
+ * @param {string} adminUserId
+ * @param {string} targetUserId
+ * @param {{name?: string, email?: string, role?: string, status?: string}} updates
+ */
+export const updateManagedUser = async (adminUserId, targetUserId, updates = {}) => {
+  try {
+    await assertAdmin(adminUserId);
+
+    if (!targetUserId) {
+      throw new Error('Target user ID is required.');
     }
 
     const targetRef = doc(db, USERS_COLLECTION, targetUserId);
@@ -359,12 +432,149 @@ export const updateUserApprovalStatus = async (adminUserId, targetUserId, nextSt
       throw new Error('User profile not found.');
     }
 
-    await updateDoc(targetRef, {
+    const current = targetSnap.data() || {};
+    const nextName = typeof updates.name === 'string' ? updates.name.trim() : current.name || '';
+    const nextEmail = typeof updates.email === 'string' ? updates.email.trim() : current.email || '';
+    const nextRole = updates.role || current.role || 'tester';
+    const nextStatus = updates.status || current.status || USER_STATUS_APPROVED;
+
+    if (!USER_ROLES.includes(nextRole)) {
+      throw new Error('Invalid role. Must be admin or tester.');
+    }
+    if (!USER_STATUSES.includes(nextStatus)) {
+      throw new Error('Invalid status.');
+    }
+
+    if (targetUserId === adminUserId && nextRole !== 'admin') {
+      throw new Error('You cannot remove your own admin role.');
+    }
+    if (targetUserId === adminUserId && nextStatus !== USER_STATUS_APPROVED) {
+      throw new Error('You cannot change your own approval status.');
+    }
+
+    const payload = {
+      name: nextName,
+      email: nextEmail,
+      role: nextRole,
       status: nextStatus,
-      approvedBy: adminUserId,
-      approvedAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
-    });
+    };
+
+    if (nextStatus !== current.status) {
+      if (nextStatus === USER_STATUS_APPROVED || nextStatus === USER_STATUS_REJECTED) {
+        payload.approvedAt = Timestamp.now();
+        payload.approvedBy = adminUserId;
+      }
+    }
+
+    await updateDoc(targetRef, payload);
+    const refreshed = await getDoc(targetRef);
+    return serializeUserDoc(refreshed);
+  } catch (error) {
+    console.error('Error updating managed user:', error);
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    throw new Error(error.message || 'Failed to update user.');
+  }
+};
+
+/**
+ * Admin-only: delete a user profile document
+ * @param {string} adminUserId
+ * @param {string} targetUserId
+ */
+export const deleteManagedUser = async (adminUserId, targetUserId) => {
+  try {
+    await assertAdmin(adminUserId);
+
+    if (!targetUserId) {
+      throw new Error('Target user ID is required.');
+    }
+    if (targetUserId === adminUserId) {
+      throw new Error('You cannot delete your own account from Users Management.');
+    }
+
+    const targetRef = doc(db, USERS_COLLECTION, targetUserId);
+    const targetSnap = await getDoc(targetRef);
+    if (!targetSnap.exists()) {
+      throw new Error('User profile not found.');
+    }
+
+    await deleteDoc(targetRef);
+  } catch (error) {
+    console.error('Error deleting managed user:', error);
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    throw new Error(error.message || 'Failed to delete user.');
+  }
+};
+
+/**
+ * Admin-only: create Firestore user profile with canonical schema
+ * @param {string} adminUserId
+ * @param {string} targetUserId
+ * @param {object} userData
+ */
+export const createManagedUserProfile = async (adminUserId, targetUserId, userData = {}) => {
+  try {
+    await assertAdmin(adminUserId);
+
+    if (!targetUserId) {
+      throw new Error('Target user ID is required.');
+    }
+
+    const email = (userData.email || '').trim();
+    const name = (userData.name || '').trim();
+    const role = userData.role || 'tester';
+    const status = userData.status || USER_STATUS_APPROVED;
+    const provider = userData.provider || 'password';
+
+    if (!email) {
+      throw new Error('Email is required.');
+    }
+    if (!USER_ROLES.includes(role)) {
+      throw new Error('Invalid role. Must be admin or tester.');
+    }
+    if (!USER_STATUSES.includes(status)) {
+      throw new Error('Invalid status.');
+    }
+
+    const now = Timestamp.now();
+    const profile = {
+      email,
+      name,
+      role,
+      status,
+      provider,
+      requestedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (status === USER_STATUS_APPROVED || status === USER_STATUS_REJECTED) {
+      profile.approvedAt = now;
+      profile.approvedBy = adminUserId;
+    }
+
+    const targetRef = doc(db, USERS_COLLECTION, targetUserId);
+    await setDoc(targetRef, profile);
+    const createdSnap = await getDoc(targetRef);
+    return serializeUserDoc(createdSnap);
+  } catch (error) {
+    console.error('Error creating managed user profile:', error);
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    throw new Error(error.message || 'Failed to create user profile.');
+  }
+};
+
+/**
+ * Admin-only: approve or reject a user
+ * @param {string} adminUserId - Current admin user ID
+ * @param {string} targetUserId - Target user ID to update
+ * @param {'approved'|'rejected'} nextStatus - New status
+ * @returns {Promise<void>}
+ */
+export const updateUserApprovalStatus = async (adminUserId, targetUserId, nextStatus) => {
+  try {
+    await updateManagedUser(adminUserId, targetUserId, { status: nextStatus });
   } catch (error) {
     console.error('Error updating user approval status:', error);
     if (error.code === 'PERMISSION_DENIED') throw error;
@@ -605,6 +815,195 @@ export const setDefaultSolutionProfile = async (userId, profileId) => {
   } catch (error) {
     console.error('Error setting default solution profile:', error);
     throw new Error('Failed to set default solution profile. Please try again.');
+  }
+};
+
+/**
+ * Get all saved school profiles for a user
+ * @param {string} userId
+ * @returns {Promise<Array>}
+ */
+export const getUserSchoolProfiles = async (userId) => {
+  try {
+    if (!userId) return [];
+
+    const profilesRef = collection(db, USERS_COLLECTION, userId, SCHOOL_PROFILES_SUBCOLLECTION);
+    let querySnapshot;
+    try {
+      const q = query(profilesRef, orderBy('createdAt', 'desc'));
+      querySnapshot = await getDocs(q);
+    } catch (queryError) {
+      querySnapshot = await getDocs(profilesRef);
+      console.warn('Falling back to unordered school profile fetch:', queryError);
+    }
+
+    const profiles = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      profiles.push({
+        id: docSnap.id,
+        ...data,
+        createdAt: data.createdAt?.toDate?.()?.toISOString?.() || null,
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString?.() || null,
+      });
+    });
+
+    profiles.sort((a, b) => {
+      const orderA = Number.isInteger(a.orderIndex) ? a.orderIndex : Number.MAX_SAFE_INTEGER;
+      const orderB = Number.isInteger(b.orderIndex) ? b.orderIndex : Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    return profiles;
+  } catch (error) {
+    console.error('Error fetching school profiles:', error);
+    const message = (error?.message || '').toLowerCase();
+    const code = error?.code || '';
+
+    if (code === 'permission-denied' || message.includes('insufficient permissions')) {
+      throw new Error('Permission denied for saved school profiles. Please publish Firestore rules for users/{uid}/schoolProfiles.');
+    }
+
+    throw new Error(`Failed to fetch saved school profiles. ${error?.message || ''}`.trim());
+  }
+};
+
+/**
+ * Save a school profile for a user
+ * @param {string} userId
+ * @param {{schoolName: string}} profileData
+ * @param {boolean} setAsDefault
+ * @returns {Promise<string>}
+ */
+export const saveUserSchoolProfile = async (userId, profileData, setAsDefault = false) => {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required to save a school profile.');
+    }
+
+    const schoolName = profileData.schoolName?.trim?.() || '';
+    if (!schoolName) {
+      throw new Error('School name is required.');
+    }
+
+    const profilesRef = collection(db, USERS_COLLECTION, userId, SCHOOL_PROFILES_SUBCOLLECTION);
+    const profileDocRef = doc(profilesRef);
+    const allProfilesSnapshot = await getDocs(profilesRef);
+    const nextOrderIndex = allProfilesSnapshot.size;
+
+    if (setAsDefault) {
+      const batch = writeBatch(db);
+      const defaultsSnapshot = await getDocs(query(profilesRef, where('isDefault', '==', true)));
+
+      defaultsSnapshot.forEach((docSnap) => {
+        batch.update(docSnap.ref, {
+          isDefault: false,
+          updatedAt: Timestamp.now(),
+        });
+      });
+
+      batch.set(profileDocRef, {
+        schoolName,
+        orderIndex: nextOrderIndex,
+        isDefault: true,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+
+      await batch.commit();
+    } else {
+      await setDoc(profileDocRef, {
+        schoolName,
+        orderIndex: nextOrderIndex,
+        isDefault: false,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+    }
+
+    return profileDocRef.id;
+  } catch (error) {
+    console.error('Error saving school profile:', error);
+    throw new Error(error.message || 'Failed to save school profile. Please try again.');
+  }
+};
+
+/**
+ * Delete one saved school profile for a user
+ * @param {string} userId
+ * @param {string} profileId
+ */
+export const deleteUserSchoolProfile = async (userId, profileId) => {
+  try {
+    if (!userId || !profileId) {
+      throw new Error('User ID and profile ID are required.');
+    }
+
+    const profileRef = doc(db, USERS_COLLECTION, userId, SCHOOL_PROFILES_SUBCOLLECTION, profileId);
+    await deleteDoc(profileRef);
+  } catch (error) {
+    console.error('Error deleting school profile:', error);
+    throw new Error('Failed to delete school profile. Please try again.');
+  }
+};
+
+/**
+ * Set one saved school profile as default for a user
+ * @param {string} userId
+ * @param {string} profileId
+ */
+export const setDefaultSchoolProfile = async (userId, profileId) => {
+  try {
+    if (!userId || !profileId) {
+      throw new Error('User ID and profile ID are required.');
+    }
+
+    const profilesRef = collection(db, USERS_COLLECTION, userId, SCHOOL_PROFILES_SUBCOLLECTION);
+    const snapshot = await getDocs(profilesRef);
+    const batch = writeBatch(db);
+
+    snapshot.forEach((docSnap) => {
+      batch.update(docSnap.ref, {
+        isDefault: docSnap.id === profileId,
+        updatedAt: Timestamp.now(),
+      });
+    });
+
+    await batch.commit();
+  } catch (error) {
+    console.error('Error setting default school profile:', error);
+    throw new Error('Failed to set default school profile. Please try again.');
+  }
+};
+
+/**
+ * Persist school profile order for a user
+ * @param {string} userId
+ * @param {string[]} orderedProfileIds
+ */
+export const reorderUserSchoolProfiles = async (userId, orderedProfileIds) => {
+  try {
+    if (!userId || !Array.isArray(orderedProfileIds)) {
+      throw new Error('User ID and ordered profile IDs are required.');
+    }
+
+    const batch = writeBatch(db);
+    orderedProfileIds.forEach((profileId, index) => {
+      const profileRef = doc(db, USERS_COLLECTION, userId, SCHOOL_PROFILES_SUBCOLLECTION, profileId);
+      batch.update(profileRef, {
+        orderIndex: index,
+        updatedAt: Timestamp.now(),
+      });
+    });
+
+    await batch.commit();
+  } catch (error) {
+    console.error('Error reordering school profiles:', error);
+    throw new Error('Failed to reorder school profiles. Please try again.');
   }
 };
 

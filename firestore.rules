@@ -27,9 +27,11 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId)
-        && request.resource.data.role == 'tester'
-        && request.resource.data.status == 'pending';
+      allow create: if
+        (isOwner(userId)
+          && request.resource.data.role == 'tester'
+          && request.resource.data.status == 'pending')
+        || isAdmin();
       allow update: if
         (isOwner(userId)
           && request.resource.data.role == resource.data.role
@@ -42,13 +44,21 @@ service cloud.firestore {
       match /solutionProfiles/{profileId} {
         allow read, write: if isOwner(userId) && isApproved();
       }
+
+      match /schoolProfiles/{profileId} {
+        allow read, write: if isOwner(userId) && isApproved();
+      }
     }
 
     match /fitTests/{fitTestId} {
-      allow read, update, delete: if
+      allow read: if
         isSignedIn() &&
         isApproved() &&
-        request.auth.uid == resource.data.userId;
+        (request.auth.uid == resource.data.userId || isAdmin());
+      allow update, delete: if
+        isSignedIn() &&
+        isApproved() &&
+        (request.auth.uid == resource.data.userId || isAdmin());
       allow create: if
         isSignedIn() &&
         isApproved() &&

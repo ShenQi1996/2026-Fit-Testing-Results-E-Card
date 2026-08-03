@@ -38,7 +38,10 @@ For detailed information, see [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)
 
 ### Form Features
 - **Complete Fit Test Form**: All required fields for OSHA-compliant documentation
+- **Test Location**: Harlem / Brooklyn / Other, with location-based QR routing on e-cards
+- **School / Client Profiles**: Save reusable school names (plus Helene College of Nursing default)
 - **Respiratory Protection Program Verification**: Track schools on file, program administrator information
+- **Saved Solution Profiles**: Reuse solution type/open/expiration settings
 - **Auto-Fill Capabilities**: 
   - Issue date defaults to today
   - Fit tester auto-fills with logged-in user's name
@@ -51,6 +54,8 @@ For detailed information, see [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)
 
 ### Results Management
 - **Fit Test Results Page**: View all fit test records organized by month
+- **Filters**: Filter by month, school/client, and test location
+- **CSV Export**: Export filtered results as a Standard Report CSV
 - **Inline Editing**: Edit records directly from the results page
 - **Resend E-Cards**: Resend e-cards to clients with updated timestamps
 - **Delete Records**: Remove records with confirmation modal
@@ -58,7 +63,9 @@ For detailed information, see [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)
 - **Calendar View**: Monthly grouping for easy navigation
 
 ### User Features
-- **Account Management**: Edit profile information
+- **Account Management**: Edit profile, saved solution profiles, and school profiles
+- **Admin Approval Flow**: New accounts stay pending until an admin approves
+- **Users Management** (admin): Add/edit/delete users and view per-user test counts
 - **Session Persistence**: Stay logged in across browser sessions
 - **Google Sign-In**: Quick authentication with Google account
 

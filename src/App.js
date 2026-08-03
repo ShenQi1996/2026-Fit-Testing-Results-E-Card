@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import FitTestForm from './components/forms/FitTestForm';
@@ -8,13 +8,30 @@ import Header from './components/common/Header';
 import EditAccount from './components/auth/EditAccount';
 import Sidebar from './components/common/Sidebar';
 import FitTestResults from './components/results/FitTestResults';
+import UsersManagement from './components/admin/UsersManagement';
 import './styles/App.css';
 
 const AppContent = () => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
   const [showSignup, setShowSignup] = useState(false);
-  const [currentPage, setCurrentPage] = useState('form'); // 'form', 'results', or 'editAccount'
+  const [currentPage, setCurrentPage] = useState('form'); // 'form', 'results', 'users', or 'editAccount'
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const handleNavigate = (page) => {
+    if (page === 'users' && user?.role !== 'admin') {
+      setCurrentPage('form');
+      setSidebarOpen(false);
+      return;
+    }
+    setCurrentPage(page);
+    setSidebarOpen(false);
+  };
+
+  useEffect(() => {
+    if (currentPage === 'users' && user?.role !== 'admin') {
+      setCurrentPage('form');
+    }
+  }, [currentPage, user?.role]);
 
   if (loading) {
     return (
@@ -48,10 +65,7 @@ const AppContent = () => {
       <div className="app-layout">
         <Sidebar 
           currentPage={currentPage} 
-          onNavigate={(page) => {
-            setCurrentPage(page);
-            setSidebarOpen(false); // Close sidebar on mobile after navigation
-          }}
+          onNavigate={handleNavigate}
           isOpen={sidebarOpen}
         />
         {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>}
@@ -62,6 +76,10 @@ const AppContent = () => {
             </div>
           ) : currentPage === 'results' ? (
             <FitTestResults />
+          ) : currentPage === 'users' && user?.role === 'admin' ? (
+            <div className="container">
+              <UsersManagement />
+            </div>
           ) : (
             <div className="container">
               <FitTestForm />

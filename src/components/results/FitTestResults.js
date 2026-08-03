@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { getUserFitTests, deleteFitTest, updateFitTest } from '../../services/firebaseDb';
 import { sendFitTestCard } from '../../services/emailService';
 import { formatDateInput, calculateExpirationDate } from '../../utils/dateUtils';
 import { downloadFitTestPdf, previewFitTestPdf } from '../../utils/pdfUtils';
+import { downloadFitTestsCsv } from '../../utils/csvUtils';
 import './FitTestResults.css';
+
+const FILTER_ALL = '__all__';
 
 const FitTestResults = () => {
   const { user } = useAuth();
@@ -21,6 +24,10 @@ const FitTestResults = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [expandedCards, setExpandedCards] = useState(new Set()); // Track which cards are expanded
   const [pdfLoading, setPdfLoading] = useState(null); // { id, action: 'preview'|'download' } while generating PDF
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [monthFilter, setMonthFilter] = useState(FILTER_ALL);
+  const [schoolFilter, setSchoolFilter] = useState(FILTER_ALL);
+  const [locationFilter, setLocationFilter] = useState(FILTER_ALL);
 
   useEffect(() => {
     if (user && user.uid) {
@@ -134,6 +141,92 @@ const FitTestResults = () => {
     }
   };
 
+  const getMonthKeyFromTest = (test) => {
+    const dateToUse = parseIssueDate(test.issueDate) || (test.createdAt ? new Date(test.createdAt) : null);
+    if (!dateToUse || isNaN(dateToUse.getTime())) return null;
+    return `${dateToUse.getFullYear()}-${String(dateToUse.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const monthOptions = useMemo(() => {
+    const map = new Map();
+    fitTests.forEach((test) => {
+      const dateToUse = parseIssueDate(test.issueDate) || (test.createdAt ? new Date(test.createdAt) : null);
+      if (!dateToUse || isNaN(dateToUse.getTime())) return;
+      const key = `${dateToUse.getFullYear()}-${String(dateToUse.getMonth() + 1).padStart(2, '0')}`;
+      if (!map.has(key)) {
+        map.set(key, dateToUse.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
+      }
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([value, label]) => ({ value, label }));
+  }, [fitTests]);
+
+  const schoolOptions = useMemo(() => {
+    const schools = new Set();
+    fitTests.forEach((test) => {
+      const school = (test.schoolsList || '').trim();
+      if (school) schools.add(school);
+    });
+    return Array.from(schools).sort((a, b) => a.localeCompare(b));
+  }, [fitTests]);
+
+  const locationOptions = useMemo(() => {
+    const locations = new Set();
+    fitTests.forEach((test) => {
+      const location = (test.testLocation || '').trim();
+      if (location) locations.add(location);
+    });
+    return Array.from(locations).sort((a, b) => a.localeCompare(b));
+  }, [fitTests]);
+
+  const filteredFitTests = useMemo(() => {
+    return fitTests.filter((test) => {
+      if (monthFilter !== FILTER_ALL) {
+        const monthKey = getMonthKeyFromTest(test);
+        if (monthKey !== monthFilter) return false;
+      }
+
+      if (schoolFilter !== FILTER_ALL) {
+        if ((test.schoolsList || '').trim() !== schoolFilter) return false;
+      }
+
+      if (locationFilter !== FILTER_ALL) {
+        if ((test.testLocation || '').trim() !== locationFilter) return false;
+      }
+
+      return true;
+    });
+  }, [fitTests, monthFilter, schoolFilter, locationFilter]);
+
+  const buildExportFilenamePrefix = () => {
+    const parts = ['fit-tests'];
+    if (monthFilter !== FILTER_ALL) parts.push(monthFilter);
+    if (schoolFilter !== FILTER_ALL) {
+      parts.push(schoolFilter.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
+    }
+    if (locationFilter !== FILTER_ALL) {
+      parts.push(locationFilter.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
+    }
+    return parts.filter(Boolean).join('-');
+  };
+
+  const handleExportCsv = () => {
+    try {
+      setExportingCsv(true);
+      setError('');
+      const filename = downloadFitTestsCsv(filteredFitTests, buildExportFilenamePrefix());
+      setSuccessMessage(
+        `Exported ${filteredFitTests.length} result${filteredFitTests.length === 1 ? '' : 's'} to ${filename}.`
+      );
+    } catch (err) {
+      console.error('Error exporting CSV:', err);
+      setError(err.message || 'Failed to export CSV. Please try again.');
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
   // Group fit tests by month/year based on issueDate
   const groupTestsByMonth = (tests) => {
     // First, sort all tests by issueDate (newest first)
@@ -183,7 +276,7 @@ const FitTestResults = () => {
     });
   };
 
-  const groupedTests = groupTestsByMonth(fitTests);
+  const groupedTests = groupTestsByMonth(filteredFitTests);
 
   const toggleCardExpansion = (testId) => {
     setExpandedCards(prev => {
@@ -483,10 +576,69 @@ const FitTestResults = () => {
     <div className="test-results-container">
       <div className="test-results-content">
         <div className="results-header">
-          <h2 className="results-title">Fit Test Results</h2>
-          <button onClick={loadFitTests} className="refresh-button">
-            🔄 Refresh
-          </button>
+          <div className="results-header-main">
+            <h2 className="results-title">Fit Test Results</h2>
+            <div className="results-header-actions">
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="export-csv-button"
+                disabled={exportingCsv || filteredFitTests.length === 0}
+                title={
+                  filteredFitTests.length === 0
+                    ? 'No filtered results to export'
+                    : 'Export currently filtered results as CSV'
+                }
+              >
+                {exportingCsv ? 'Exporting...' : '⬇ Export CSV'}
+              </button>
+              <button onClick={loadFitTests} className="refresh-button">
+                🔄 Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="results-filters">
+            <label className="results-filter">
+              <span>Month</span>
+              <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}>
+                <option value={FILTER_ALL}>All months</option>
+                {monthOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="results-filter">
+              <span>School</span>
+              <select value={schoolFilter} onChange={(e) => setSchoolFilter(e.target.value)}>
+                <option value={FILTER_ALL}>All schools</option>
+                {schoolOptions.map((school) => (
+                  <option key={school} value={school}>
+                    {school}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="results-filter">
+              <span>Location</span>
+              <select value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}>
+                <option value={FILTER_ALL}>All locations</option>
+                {locationOptions.map((location) => (
+                  <option key={location} value={location}>
+                    {location}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="results-filter-count">
+              Showing {filteredFitTests.length} of {fitTests.length}
+            </div>
+          </div>
         </div>
 
         {successMessage && (
@@ -505,6 +657,11 @@ const FitTestResults = () => {
           <div className="empty-state">
             <p>No test results found.</p>
             <p>Start by sending your first fit test e-card!</p>
+          </div>
+        ) : filteredFitTests.length === 0 ? (
+          <div className="empty-state">
+            <p>No results match your filters.</p>
+            <p>Try a different month, school, or location.</p>
           </div>
         ) : (
           <div className="calendar-view">
@@ -707,6 +864,10 @@ const FitTestResults = () => {
                               </div>
                             )}
                             <div className="result-row">
+                              <span className="result-label">Test Location:</span>
+                              <span className="result-value">{test.testLocation || 'N/A'}</span>
+                            </div>
+                            <div className="result-row">
                               <span className="result-label">Fit Test Type:</span>
                               <span className="result-value">{test.fitTestType || 'N/A'}</span>
                             </div>
@@ -770,7 +931,7 @@ const FitTestResults = () => {
                               )}
                               {test.schoolsList && (
                                 <div className="result-row">
-                                  <span className="result-label">List of Schools Clients:</span>
+                                  <span className="result-label">School / Client:</span>
                                   <span className="result-value">{test.schoolsList}</span>
                                 </div>
                               )}

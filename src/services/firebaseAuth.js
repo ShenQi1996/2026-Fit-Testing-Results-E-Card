@@ -1,6 +1,7 @@
 // Firebase Authentication Service
 // Handles user authentication using Firebase Auth
 
+import { initializeApp, deleteApp } from 'firebase/app';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -15,9 +16,15 @@ import {
   signInWithRedirect,
   getRedirectResult,
   GoogleAuthProvider,
+  getAuth,
 } from 'firebase/auth';
-import { auth } from '../config/firebase';
-import { ensureUserProfile, getUserAccessProfile } from './firebaseDb';
+import { auth, firebaseConfig } from '../config/firebase';
+import {
+  ensureUserProfile,
+  getUserAccessProfile,
+  getUserRole,
+  createManagedUserProfile,
+} from './firebaseDb';
 
 const PENDING_APPROVAL_MESSAGE = 'Your account is pending admin approval. Please contact an administrator.';
 const REJECTED_APPROVAL_MESSAGE = 'Your account request was not approved. Please contact an administrator.';
@@ -129,7 +136,7 @@ export const signInWithGoogle = async () => {
         uid: user.uid,
         email: user.email,
         name: user.displayName || '',
-        provider: 'google',
+        provider: user.providerData?.[0]?.providerId || 'google.com',
       });
       const accessProfile = await assertUserApproved(user);
 
@@ -342,6 +349,69 @@ export const handleGoogleRedirect = async () => {
     // If there's an error, it means no redirect happened or it failed
     // This is normal if user didn't use redirect method
     return null;
+  }
+};
+
+/**
+ * Admin-only: create Auth user + Firestore profile without changing current admin session.
+ * Uses a secondary Firebase app instance.
+ * @param {string} adminUserId
+ * @param {{email: string, password: string, name?: string, role?: string, status?: string}} userData
+ */
+export const createManagedAuthUser = async (adminUserId, userData = {}) => {
+  let secondaryApp = null;
+  try {
+    const adminRole = await getUserRole(adminUserId);
+    if (adminRole !== 'admin') {
+      const error = new Error('Only admin users can create users.');
+      error.code = 'PERMISSION_DENIED';
+      throw error;
+    }
+
+    const email = (userData.email || '').trim();
+    const password = userData.password || '';
+    const name = (userData.name || '').trim();
+
+    if (!email || !password) {
+      throw new Error('Email and password are required to create a user.');
+    }
+    if (password.length < 6) {
+      throw new Error('Password must be at least 6 characters.');
+    }
+
+    secondaryApp = initializeApp(firebaseConfig, `admin-create-${Date.now()}`);
+    const secondaryAuth = getAuth(secondaryApp);
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    const createdUser = credential.user;
+
+    if (name) {
+      await updateProfile(createdUser, { displayName: name });
+    }
+
+    const profile = await createManagedUserProfile(adminUserId, createdUser.uid, {
+      email: createdUser.email || email,
+      name: name || createdUser.displayName || '',
+      role: userData.role || 'tester',
+      status: userData.status || 'approved',
+      provider: 'password',
+    });
+
+    await signOut(secondaryAuth);
+    return profile;
+  } catch (error) {
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    if (error?.message && !error.code?.startsWith?.('auth/')) {
+      throw error;
+    }
+    throw new Error(getAuthErrorMessage(error.code) || error.message || 'Failed to create user.');
+  } finally {
+    if (secondaryApp) {
+      try {
+        await deleteApp(secondaryApp);
+      } catch (cleanupError) {
+        console.warn('Failed to clean up secondary Firebase app:', cleanupError);
+      }
+    }
   }
 };
 

@@ -51,6 +51,14 @@
   gap: 10px;
 }
 
+.sidebar-button-label {
+  display: inline-block;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sidebar-button:hover {
   background: var(--bg-secondary);
   border-color: var(--accent-teal);

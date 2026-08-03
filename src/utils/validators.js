@@ -37,6 +37,13 @@ export const validateFitTestForm = (formData, hasStrokes = false, hasTesterStrok
     fieldErrors.fitTester = 'Fit tester name is required.';
   }
 
+  // Validate test location
+  if (!formData.testLocation?.trim()) {
+    fieldErrors.testLocation = 'Please select test location.';
+  } else if (formData.testLocation === 'Other') {
+    fieldErrors.testLocation = 'Please enter a custom test location.';
+  }
+
   // Validate issue date
   if (!formData.issueDate?.trim()) {
     fieldErrors.issueDate = 'Please enter issue date.';

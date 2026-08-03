@@ -25,12 +25,19 @@ const FitTestForm = () => {
     selectedSolutionOption,
     setSolutionProfileAsDefault,
     isLoadingSolutionProfiles,
+    schoolOptions,
+    selectedSchoolOption,
+    setSchoolProfileAsDefault,
+    isLoadingSchoolProfiles,
     hasStrokes,
     hasTesterStrokes,
     handleInputChange,
     handleSolutionOptionChange,
+    handleSchoolOptionChange,
     setSetSolutionProfileAsDefault,
+    setSetSchoolProfileAsDefault,
     isAddingNewSolutionProfile,
+    isAddingNewSchoolProfile,
     handleSubmit,
     handleSignatureStroke,
     handleSignatureClear,
@@ -74,6 +81,13 @@ const FitTestForm = () => {
       <RespiratoryProtectionProgramSection
         formData={formData}
         onChange={handleInputChange}
+        schoolOptions={schoolOptions}
+        selectedSchoolOption={selectedSchoolOption}
+        onSchoolOptionChange={handleSchoolOptionChange}
+        setSchoolProfileAsDefault={setSchoolProfileAsDefault}
+        onSetSchoolProfileAsDefaultChange={setSetSchoolProfileAsDefault}
+        isAddingNewSchoolProfile={isAddingNewSchoolProfile}
+        isLoadingSchoolProfiles={isLoadingSchoolProfiles}
         isLoading={isLoading}
         fieldErrors={fieldErrors}
       />
