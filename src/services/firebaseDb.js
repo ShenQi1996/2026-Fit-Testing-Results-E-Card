@@ -22,6 +22,8 @@ import { calculateExpirationDate } from '../utils/dateUtils';
 const FIT_TESTS_COLLECTION = 'fitTests';
 const USERS_COLLECTION = 'users';
 const SOLUTION_PROFILES_SUBCOLLECTION = 'solutionProfiles';
+const USER_STATUS_PENDING = 'pending';
+const USER_STATUS_APPROVED = 'approved';
 
 /**
  * Save a fit test record
@@ -203,18 +205,170 @@ export const getUserRole = async (userId) => {
     if (userDocSnap.exists()) {
       const userData = userDocSnap.data();
       return userData.role || 'tester'; // Default to tester if role not set
-    } else {
-      // User doesn't exist in users collection, create with default role
-      await setDoc(userDocRef, {
-        role: 'tester',
-        createdAt: Timestamp.now(),
-      });
-      return 'tester';
     }
+    return 'tester';
   } catch (error) {
     console.error('Error getting user role:', error);
     // Default to tester on error
     return 'tester';
+  }
+};
+
+/**
+ * Ensure a user profile document exists for auth users
+ * New profiles are created as pending approval by default.
+ * @param {object} userInfo - { uid, email, name, provider }
+ * @returns {Promise<{isNewUser: boolean}>}
+ */
+export const ensureUserProfile = async (userInfo) => {
+  try {
+    if (!userInfo?.uid) {
+      throw new Error('User ID is required to ensure profile.');
+    }
+
+    const userDocRef = doc(db, USERS_COLLECTION, userInfo.uid);
+    const userDocSnap = await getDoc(userDocRef);
+
+    if (!userDocSnap.exists()) {
+      await setDoc(userDocRef, {
+        email: userInfo.email || '',
+        name: userInfo.name || '',
+        role: 'tester',
+        status: USER_STATUS_PENDING,
+        provider: userInfo.provider || 'unknown',
+        requestedAt: Timestamp.now(),
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+      return { isNewUser: true };
+    }
+
+    // Backfill common profile fields for existing users without changing approval state.
+    await updateDoc(userDocRef, {
+      email: userInfo.email || userDocSnap.data().email || '',
+      name: userInfo.name || userDocSnap.data().name || '',
+      updatedAt: Timestamp.now(),
+    });
+
+    return { isNewUser: false };
+  } catch (error) {
+    console.error('Error ensuring user profile:', error);
+    throw new Error('Failed to initialize user profile. Please try again.');
+  }
+};
+
+/**
+ * Get user access profile including role + approval status
+ * Missing status defaults to approved for backward compatibility.
+ * @param {string} userId - User ID
+ * @returns {Promise<{role: string, status: string}>}
+ */
+export const getUserAccessProfile = async (userId) => {
+  try {
+    if (!userId) {
+      return { role: 'tester', status: USER_STATUS_PENDING };
+    }
+
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+    const userDocSnap = await getDoc(userDocRef);
+
+    if (!userDocSnap.exists()) {
+      return { role: 'tester', status: USER_STATUS_PENDING };
+    }
+
+    const data = userDocSnap.data();
+    return {
+      role: data.role || 'tester',
+      status: data.status || USER_STATUS_APPROVED,
+    };
+  } catch (error) {
+    console.error('Error getting user access profile:', error);
+    return { role: 'tester', status: USER_STATUS_PENDING };
+  }
+};
+
+/**
+ * Admin-only: list users waiting for approval
+ * @param {string} adminUserId - Current admin user ID
+ * @returns {Promise<Array>}
+ */
+export const getPendingUsers = async (adminUserId) => {
+  try {
+    const adminRole = await getUserRole(adminUserId);
+    if (adminRole !== 'admin') {
+      const error = new Error('Only admin users can view pending approvals.');
+      error.code = 'PERMISSION_DENIED';
+      throw error;
+    }
+
+    const pendingQuery = query(
+      collection(db, USERS_COLLECTION),
+      where('status', '==', USER_STATUS_PENDING)
+    );
+    const querySnapshot = await getDocs(pendingQuery);
+
+    const users = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      users.push({
+        id: docSnap.id,
+        ...data,
+        requestedAt: data.requestedAt?.toDate?.()?.toISOString?.() || null,
+        createdAt: data.createdAt?.toDate?.()?.toISOString?.() || null,
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString?.() || null,
+      });
+    });
+
+    users.sort((a, b) => {
+      const dateA = a.requestedAt ? new Date(a.requestedAt).getTime() : 0;
+      const dateB = b.requestedAt ? new Date(b.requestedAt).getTime() : 0;
+      return dateA - dateB;
+    });
+
+    return users;
+  } catch (error) {
+    console.error('Error fetching pending users:', error);
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    throw new Error('Failed to fetch pending users. Please try again.');
+  }
+};
+
+/**
+ * Admin-only: approve or reject a user
+ * @param {string} adminUserId - Current admin user ID
+ * @param {string} targetUserId - Target user ID to update
+ * @param {'approved'|'rejected'} nextStatus - New status
+ * @returns {Promise<void>}
+ */
+export const updateUserApprovalStatus = async (adminUserId, targetUserId, nextStatus) => {
+  try {
+    const adminRole = await getUserRole(adminUserId);
+    if (adminRole !== 'admin') {
+      const error = new Error('Only admin users can update approval status.');
+      error.code = 'PERMISSION_DENIED';
+      throw error;
+    }
+
+    if (nextStatus !== 'approved' && nextStatus !== 'rejected') {
+      throw new Error('Invalid status. Must be approved or rejected.');
+    }
+
+    const targetRef = doc(db, USERS_COLLECTION, targetUserId);
+    const targetSnap = await getDoc(targetRef);
+    if (!targetSnap.exists()) {
+      throw new Error('User profile not found.');
+    }
+
+    await updateDoc(targetRef, {
+      status: nextStatus,
+      approvedBy: adminUserId,
+      approvedAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+  } catch (error) {
+    console.error('Error updating user approval status:', error);
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    throw new Error(error.message || 'Failed to update approval status.');
   }
 };
 

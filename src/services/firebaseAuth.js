@@ -17,7 +17,23 @@ import {
   GoogleAuthProvider,
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
-import { getUserRole } from './firebaseDb';
+import { ensureUserProfile, getUserAccessProfile } from './firebaseDb';
+
+const PENDING_APPROVAL_MESSAGE = 'Your account is pending admin approval. Please contact an administrator.';
+const REJECTED_APPROVAL_MESSAGE = 'Your account request was not approved. Please contact an administrator.';
+
+const assertUserApproved = async (user) => {
+  const accessProfile = await getUserAccessProfile(user.uid);
+  if (accessProfile.status === 'approved') {
+    return accessProfile;
+  }
+
+  await signOut(auth);
+  if (accessProfile.status === 'rejected') {
+    throw new Error(REJECTED_APPROVAL_MESSAGE);
+  }
+  throw new Error(PENDING_APPROVAL_MESSAGE);
+};
 
 /**
  * Sign up a new user
@@ -39,13 +55,19 @@ export const signUp = async (email, password, name) => {
       });
     }
 
-    return {
+    await ensureUserProfile({
       uid: user.uid,
       email: user.email,
-      name: user.displayName || name,
-      createdAt: user.metadata.creationTime,
-    };
+      name: user.displayName || name || '',
+      provider: 'password',
+    });
+
+    await signOut(auth);
+    throw new Error(PENDING_APPROVAL_MESSAGE);
   } catch (error) {
+    if (error?.message === PENDING_APPROVAL_MESSAGE) {
+      throw error;
+    }
     throw new Error(getAuthErrorMessage(error.code));
   }
 };
@@ -60,14 +82,23 @@ export const signIn = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
+    const accessProfile = await assertUserApproved(user);
 
     return {
       uid: user.uid,
       email: user.email,
       name: user.displayName || '',
       createdAt: user.metadata.creationTime,
+      role: accessProfile.role,
+      status: accessProfile.status,
     };
   } catch (error) {
+    if (
+      error?.message === PENDING_APPROVAL_MESSAGE ||
+      error?.message === REJECTED_APPROVAL_MESSAGE
+    ) {
+      throw error;
+    }
     throw new Error(getAuthErrorMessage(error.code));
   }
 };
@@ -94,34 +125,49 @@ export const signInWithGoogle = async () => {
       // Try popup method first (works better in most cases)
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
+      await ensureUserProfile({
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || '',
+        provider: 'google',
+      });
+      const accessProfile = await assertUserApproved(user);
 
       return {
         uid: user.uid,
         email: user.email,
         name: user.displayName || '',
         createdAt: user.metadata.creationTime,
+        role: accessProfile.role,
+        status: accessProfile.status,
       };
     } catch (popupError) {
-      // If popup is blocked or fails, check if we should use redirect
-      if (
-        popupError.code === 'auth/popup-blocked' ||
-        popupError.code === 'auth/popup-closed-by-user' ||
-        popupError.code === 'auth/cancelled-popup-request'
-      ) {
-        // Use redirect method as fallback
-        // Note: This will cause a full page redirect
+      // Use redirect fallback only when popup is blocked by browser.
+      if (popupError.code === 'auth/popup-blocked') {
         await signInWithRedirect(auth, provider);
-        // The function will return after redirect, so we throw a special error
-        // The actual sign-in will complete after the redirect
         throw new Error('Redirecting to Google sign-in...');
       }
-      // Re-throw other errors
+      // If user closes popup, treat as normal cancellation.
+      if (popupError.code === 'auth/popup-closed-by-user') {
+        throw new Error('Google sign-in was cancelled.');
+      }
+      // Multiple popup requests should not trigger redirect fallback.
+      if (popupError.code === 'auth/cancelled-popup-request') {
+        throw new Error('Google sign-in request was cancelled. Please try again.');
+      }
+
       throw popupError;
     }
   } catch (error) {
     // Handle redirect errors or other errors
     if (error.message === 'Redirecting to Google sign-in...') {
       throw error; // Let the redirect happen
+    }
+    if (
+      error?.message === PENDING_APPROVAL_MESSAGE ||
+      error?.message === REJECTED_APPROVAL_MESSAGE
+    ) {
+      throw error;
     }
     throw new Error(getAuthErrorMessage(error.code));
   }
@@ -192,14 +238,27 @@ export const onAuthStateChange = (callback) => {
   return onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
       try {
-        // Fetch user role from Firestore
-        const role = await getUserRole(firebaseUser.uid);
+        await ensureUserProfile({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || '',
+          provider: firebaseUser.providerData?.[0]?.providerId || 'unknown',
+        });
+        const accessProfile = await getUserAccessProfile(firebaseUser.uid);
+
+        if (accessProfile.status !== 'approved') {
+          await signOut(auth);
+          callback(null);
+          return;
+        }
+
         callback({
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           name: firebaseUser.displayName || '',
           createdAt: firebaseUser.metadata.creationTime,
-          role, // Add role to user object
+          role: accessProfile.role,
+          status: accessProfile.status,
         });
       } catch (error) {
         console.error('Error fetching user role:', error);
@@ -209,7 +268,8 @@ export const onAuthStateChange = (callback) => {
           email: firebaseUser.email,
           name: firebaseUser.displayName || '',
           createdAt: firebaseUser.metadata.creationTime,
-          role: 'tester', // Default to tester on error
+          role: 'tester',
+          status: 'approved',
         });
       }
     } else {
@@ -226,14 +286,18 @@ export const getCurrentUser = async () => {
   const user = auth.currentUser;
   if (user) {
     try {
-      // Fetch user role from Firestore
-      const role = await getUserRole(user.uid);
+      const accessProfile = await getUserAccessProfile(user.uid);
+      if (accessProfile.status !== 'approved') {
+        await signOut(auth);
+        return null;
+      }
       return {
         uid: user.uid,
         email: user.email,
         name: user.displayName || '',
         createdAt: user.metadata.creationTime,
-        role, // Add role to user object
+        role: accessProfile.role,
+        status: accessProfile.status,
       };
     } catch (error) {
       console.error('Error fetching user role:', error);
@@ -243,7 +307,8 @@ export const getCurrentUser = async () => {
         email: user.email,
         name: user.displayName || '',
         createdAt: user.metadata.creationTime,
-        role: 'tester', // Default to tester on error
+        role: 'tester',
+        status: 'approved',
       };
     }
   }

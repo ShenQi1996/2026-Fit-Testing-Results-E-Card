@@ -77,10 +77,18 @@ For detailed information, see [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)
 
 ### Prerequisites
 
-- Node.js (v14 or higher)
+- Node.js (exactly v20.11.1)
 - npm or yarn
 - Firebase account
 - EmailJS account (optional, for email sending)
+
+Use `nvm` to match the project version quickly:
+```bash
+nvm install 20.11.1
+nvm use 20.11.1
+node --version
+npm --version
+```
 
 ### Quick Start
 
@@ -202,9 +210,14 @@ See individual setup guides for detailed instructions.
 
 ### Available Scripts
 
-- `npm start` - Start development server with hot reload
+- `npm start` - Start the development server with hot reload (use this while coding)
 - `npm run build` - Build for production
-- `npm run build:dev` - Build in development mode
+- `npm run build:dev` - Generate a development-mode bundle (does not start a server)
+
+### Which command should I use during development?
+
+- Use `npm start` for day-to-day development and testing in the browser.
+- Use `npm run build:dev` only when you want a compiled development bundle output.
 
 ### Development Guidelines
 

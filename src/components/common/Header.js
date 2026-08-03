@@ -31,8 +31,8 @@ const Header = ({ onEditAccount, onMenuToggle, sidebarOpen }) => {
             <div className="user-info">
               <span className="user-name-mobile">👤</span>
               <span className="user-name">Welcome, {user.name}</span>
-              <button onClick={onEditAccount} className="edit-account-button" title="Edit Account">
-                <span className="button-text">Edit</span>
+              <button onClick={onEditAccount} className="edit-account-button" title="Account Settings">
+                <span className="button-text">Account Settings</span>
                 <span className="button-icon">⚙️</span>
               </button>
               <button onClick={logout} className="logout-button" title="Logout">
