@@ -4,6 +4,9 @@
   flex-direction: column;
   gap: 0;
   margin-top: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .card-preview-placeholder {
@@ -20,35 +23,49 @@
   background: var(--bg-primary);
   border: 2px solid var(--border-color);
   border-radius: 12px;
-  padding: 30px;
-  min-height: 500px;
-  max-height: 700px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  transition: background-color 0.3s ease, border-color 0.3s ease;
-  margin-top: 0;
-}
-
-.card-preview-content {
-  transform: scale(0.9);
-  transform-origin: center center;
+  padding: 24px;
+  min-height: 280px;
+  max-height: 720px;
   width: 100%;
-  max-width: 800px;
-  margin: 0 auto;
-  pointer-events: none;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
+  box-sizing: border-box;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
-.card-preview-content table {
-  width: 100% !important;
-  max-width: 800px;
-  margin: 0 auto;
-  display: table;
+.card-preview-viewport {
+  position: relative;
+  overflow: hidden;
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+/* Scale the whole email card as one unit. Do NOT override nested table widths. */
+.card-preview-content {
+  transform-origin: top left;
+  pointer-events: none;
+  display: block;
+  width: 800px;
+  overflow: hidden;
+}
+
+/* Strip only the outer email chrome so the 800px card isn't squeezed. */
+.card-preview-content > table {
+  width: 800px !important;
+  max-width: 800px !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.card-preview-content > table > tbody > tr > td,
+.card-preview-content > table > tr > td {
+  padding: 0 !important;
 }
 
 .form-label {
@@ -60,74 +77,20 @@
   padding-bottom: 8px;
 }
 
-/* Responsive design for Card Preview */
 @media (max-width: 768px) {
-  .card-preview-container {
-    gap: 0;
-  }
-
   .card-preview-wrapper {
-    min-height: 350px;
-    max-height: 450px;
-    padding: 20px 12px;
+    padding: 14px 10px;
+    min-height: 240px;
+    max-height: 520px;
     border-radius: 8px;
-    align-items: center;
-    justify-content: center;
-    margin-top: 0;
-  }
-
-  .card-preview-content {
-    transform: scale(0.7);
-    transform-origin: center center;
-    width: 100%;
-    max-width: 100%;
-    margin: 0 auto;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .card-preview-content table {
-    margin: 0 auto;
-    display: table;
-  }
-}
-
-/* iPhone 17 and larger mobile devices */
-@media (min-width: 430px) and (max-width: 768px) {
-  .card-preview-wrapper {
-    padding: 24px 16px;
-  }
-
-  .card-preview-content {
-    transform: scale(0.75);
-    transform-origin: center center;
   }
 }
 
 @media (max-width: 480px) {
   .card-preview-wrapper {
-    min-height: 300px;
-    max-height: 400px;
-    padding: 15px 8px;
-    align-items: center;
-    justify-content: center;
-    margin-top: 0;
-  }
-
-  .card-preview-content {
-    transform: scale(0.6);
-    transform-origin: center center;
-    width: 100%;
-    margin: 0 auto;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .card-preview-content table {
-    margin: 0 auto;
-    display: table;
+    padding: 10px 6px;
+    min-height: 220px;
+    max-height: 460px;
   }
 
   .card-preview-placeholder {
@@ -135,4 +98,3 @@
     font-size: 14px;
   }
 }
-
