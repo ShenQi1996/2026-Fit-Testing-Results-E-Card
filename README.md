@@ -84,15 +84,15 @@ For detailed information, see [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)
 
 ### Prerequisites
 
-- Node.js (exactly v20.11.1)
+- Node.js 24.x (required by Vercel)
 - npm or yarn
 - Firebase account
 - EmailJS account (optional, for email sending)
 
 Use `nvm` to match the project version quickly:
 ```bash
-nvm install 20.11.1
-nvm use 20.11.1
+nvm install 24
+nvm use 24
 node --version
 npm --version
 ```
