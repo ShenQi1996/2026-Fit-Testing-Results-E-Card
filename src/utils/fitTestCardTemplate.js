@@ -1,4 +1,5 @@
 // Fit Testing Results E-Card Template
+import { calculateExpirationDate } from './dateUtils';
 
 export const generateFitTestCard = (formData) => {
   const {
@@ -6,6 +7,7 @@ export const generateFitTestCard = (formData) => {
     dob,
     testLocation,
     issueDate,
+    expirationDate,
     fitTestType,
     respiratorMfg,
     testingAgent,
@@ -15,6 +17,8 @@ export const generateFitTestCard = (formData) => {
     fitTester,
     recipientEmail,
   } = formData;
+
+  const displayExpirationDate = expirationDate || calculateExpirationDate(issueDate);
 
   // Route QR destination by selected testing location.
   const LOCATION_QR_URLS = {
@@ -136,6 +140,10 @@ export const generateFitTestCard = (formData) => {
                                 <tr>
                                   <td style="padding: 8px 0; width: 40%; color: #005889; font-weight: 600;">Issue Date:</td>
                                   <td style="padding: 8px 0; color: #444; text-align: right; font-weight: 500;">${issueDate || '[Date]'}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding: 8px 0; color: #005889; font-weight: 600;">Expiration Date:</td>
+                                  <td style="padding: 8px 0; color: #444; text-align: right; font-weight: 500;">${displayExpirationDate || '[Date]'}</td>
                                 </tr>
                                 <tr>
                                   <td style="padding: 8px 0; color: #005889; font-weight: 600;">Fit Test Type:</td>
