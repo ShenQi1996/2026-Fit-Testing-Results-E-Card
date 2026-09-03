@@ -56,9 +56,10 @@ For detailed information, see [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)
 - **Fit Test Results Page**: View all fit test records organized by month
 - **Filters**: Filter by month, school/client, and test location
 - **CSV Export**: Export filtered results as a Standard Report CSV
-- **Inline Editing**: Edit records directly from the results page
+- **PDF Preview & Download**: Regenerate any saved record's e-card as a PDF
+- **Inline Editing** (admin): Edit records directly from the results page, including test location
 - **Resend E-Cards**: Resend e-cards to clients with updated timestamps
-- **Delete Records**: Remove records with confirmation modal
+- **Delete Records** (admin): Remove records with confirmation modal
 - **Sorting**: Results sorted by issue date (newest first)
 - **Calendar View**: Monthly grouping for easy navigation
 
@@ -123,7 +124,7 @@ npm --version
    ```
 
 6. **Open in browser**
-   - Navigate to `http://localhost:8080` (or the port shown in terminal)
+   - Navigate to `http://localhost:3000` (or the port shown in terminal)
 
 For detailed setup instructions, see [HOW_TO_RUN.md](./HOW_TO_RUN.md)
 

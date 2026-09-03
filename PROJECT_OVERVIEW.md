@@ -69,10 +69,12 @@ This application streamlines the workflow for medical professionals who perform 
 ### 4. Results Management
 
 - **View All Results**: Calendar-style monthly grouping
-- **Inline Editing**: Edit records directly from the results page
+- **Filters**: Narrow results by month, school/client, and test location
+- **Inline Editing** (admin): Edit records directly from the results page, including test location
+- **PDF Preview & Download**: Regenerate a saved record's e-card as a PDF
 - **Resend E-Cards**: Resend e-cards with updated timestamps
-- **Delete Records**: Remove records with confirmation
-- **Export Ready**: Data structure ready for reporting
+- **Delete Records** (admin): Remove records with confirmation
+- **CSV Export**: Export the filtered result set as a Standard Report CSV
 
 ### 5. User Authentication System
 
@@ -178,7 +180,6 @@ Display in calendar-style layout
 
 Potential features for future versions:
 
-- [ ] PDF export of e-cards
 - [ ] Bulk operations (delete multiple records)
 - [ ] Advanced filtering and search
 - [ ] Reporting and analytics dashboard

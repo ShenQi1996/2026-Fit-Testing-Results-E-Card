@@ -15,16 +15,32 @@ This guide will help you fix Google sign-in issues when deploying to Vercel prod
 3. Go to **Authentication** → **Settings** → **Authorized domains**
 4. Click **"Add domain"**
 5. Add your Vercel domain(s):
-   - `your-project.vercel.app` (your Vercel deployment URL)
+   - `2026-fit-testing-results-e-card.vercel.app` (current production domain)
    - `your-custom-domain.com` (if you have a custom domain)
    - `localhost` (should already be there for development)
 6. Click **"Add"**
 
-**Important**: You need to add the exact domain where your app is hosted. For example:
-- If your Vercel URL is `email-form-app.vercel.app`, add that
-- If you have a custom domain like `securefit.com`, add that too
+**Important**: Enter the bare hostname only — no `https://`, no trailing slash, no port.
+
+### Use the production domain, not a per-deployment URL
+
+Vercel gives every deployment its own hostname, shaped like
+`2026-fit-testing-results-e-card-<hash>-<scope>.vercel.app`. Those URLs change on
+every push and are **not** on Firebase's authorized list, so Google sign-in there
+fails with `auth/unauthorized-domain` even though production works fine. They are
+also gated behind Vercel's deployment protection, which serves a Vercel login page
+to anyone without a session.
+
+Always test Google sign-in on the production domain. Firebase does not support
+wildcards, so authorizing preview deployments would mean adding each hostname by
+hand — set up a custom domain instead if you need them to work.
 
 ## Step 2: Configure Google OAuth in Google Cloud Console
+
+**Usually not needed.** The app uses the default `authDomain`
+(`fit-test-result-e-card-2026.firebaseapp.com`), so the OAuth handshake runs on a
+Firebase-managed domain that is already registered on the OAuth client Firebase
+created. Only work through this step if sign-in still fails after Step 1.
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Select your project (or create one if you haven't)
@@ -32,11 +48,11 @@ This guide will help you fix Google sign-in issues when deploying to Vercel prod
 4. Find your **OAuth 2.0 Client ID** (the one used by Firebase)
 5. Click to edit it
 6. Under **Authorized JavaScript origins**, add:
-   - `https://your-project.vercel.app`
+   - `https://2026-fit-testing-results-e-card.vercel.app`
    - `https://your-custom-domain.com` (if applicable)
    - `http://localhost:3000` (for development)
 7. Under **Authorized redirect URIs**, add:
-   - `https://your-project.vercel.app`
+   - `https://2026-fit-testing-results-e-card.vercel.app`
    - `https://your-custom-domain.com` (if applicable)
    - `http://localhost:3000` (for development)
    - `https://fit-test-result-e-card-2026.firebaseapp.com/__/auth/handler`
@@ -84,7 +100,10 @@ const firebaseConfig = {
 ## Troubleshooting
 
 ### Error: "auth/unauthorized-domain"
-**Solution**: Add your Vercel domain to Firebase authorized domains (Step 1)
+**Solution**: First check the URL in your address bar. If it contains a deployment
+hash (`...-<hash>-<scope>.vercel.app`), you are on a per-deployment URL that Firebase
+will never authorize — retry on the production domain. Otherwise, add the domain to
+Firebase authorized domains (Step 1).
 
 ### Error: "auth/popup-blocked"
 **Solution**: The code now automatically falls back to redirect method. This is normal behavior.
@@ -124,5 +143,5 @@ If you're still having issues:
 
 ---
 
-**Last Updated**: 2024
+**Last Updated**: September 2026
 
