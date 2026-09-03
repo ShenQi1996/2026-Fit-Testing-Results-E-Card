@@ -175,7 +175,7 @@ You should see output like:
 
 ```
 webpack 5.x.x compiled successfully
-Project is running at http://localhost:8080
+Project is running at http://localhost:3000
 webpack compiled successfully
 ```
 
@@ -184,7 +184,7 @@ webpack compiled successfully
 Open your web browser and navigate to:
 
 ```
-http://localhost:8080
+http://localhost:3000
 ```
 
 The application should load and show the landing page (or login page if you've already configured Firebase).
@@ -209,9 +209,9 @@ After setup, verify everything works:
 
 ### Port Already in Use
 
-If port 8080 is already in use:
+If port 3000 is already in use:
 
-1. Find and stop the process using port 8080
+1. Find and stop the process using port 3000
 2. Or modify `webpack.config.js` to use a different port
 
 ### Firebase Errors

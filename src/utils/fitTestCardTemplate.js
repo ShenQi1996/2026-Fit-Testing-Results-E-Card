@@ -25,7 +25,9 @@ export const generateFitTestCard = (formData) => {
     Harlem: 'https://next-leap-fit.vercel.app/',
     Brooklyn: 'https://next-leap-fit-bk-2026.vercel.app/',
   };
-  const qrCodeUrl = LOCATION_QR_URLS[testLocation] || LOCATION_QR_URLS.Harlem;
+  // Custom "Other" locations have no booking site of their own and land here.
+  const DEFAULT_QR_URL = LOCATION_QR_URLS.Harlem;
+  const qrCodeUrl = LOCATION_QR_URLS[testLocation] || DEFAULT_QR_URL;
   const qrCodePlaceholder = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrCodeUrl)}`;
   const logoUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/secure-fit-logo.png`

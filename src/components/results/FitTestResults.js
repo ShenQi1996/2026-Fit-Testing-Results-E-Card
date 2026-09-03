@@ -5,6 +5,7 @@ import { sendFitTestCard } from '../../services/emailService';
 import { formatDateInput, calculateExpirationDate } from '../../utils/dateUtils';
 import { downloadFitTestPdf, previewFitTestPdf } from '../../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../../utils/csvUtils';
+import { TEST_LOCATION_OPTIONS } from '../../constants/fitTestOptions';
 import './FitTestResults.css';
 
 const FILTER_ALL = '__all__';
@@ -338,7 +339,10 @@ const FitTestResults = () => {
     recipientEmail: test.recipientEmail || '',
     clientName: test.clientName || '',
     dob: test.dob || '',
+    testLocation: test.testLocation || '',
     issueDate: test.issueDate || '',
+    // Empty expirationDate lets the card template recompute it from issueDate.
+    expirationDate: test.expirationDate || '',
     fitTestType: test.fitTestType || '',
     respiratorMfg: test.respiratorMfg || '',
     testingAgent: test.testingAgent || '',
@@ -428,6 +432,7 @@ const FitTestResults = () => {
       recipientEmail: test.recipientEmail || '',
       clientName: test.clientName || '',
       dob: test.dob || '',
+      testLocation: test.testLocation || '',
       issueDate: test.issueDate || '',
       fitTestType: test.fitTestType || '',
       respiratorMfg: test.respiratorMfg || '',
@@ -452,6 +457,14 @@ const FitTestResults = () => {
   };
 
   const handleEditSave = async (testId) => {
+    // 'Other' is the prompt for a custom value, never a location in its own right.
+    const nextLocation = (editData.testLocation || '').trim();
+    if (!nextLocation || nextLocation === 'Other') {
+      setError('Please select or enter a test location before saving.');
+      setTimeout(() => setError(''), 4000);
+      return;
+    }
+
     try {
       setSaving(true);
       setSuccessMessage('');
@@ -459,6 +472,7 @@ const FitTestResults = () => {
 
       // Recalculate expiration date if issueDate is being updated
       const updates = { ...editData };
+      updates.testLocation = nextLocation;
       if (editData.issueDate) {
         updates.expirationDate = calculateExpirationDate(editData.issueDate);
       }
@@ -490,6 +504,11 @@ const FitTestResults = () => {
       setSaving(false);
     }
   };
+
+  // A location outside the preset list came from the "Other" free-text input.
+  const isCustomEditLocation =
+    editData.testLocation &&
+    !TEST_LOCATION_OPTIONS.some((opt) => opt.value === editData.testLocation);
 
   if (loading) {
     return (
@@ -712,6 +731,32 @@ const FitTestResults = () => {
                               onChange={(e) => handleEditChange('recipientEmail', e.target.value)}
                               placeholder="Recipient email"
                             />
+                          </div>
+                          <div className="edit-form-row">
+                            <label>Test Location:</label>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <select
+                                className="edit-select"
+                                value={isCustomEditLocation ? 'Other' : (editData.testLocation || '')}
+                                onChange={(e) => handleEditChange('testLocation', e.target.value)}
+                              >
+                                <option value="">Select location</option>
+                                {TEST_LOCATION_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                              {(isCustomEditLocation || editData.testLocation === 'Other') && (
+                                <input
+                                  type="text"
+                                  className="edit-input"
+                                  placeholder="Enter location"
+                                  value={isCustomEditLocation ? editData.testLocation : ''}
+                                  onChange={(e) => handleEditChange('testLocation', e.target.value)}
+                                />
+                              )}
+                            </div>
                           </div>
                           <div className="edit-form-row">
                             <label>Issue Date:</label>
