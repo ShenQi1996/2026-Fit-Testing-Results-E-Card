@@ -2,6 +2,8 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { generateFitTestCard } from './fitTestCardTemplate';
 
+const PDF_SHARE_TITLE = 'Fit Testing Results E-card';
+
 const createCardRenderElement = (formData) => {
   const wrapper = document.createElement('div');
   wrapper.style.position = 'fixed';
@@ -14,6 +16,47 @@ const createCardRenderElement = (formData) => {
   wrapper.innerHTML = generateFitTestCard(formData);
   document.body.appendChild(wrapper);
   return wrapper;
+};
+
+const applyPdfMetadata = (doc, formData) => {
+  const clientName = (formData.clientName || '').trim();
+  doc.setProperties({
+    title: clientName ? `${PDF_SHARE_TITLE} - ${clientName}` : PDF_SHARE_TITLE,
+    subject: PDF_SHARE_TITLE,
+    author: 'Secure Fit LLC',
+    creator: 'Secure Fit LLC',
+    keywords: '',
+  });
+};
+
+const getPdfFilename = (safeName) => `fit-test-result-${safeName}.pdf`;
+
+const shareOrDownloadPdf = async (doc, filename) => {
+  const blob = doc.output('blob');
+  const file = new File([blob], filename, { type: 'application/pdf' });
+  const canShareFiles =
+    typeof navigator !== 'undefined' &&
+    typeof navigator.share === 'function' &&
+    typeof File !== 'undefined' &&
+    (!navigator.canShare || navigator.canShare({ files: [file] }));
+
+  if (canShareFiles) {
+    try {
+      // Only the file is shared. Do not pass `url` or `text` — phones would
+      // attach the internal form-app page title and link.
+      await navigator.share({
+        files: [file],
+        title: PDF_SHARE_TITLE,
+      });
+      return;
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        return;
+      }
+    }
+  }
+
+  doc.save(filename);
 };
 
 const buildFitTestPdf = async (formData) => {
@@ -46,6 +89,7 @@ const buildFitTestPdf = async (formData) => {
 
     const imgData = canvas.toDataURL('image/png');
     doc.addImage(imgData, 'PNG', x, y, imgWidth, imgHeight);
+    applyPdfMetadata(doc, formData);
 
     const safeName = (formData.clientName || 'client')
       .trim()
@@ -61,7 +105,7 @@ const buildFitTestPdf = async (formData) => {
 
 export const downloadFitTestPdf = async (formData) => {
   const { doc, safeName } = await buildFitTestPdf(formData);
-  doc.save(`fit-test-result-${safeName}.pdf`);
+  await shareOrDownloadPdf(doc, getPdfFilename(safeName));
 };
 
 export const previewFitTestPdf = async (formData) => {

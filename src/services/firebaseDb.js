@@ -17,7 +17,9 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { calculateExpirationDate } from '../utils/dateUtils';
+import { calculateExpirationDate, isFitTestPastRetention } from '../utils/dateUtils';
+
+const FIRESTORE_BATCH_LIMIT = 400;
 
 const FIT_TESTS_COLLECTION = 'fitTests';
 const USERS_COLLECTION = 'users';
@@ -82,6 +84,57 @@ export const saveFitTest = async (userId, fitTestData) => {
   }
 };
 
+const deleteExpiredFitTestDocuments = async (docs = []) => {
+  const expiredDocs = docs.filter((docSnap) => isFitTestPastRetention(docSnap.data() || {}));
+  if (expiredDocs.length === 0) {
+    return 0;
+  }
+
+  for (let i = 0; i < expiredDocs.length; i += FIRESTORE_BATCH_LIMIT) {
+    const batch = writeBatch(db);
+    expiredDocs.slice(i, i + FIRESTORE_BATCH_LIMIT).forEach((docSnap) => {
+      batch.delete(docSnap.ref);
+    });
+    await batch.commit();
+  }
+
+  return expiredDocs.length;
+};
+
+const mapFitTestDoc = (docSnap) => {
+  const data = docSnap.data() || {};
+  return {
+    id: docSnap.id,
+    ...data,
+    createdAt: data.createdAt?.toDate?.()?.toISOString(),
+    updatedAt: data.updatedAt?.toDate?.()?.toISOString(),
+  };
+};
+
+/**
+ * Delete fit tests older than 3 years.
+ * Testers only clean their own records; admins clean all records.
+ * @param {string} userId
+ * @returns {Promise<number>} Number of records removed
+ */
+export const purgeExpiredFitTests = async (userId) => {
+  if (!userId) return 0;
+
+  try {
+    const role = await getUserRole(userId);
+    const testsQuery =
+      role === 'admin'
+        ? collection(db, FIT_TESTS_COLLECTION)
+        : query(collection(db, FIT_TESTS_COLLECTION), where('userId', '==', userId));
+
+    const querySnapshot = await getDocs(testsQuery);
+    return await deleteExpiredFitTestDocuments(querySnapshot.docs);
+  } catch (error) {
+    console.error('Error purging expired fit tests:', error);
+    return 0;
+  }
+};
+
 /**
  * Get all fit test records for a user
  * @param {string} userId - User ID
@@ -96,18 +149,15 @@ export const getUserFitTests = async (userId) => {
     );
     
     const querySnapshot = await getDocs(q);
-    const fitTests = [];
-    
-    querySnapshot.forEach((doc) => {
-      fitTests.push({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate()?.toISOString(),
-        updatedAt: doc.data().updatedAt?.toDate()?.toISOString(),
-      });
-    });
-    
-    return fitTests;
+    try {
+      await deleteExpiredFitTestDocuments(querySnapshot.docs);
+    } catch (cleanupError) {
+      console.error('Error purging expired fit tests:', cleanupError);
+    }
+
+    return querySnapshot.docs
+      .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}))
+      .map(mapFitTestDoc);
   } catch (error) {
     console.error('Error fetching fit tests:', error);
     
@@ -144,9 +194,15 @@ export const getFitTestCountsByUser = async (adminUserId) => {
     await assertAdmin(adminUserId);
 
     const querySnapshot = await getDocs(collection(db, FIT_TESTS_COLLECTION));
-    const counts = {};
+    try {
+      await deleteExpiredFitTestDocuments(querySnapshot.docs);
+    } catch (cleanupError) {
+      console.error('Error purging expired fit tests:', cleanupError);
+    }
 
-    querySnapshot.forEach((docSnap) => {
+    const counts = {};
+    querySnapshot.docs.forEach((docSnap) => {
+      if (isFitTestPastRetention(docSnap.data() || {})) return;
       const ownerId = docSnap.data()?.userId;
       if (!ownerId) return;
       counts[ownerId] = (counts[ownerId] || 0) + 1;

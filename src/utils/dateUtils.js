@@ -85,3 +85,53 @@ export const calculateExpirationDate = (testDateString) => {
   return `${month}/${day}/${year}`;
 };
 
+/** Fit test records are kept this long from the test date, then removed. */
+export const FIT_TEST_RETENTION_YEARS = 3;
+
+const startOfLocalDay = (date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+/**
+ * Date used for retention: issue/test date, or createdAt if issue date is missing.
+ * @param {object} record
+ * @returns {Date|null}
+ */
+export const getFitTestRetentionDate = (record) => {
+  if (!record) return null;
+
+  const fromIssue = parseDateString(record.issueDate);
+  if (fromIssue && !Number.isNaN(fromIssue.getTime())) {
+    return startOfLocalDay(fromIssue);
+  }
+
+  const createdAt = record.createdAt;
+  if (!createdAt) return null;
+
+  if (typeof createdAt.toDate === 'function') {
+    const fromTimestamp = createdAt.toDate();
+    return fromTimestamp && !Number.isNaN(fromTimestamp.getTime())
+      ? startOfLocalDay(fromTimestamp)
+      : null;
+  }
+
+  const parsed = new Date(createdAt);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return startOfLocalDay(parsed);
+};
+
+/**
+ * True when a fit test is older than the retention window (3 years).
+ * Undated records are kept so we do not delete by accident.
+ * @param {object} record
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+export const isFitTestPastRetention = (record, now = new Date()) => {
+  const recordDate = getFitTestRetentionDate(record);
+  if (!recordDate) return false;
+
+  const cutoff = startOfLocalDay(now);
+  cutoff.setFullYear(cutoff.getFullYear() - FIT_TEST_RETENTION_YEARS);
+  return recordDate < cutoff;
+};
+

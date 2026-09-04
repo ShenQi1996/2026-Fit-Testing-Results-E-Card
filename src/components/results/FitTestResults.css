@@ -40,6 +40,20 @@
   transition: color 0.3s ease;
 }
 
+.results-header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.results-retention-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
 .results-header-actions {
   display: flex;
   align-items: center;

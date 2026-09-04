@@ -9,6 +9,7 @@ import EditAccount from './components/auth/EditAccount';
 import Sidebar from './components/common/Sidebar';
 import FitTestResults from './components/results/FitTestResults';
 import UsersManagement from './components/admin/UsersManagement';
+import { purgeExpiredFitTests } from './services/firebaseDb';
 import './styles/App.css';
 
 const AppContent = () => {
@@ -32,6 +33,16 @@ const AppContent = () => {
       setCurrentPage('form');
     }
   }, [currentPage, user?.role]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user?.uid) return undefined;
+
+    purgeExpiredFitTests(user.uid).catch((error) => {
+      console.error('Fit test retention cleanup failed:', error);
+    });
+
+    return undefined;
+  }, [isAuthenticated, user?.uid]);
 
   if (loading) {
     return (
