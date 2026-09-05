@@ -18,11 +18,87 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { calculateExpirationDate, isFitTestPastRetention } from '../utils/dateUtils';
+import { buildLookupKey, normalizeClientName, normalizeDob } from '../utils/lookupKey';
 
 const FIRESTORE_BATCH_LIMIT = 400;
 
 const FIT_TESTS_COLLECTION = 'fitTests';
+const FIT_TEST_LOOKUPS_COLLECTION = 'fitTestLookups';
 const USERS_COLLECTION = 'users';
+
+const LOOKUP_CARD_FIELDS = [
+  'recipientEmail',
+  'clientName',
+  'dob',
+  'testLocation',
+  'issueDate',
+  'expirationDate',
+  'fitTestType',
+  'respiratorMfg',
+  'testingAgent',
+  'maskSize',
+  'model',
+  'result',
+  'fitTester',
+];
+
+const toLookupCardData = (record = {}) => {
+  const data = {};
+  LOOKUP_CARD_FIELDS.forEach((field) => {
+    data[field] = record[field] || '';
+  });
+  return data;
+};
+
+const upsertFitTestLookup = async (lookupKey, record, fitTestId, userId) => {
+  if (!lookupKey || !fitTestId) return;
+
+  await setDoc(doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey), {
+    ...toLookupCardData(record),
+    userId: userId || record.userId || '',
+    fitTestId,
+    lookupKey,
+    updatedAt: Timestamp.now(),
+  });
+};
+
+const deleteFitTestLookupIfCurrent = async (lookupKey, fitTestId) => {
+  if (!lookupKey) return;
+
+  const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey);
+  const lookupSnap = await getDoc(lookupRef);
+  if (!lookupSnap.exists()) return;
+  if (fitTestId && lookupSnap.data()?.fitTestId !== fitTestId) return;
+  await deleteDoc(lookupRef);
+};
+
+const resolveLookupKey = async (record = {}) =>
+  record.lookupKey || (await buildLookupKey(record.clientName, record.dob));
+
+const syncLookupsForFitTests = async (tests = []) => {
+  const sorted = [...tests].sort((a, b) => {
+    const timeA = Date.parse(a.createdAt) || 0;
+    const timeB = Date.parse(b.createdAt) || 0;
+    return timeB - timeA;
+  });
+  const seenKeys = new Set();
+
+  for (const test of sorted) {
+    try {
+      const lookupKey = await resolveLookupKey(test);
+      if (!lookupKey || seenKeys.has(lookupKey)) continue;
+      seenKeys.add(lookupKey);
+
+      if (!test.lookupKey) {
+        await updateDoc(doc(db, FIT_TESTS_COLLECTION, test.id), { lookupKey });
+      }
+      await upsertFitTestLookup(lookupKey, test, test.id, test.userId);
+    } catch (error) {
+      console.error('Error syncing fit test lookup:', error);
+    }
+  }
+};
+
 const SOLUTION_PROFILES_SUBCOLLECTION = 'solutionProfiles';
 const SCHOOL_PROFILES_SUBCOLLECTION = 'schoolProfiles';
 export const USER_STATUS_PENDING = 'pending';
@@ -71,12 +147,17 @@ const serializeUserDoc = (docSnap) => {
  */
 export const saveFitTest = async (userId, fitTestData) => {
   try {
+    const lookupKey = await buildLookupKey(fitTestData.clientName, fitTestData.dob);
     const docRef = await addDoc(collection(db, FIT_TESTS_COLLECTION), {
       userId,
       ...fitTestData,
+      lookupKey: lookupKey || null,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     });
+    if (lookupKey) {
+      await upsertFitTestLookup(lookupKey, fitTestData, docRef.id, userId);
+    }
     return docRef.id;
   } catch (error) {
     console.error('Error saving fit test:', error);
@@ -91,9 +172,29 @@ const deleteExpiredFitTestDocuments = async (docs = []) => {
   }
 
   for (let i = 0; i < expiredDocs.length; i += FIRESTORE_BATCH_LIMIT) {
+    const chunk = expiredDocs.slice(i, i + FIRESTORE_BATCH_LIMIT);
+    const lookupRefsToDelete = [];
+
+    await Promise.all(chunk.map(async (docSnap) => {
+      try {
+        const lookupKey = await resolveLookupKey(docSnap.data() || {});
+        if (!lookupKey) return;
+        const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey);
+        const lookupSnap = await getDoc(lookupRef);
+        if (lookupSnap.exists() && lookupSnap.data()?.fitTestId === docSnap.id) {
+          lookupRefsToDelete.push(lookupRef);
+        }
+      } catch (error) {
+        console.error('Error resolving expired fit test lookup:', error);
+      }
+    }));
+
     const batch = writeBatch(db);
-    expiredDocs.slice(i, i + FIRESTORE_BATCH_LIMIT).forEach((docSnap) => {
+    chunk.forEach((docSnap) => {
       batch.delete(docSnap.ref);
+    });
+    lookupRefsToDelete.forEach((lookupRef) => {
+      batch.delete(lookupRef);
     });
     await batch.commit();
   }
@@ -155,9 +256,15 @@ export const getUserFitTests = async (userId) => {
       console.error('Error purging expired fit tests:', cleanupError);
     }
 
-    return querySnapshot.docs
+    const tests = querySnapshot.docs
       .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}))
       .map(mapFitTestDoc);
+
+    syncLookupsForFitTests(tests).catch((syncError) => {
+      console.error('Error syncing fit test lookups:', syncError);
+    });
+
+    return tests;
   } catch (error) {
     console.error('Error fetching fit tests:', error);
     
@@ -243,6 +350,43 @@ export const getFitTest = async (fitTestId) => {
 };
 
 /**
+ * Public resend lookup by name and date of birth.
+ * Returns card fields for EmailJS, or null when there is no match / no email on file.
+ * @param {string} clientName
+ * @param {string} dob
+ * @returns {Promise<object|null>}
+ */
+export const lookupFitTestForResend = async (clientName, dob) => {
+  try {
+    const lookupKey = await buildLookupKey(clientName, dob);
+    if (!lookupKey) return null;
+
+    const lookupSnap = await getDoc(doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey));
+    if (!lookupSnap.exists()) return null;
+
+    const data = lookupSnap.data() || {};
+    if (!data.recipientEmail?.trim()) return null;
+
+    // Hash collision is extremely unlikely; still require both fields to match.
+    const nameMatches = normalizeClientName(data.clientName) === normalizeClientName(clientName);
+    const dobMatches = normalizeDob(data.dob) === normalizeDob(dob);
+    if (!nameMatches || !dobMatches) return null;
+
+    return {
+      id: lookupSnap.id,
+      ...toLookupCardData(data),
+    };
+  } catch (error) {
+    console.error('Error looking up fit test for resend:', error);
+    // Unpublished rules for fitTestLookups look identical to a bad name/DOB otherwise.
+    if (error.code === 'permission-denied') {
+      throw new Error('E-card resend is not enabled yet. Please contact Secure Fit.');
+    }
+    throw new Error('Unable to look up the e-card right now. Please try again.');
+  }
+};
+
+/**
  * Update a fit test record
  * @param {string} fitTestId - Fit test document ID
  * @param {object} updates - Fields to update
@@ -264,10 +408,24 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     }
     
     const docRef = doc(db, FIT_TESTS_COLLECTION, fitTestId);
+    const existingSnap = await getDoc(docRef);
+    const existing = existingSnap.exists() ? existingSnap.data() : {};
+    const nextRecord = { ...existing, ...updates };
+    const previousKey = await resolveLookupKey(existing);
+    const nextKey = await buildLookupKey(nextRecord.clientName, nextRecord.dob);
+
     await updateDoc(docRef, {
       ...updates,
+      lookupKey: nextKey || null,
       updatedAt: Timestamp.now(),
     });
+
+    if (previousKey && previousKey !== nextKey) {
+      await deleteFitTestLookupIfCurrent(previousKey, fitTestId);
+    }
+    if (nextKey) {
+      await upsertFitTestLookup(nextKey, nextRecord, fitTestId, existing.userId || userId);
+    }
   } catch (error) {
     console.error('Error updating fit test:', error);
     // Re-throw permission denied errors
@@ -299,7 +457,11 @@ export const deleteFitTest = async (fitTestId, userId) => {
     }
     
     const docRef = doc(db, FIT_TESTS_COLLECTION, fitTestId);
+    const existingSnap = await getDoc(docRef);
+    const existing = existingSnap.exists() ? existingSnap.data() : {};
+    const lookupKey = await resolveLookupKey(existing);
     await deleteDoc(docRef);
+    await deleteFitTestLookupIfCurrent(lookupKey, fitTestId);
   } catch (error) {
     console.error('Error deleting fit test:', error);
     // Re-throw permission denied errors

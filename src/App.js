@@ -9,14 +9,21 @@ import EditAccount from './components/auth/EditAccount';
 import Sidebar from './components/common/Sidebar';
 import FitTestResults from './components/results/FitTestResults';
 import UsersManagement from './components/admin/UsersManagement';
+import ResendCardPage from './components/lookup/ResendCardPage';
 import { purgeExpiredFitTests } from './services/firebaseDb';
 import './styles/App.css';
+
+const getPublicPath = () => {
+  if (typeof window === 'undefined') return '/';
+  return window.location.pathname.replace(/\/+$/, '') || '/';
+};
 
 const AppContent = () => {
   const { isAuthenticated, loading, user } = useAuth();
   const [showSignup, setShowSignup] = useState(false);
   const [currentPage, setCurrentPage] = useState('form'); // 'form', 'results', 'users', or 'editAccount'
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const isResendPage = getPublicPath() === '/resend';
 
   const handleNavigate = (page) => {
     if (page === 'users' && user?.role !== 'admin') {
@@ -43,6 +50,14 @@ const AppContent = () => {
 
     return undefined;
   }, [isAuthenticated, user?.uid]);
+
+  if (isResendPage) {
+    return (
+      <div className="app auth-page">
+        <ResendCardPage />
+      </div>
+    );
+  }
 
   if (loading) {
     return (
