@@ -41,7 +41,7 @@ const Login = ({ onSwitchToSignup }) => {
   return (
     <div className="auth-container">
       <div className="auth-card">
-        <h2 className="auth-title">Login</h2>
+        <h2 className="auth-title">Staff Login</h2>
         <p className="auth-subtitle">Welcome back! Please login to continue.</p>
         
         {error && <div className="auth-error">{error}</div>}
@@ -105,6 +105,12 @@ const Login = ({ onSwitchToSignup }) => {
         <p className="auth-subtitle" style={{ marginTop: '8px', marginBottom: '0' }}>
           New accounts require admin approval before access is granted.
         </p>
+        <div className="auth-switch">
+          <p>
+            Need your e-card again?
+            <a href="/resend" className="auth-link">Resend e-card</a>
+          </p>
+        </div>
         {/*}
         <div className="auth-switch">
           <p>Don't have an account? <button type="button" onClick={onSwitchToSignup} className="auth-link">Sign up</button></p>

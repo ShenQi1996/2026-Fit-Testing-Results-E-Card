@@ -64,5 +64,17 @@ service cloud.firestore {
         isApproved() &&
         request.auth.uid == request.resource.data.userId;
     }
+
+    // Public resend: guests can get a lookup doc only if they know the name+DOB hash.
+    // Listing is denied so the collection cannot be dumped.
+    match /fitTestLookups/{lookupKey} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isSignedIn() && isApproved();
+      allow delete: if
+        isSignedIn() &&
+        isApproved() &&
+        (isAdmin() || request.auth.uid == resource.data.userId);
+    }
   }
 }
