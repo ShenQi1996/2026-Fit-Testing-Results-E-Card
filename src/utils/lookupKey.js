@@ -19,28 +19,38 @@ export const normalizeDob = (dob = '') => {
   return trimmed;
 };
 
+/**
+ * Normalize an email for matching so casing and stray spaces do not matter.
+ * @param {string} email
+ * @returns {string}
+ */
+export const normalizeEmail = (email = '') => email.trim().toLowerCase();
+
 const bytesToHex = (buffer) =>
   Array.from(new Uint8Array(buffer))
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
 
 /**
- * SHA-256 hex key from name + DOB. Empty if either value is missing/invalid.
- * Document ID for public resend lookups — guests must know both values.
+ * SHA-256 hex key from name + DOB + email. Empty if any value is missing/invalid.
+ * Document ID for public resend lookups — guests must know all three values,
+ * so a record cannot even be fetched without the email on file.
  * @param {string} clientName
  * @param {string} dob
+ * @param {string} recipientEmail
  * @returns {Promise<string>}
  */
-export const buildLookupKey = async (clientName, dob) => {
+export const buildLookupKey = async (clientName, dob, recipientEmail) => {
   const name = normalizeClientName(clientName);
   const birthDate = normalizeDob(dob);
-  if (!name || !birthDate) return '';
+  const email = normalizeEmail(recipientEmail);
+  if (!name || !birthDate || !email) return '';
 
   if (typeof crypto === 'undefined' || !crypto.subtle) {
     throw new Error('Secure lookup is not available in this browser.');
   }
 
-  const payload = `${name}|${birthDate}`;
+  const payload = `${name}|${birthDate}|${email}`;
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
   return bytesToHex(digest);
 };

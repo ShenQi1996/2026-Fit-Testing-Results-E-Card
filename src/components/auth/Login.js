@@ -107,8 +107,7 @@ const Login = ({ onSwitchToSignup }) => {
         </p>
         <div className="auth-switch">
           <p>
-            Need your e-card again?
-            <a href="/resend" className="auth-link">Resend e-card</a>
+            <a href="/" className="auth-link">Back to home</a>
           </p>
         </div>
         {/*}
