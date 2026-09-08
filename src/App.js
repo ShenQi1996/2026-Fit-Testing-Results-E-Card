@@ -10,8 +10,12 @@ import Sidebar from './components/common/Sidebar';
 import FitTestResults from './components/results/FitTestResults';
 import UsersManagement from './components/admin/UsersManagement';
 import ResendCardPage from './components/lookup/ResendCardPage';
+import HomePage from './components/common/HomePage';
 import { purgeExpiredFitTests } from './services/firebaseDb';
 import './styles/App.css';
+
+const STAFF_LOGIN_PATH = '/staff_login';
+const RESEND_PATH = '/resend';
 
 const getPublicPath = () => {
   if (typeof window === 'undefined') return '/';
@@ -23,7 +27,9 @@ const AppContent = () => {
   const [showSignup, setShowSignup] = useState(false);
   const [currentPage, setCurrentPage] = useState('form'); // 'form', 'results', 'users', or 'editAccount'
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const isResendPage = getPublicPath() === '/resend';
+  const publicPath = getPublicPath();
+  const isStaffLoginPage = publicPath === STAFF_LOGIN_PATH;
+  const isResendPage = publicPath === RESEND_PATH;
 
   const handleNavigate = (page) => {
     if (page === 'users' && user?.role !== 'admin') {
@@ -51,32 +57,40 @@ const AppContent = () => {
     return undefined;
   }, [isAuthenticated, user?.uid]);
 
-  if (isResendPage) {
-    return (
-      <div className="app auth-page">
-        <ResendCardPage />
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="app">
-        <div className="loading-container">
-          <div className="loading-spinner">Loading...</div>
-        </div>
-      </div>
-    );
-  }
-
   if (!isAuthenticated) {
+    if (isResendPage) {
+      return (
+        <div className="app auth-page">
+          <ResendCardPage />
+        </div>
+      );
+    }
+
+    if (isStaffLoginPage) {
+      if (loading) {
+        return (
+          <div className="app">
+            <div className="loading-container">
+              <div className="loading-spinner">Loading...</div>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="app auth-page">
+          {showSignup ? (
+            <Signup onSwitchToLogin={() => setShowSignup(false)} />
+          ) : (
+            <Login onSwitchToSignup={() => setShowSignup(true)} />
+          )}
+        </div>
+      );
+    }
+
     return (
       <div className="app auth-page">
-        {showSignup ? (
-          <Signup onSwitchToLogin={() => setShowSignup(false)} />
-        ) : (
-          <Login onSwitchToSignup={() => setShowSignup(true)} />
-        )}
+        <HomePage />
       </div>
     );
   }

@@ -17,8 +17,17 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { calculateExpirationDate, isFitTestPastRetention } from '../utils/dateUtils';
-import { buildLookupKey, normalizeClientName, normalizeDob } from '../utils/lookupKey';
+import {
+  calculateExpirationDate,
+  isFitTestPastRetention,
+  parseDateString,
+} from '../utils/dateUtils';
+import {
+  buildLookupKey,
+  normalizeClientName,
+  normalizeDob,
+  normalizeEmail,
+} from '../utils/lookupKey';
 
 const FIRESTORE_BATCH_LIMIT = 400;
 
@@ -50,14 +59,60 @@ const toLookupCardData = (record = {}) => {
   return data;
 };
 
+const toMillis = (value) => {
+  if (!value) return 0;
+  if (typeof value.toDate === 'function') {
+    const asDate = value.toDate();
+    return asDate && !Number.isNaN(asDate.getTime()) ? asDate.getTime() : 0;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const issueDateMs = (record = {}) => {
+  const parsed = parseDateString(record.issueDate);
+  return parsed && !Number.isNaN(parsed.getTime()) ? parsed.getTime() : 0;
+};
+
+/** Newest test first: test date decides, save time only breaks ties. */
+const compareFitTestRecency = (a, b) => {
+  const issueDiff = issueDateMs(b) - issueDateMs(a);
+  if (issueDiff !== 0) return issueDiff;
+  return toMillis(b.createdAt) - toMillis(a.createdAt);
+};
+
+/**
+ * True when `candidate` is the later test, so a backdated entry entered after a
+ * newer one cannot take over the client's resend card.
+ */
+const isLaterFitTest = (candidate, candidateCreatedMs, existing) => {
+  const candidateIssue = issueDateMs(candidate);
+  const existingIssue = issueDateMs(existing);
+  if (candidateIssue !== existingIssue) return candidateIssue > existingIssue;
+  return candidateCreatedMs >= (existing.testCreatedAtMs || 0);
+};
+
 const upsertFitTestLookup = async (lookupKey, record, fitTestId, userId) => {
   if (!lookupKey || !fitTestId) return;
 
-  await setDoc(doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey), {
+  const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey);
+  const createdMs = toMillis(record.createdAt) || Date.now();
+  const existingSnap = await getDoc(lookupRef);
+
+  if (existingSnap.exists()) {
+    const existing = existingSnap.data() || {};
+    // Re-pointing the same test is always allowed so admin edits still apply.
+    if (existing.fitTestId !== fitTestId && !isLaterFitTest(record, createdMs, existing)) {
+      return;
+    }
+  }
+
+  await setDoc(lookupRef, {
     ...toLookupCardData(record),
     userId: userId || record.userId || '',
     fitTestId,
     lookupKey,
+    testCreatedAtMs: createdMs,
     updatedAt: Timestamp.now(),
   });
 };
@@ -72,15 +127,12 @@ const deleteFitTestLookupIfCurrent = async (lookupKey, fitTestId) => {
   await deleteDoc(lookupRef);
 };
 
+/** Always recomputed from the record so key-format changes propagate on next write. */
 const resolveLookupKey = async (record = {}) =>
-  record.lookupKey || (await buildLookupKey(record.clientName, record.dob));
+  buildLookupKey(record.clientName, record.dob, record.recipientEmail);
 
 const syncLookupsForFitTests = async (tests = []) => {
-  const sorted = [...tests].sort((a, b) => {
-    const timeA = Date.parse(a.createdAt) || 0;
-    const timeB = Date.parse(b.createdAt) || 0;
-    return timeB - timeA;
-  });
+  const sorted = [...tests].sort(compareFitTestRecency);
   const seenKeys = new Set();
 
   for (const test of sorted) {
@@ -89,7 +141,8 @@ const syncLookupsForFitTests = async (tests = []) => {
       if (!lookupKey || seenKeys.has(lookupKey)) continue;
       seenKeys.add(lookupKey);
 
-      if (!test.lookupKey) {
+      if (test.lookupKey !== lookupKey) {
+        // Drops any key from an older format still stored on the record.
         await updateDoc(doc(db, FIT_TESTS_COLLECTION, test.id), { lookupKey });
       }
       await upsertFitTestLookup(lookupKey, test, test.id, test.userId);
@@ -147,7 +200,7 @@ const serializeUserDoc = (docSnap) => {
  */
 export const saveFitTest = async (userId, fitTestData) => {
   try {
-    const lookupKey = await buildLookupKey(fitTestData.clientName, fitTestData.dob);
+    const lookupKey = await resolveLookupKey(fitTestData);
     const docRef = await addDoc(collection(db, FIT_TESTS_COLLECTION), {
       userId,
       ...fitTestData,
@@ -177,12 +230,16 @@ const deleteExpiredFitTestDocuments = async (docs = []) => {
 
     await Promise.all(chunk.map(async (docSnap) => {
       try {
-        const lookupKey = await resolveLookupKey(docSnap.data() || {});
-        if (!lookupKey) return;
-        const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey);
-        const lookupSnap = await getDoc(lookupRef);
-        if (lookupSnap.exists() && lookupSnap.data()?.fitTestId === docSnap.id) {
-          lookupRefsToDelete.push(lookupRef);
+        const data = docSnap.data() || {};
+        // Include any stored key so lookups from an older key format also go.
+        const keys = new Set([await resolveLookupKey(data), data.lookupKey].filter(Boolean));
+
+        for (const key of keys) {
+          const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, key);
+          const lookupSnap = await getDoc(lookupRef);
+          if (lookupSnap.exists() && lookupSnap.data()?.fitTestId === docSnap.id) {
+            lookupRefsToDelete.push(lookupRef);
+          }
         }
       } catch (error) {
         console.error('Error resolving expired fit test lookup:', error);
@@ -210,6 +267,37 @@ const mapFitTestDoc = (docSnap) => {
     createdAt: data.createdAt?.toDate?.()?.toISOString(),
     updatedAt: data.updatedAt?.toDate?.()?.toISOString(),
   };
+};
+
+/**
+ * After a record is removed, hand its resend card to that client's next most
+ * recent test so they are not left without one.
+ * @param {string} lookupKey
+ * @param {string} removedFitTestId
+ * @param {string} [fallbackUserId]
+ * @returns {Promise<void>}
+ */
+const repointLookupToLatestRemaining = async (lookupKey, removedFitTestId, fallbackUserId) => {
+  if (!lookupKey) return;
+
+  try {
+    const siblingsSnapshot = await getDocs(
+      query(collection(db, FIT_TESTS_COLLECTION), where('lookupKey', '==', lookupKey))
+    );
+
+    const remaining = siblingsSnapshot.docs
+      .filter((docSnap) => docSnap.id !== removedFitTestId)
+      .map(mapFitTestDoc)
+      .filter((record) => !isFitTestPastRetention(record))
+      .sort(compareFitTestRecency);
+
+    const next = remaining[0];
+    if (!next) return;
+
+    await upsertFitTestLookup(lookupKey, next, next.id, next.userId || fallbackUserId);
+  } catch (error) {
+    console.error('Error re-pointing fit test lookup:', error);
+  }
 };
 
 /**
@@ -350,15 +438,16 @@ export const getFitTest = async (fitTestId) => {
 };
 
 /**
- * Public resend lookup by name and date of birth.
- * Returns card fields for EmailJS, or null when there is no match / no email on file.
+ * Public resend lookup by name, date of birth, and the email on file.
+ * Returns card fields for EmailJS, or null when there is no match.
  * @param {string} clientName
  * @param {string} dob
+ * @param {string} recipientEmail
  * @returns {Promise<object|null>}
  */
-export const lookupFitTestForResend = async (clientName, dob) => {
+export const lookupFitTestForResend = async (clientName, dob, recipientEmail) => {
   try {
-    const lookupKey = await buildLookupKey(clientName, dob);
+    const lookupKey = await buildLookupKey(clientName, dob, recipientEmail);
     if (!lookupKey) return null;
 
     const lookupSnap = await getDoc(doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey));
@@ -367,10 +456,11 @@ export const lookupFitTestForResend = async (clientName, dob) => {
     const data = lookupSnap.data() || {};
     if (!data.recipientEmail?.trim()) return null;
 
-    // Hash collision is extremely unlikely; still require both fields to match.
+    // Hash collision is extremely unlikely; still require all three to match.
     const nameMatches = normalizeClientName(data.clientName) === normalizeClientName(clientName);
     const dobMatches = normalizeDob(data.dob) === normalizeDob(dob);
-    if (!nameMatches || !dobMatches) return null;
+    const emailMatches = normalizeEmail(data.recipientEmail) === normalizeEmail(recipientEmail);
+    if (!nameMatches || !dobMatches || !emailMatches) return null;
 
     return {
       id: lookupSnap.id,
@@ -412,7 +502,7 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const existing = existingSnap.exists() ? existingSnap.data() : {};
     const nextRecord = { ...existing, ...updates };
     const previousKey = await resolveLookupKey(existing);
-    const nextKey = await buildLookupKey(nextRecord.clientName, nextRecord.dob);
+    const nextKey = await resolveLookupKey(nextRecord);
 
     await updateDoc(docRef, {
       ...updates,
@@ -420,8 +510,17 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
       updatedAt: Timestamp.now(),
     });
 
+    // Release lookups this record no longer owns, including any older key format.
+    const releasedKeys = new Set(
+      [previousKey, existing.lookupKey].filter((key) => key && key !== nextKey)
+    );
+    for (const key of releasedKeys) {
+      await deleteFitTestLookupIfCurrent(key, fitTestId);
+    }
+
     if (previousKey && previousKey !== nextKey) {
-      await deleteFitTestLookupIfCurrent(previousKey, fitTestId);
+      // The old name/DOB/email may still belong to other tests for that client.
+      await repointLookupToLatestRemaining(previousKey, fitTestId, existing.userId || userId);
     }
     if (nextKey) {
       await upsertFitTestLookup(nextKey, nextRecord, fitTestId, existing.userId || userId);
@@ -461,7 +560,13 @@ export const deleteFitTest = async (fitTestId, userId) => {
     const existing = existingSnap.exists() ? existingSnap.data() : {};
     const lookupKey = await resolveLookupKey(existing);
     await deleteDoc(docRef);
-    await deleteFitTestLookupIfCurrent(lookupKey, fitTestId);
+
+    const staleKeys = new Set([lookupKey, existing.lookupKey].filter(Boolean));
+    for (const key of staleKeys) {
+      await deleteFitTestLookupIfCurrent(key, fitTestId);
+    }
+
+    await repointLookupToLatestRemaining(lookupKey, fitTestId, existing.userId || userId);
   } catch (error) {
     console.error('Error deleting fit test:', error);
     // Re-throw permission denied errors

@@ -2,15 +2,17 @@ import React, { useState } from 'react';
 import { lookupFitTestForResend } from '../../services/firebaseDb';
 import { sendFitTestCard } from '../../services/emailService';
 import { formatDateInput, parseDateString } from '../../utils/dateUtils';
+import { validateEmail } from '../../utils/validators';
 import '../auth/Auth.css';
 
 const SENT_MESSAGE = 'The e-card was sent to the email on file.';
 const NOT_FOUND_MESSAGE =
-  'No matching e-card was found. Name and date of birth must both match the original test.';
+  'No matching e-card was found. Name, date of birth, and email must all match the original test.';
 
 const ResendCardPage = () => {
   const [clientName, setClientName] = useState('');
   const [dob, setDob] = useState('');
+  const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -29,10 +31,14 @@ const ResendCardPage = () => {
       setError('Please enter a valid date of birth (MM/DD/YYYY).');
       return;
     }
+    if (!validateEmail(email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
 
     setIsLoading(true);
     try {
-      const record = await lookupFitTestForResend(name, dob);
+      const record = await lookupFitTestForResend(name, dob, email.trim());
       if (!record) {
         setError(NOT_FOUND_MESSAGE);
         return;
@@ -52,7 +58,8 @@ const ResendCardPage = () => {
       <div className="auth-card">
         <h2 className="auth-title">Resend E-Card</h2>
         <p className="auth-subtitle">
-          Enter the name and date of birth from your fit test. We will send the e-card to the email on file.
+          Enter the name, date of birth, and email from your fit test. We will send your most recent
+          e-card to that email.
         </p>
 
         {error && <div className="auth-error" role="alert">{error}</div>}
@@ -91,6 +98,21 @@ const ResendCardPage = () => {
             />
           </div>
 
+          <div className="form-group">
+            <label htmlFor="resend-email">Email Address</label>
+            <input
+              type="email"
+              id="resend-email"
+              className="form-input"
+              placeholder="Enter the email used for your fit test"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+              disabled={isLoading}
+            />
+          </div>
+
           <button
             type="submit"
             className="auth-button"
@@ -102,8 +124,7 @@ const ResendCardPage = () => {
 
         <div className="auth-switch">
           <p>
-            Staff login?
-            <a href="/" className="auth-link">Go to login</a>
+            <a href="/" className="auth-link">Back to home</a>
           </p>
         </div>
       </div>

@@ -897,6 +897,10 @@ const FitTestResults = () => {
                           <div className="result-section">
                             <h4 className="result-section-title">Basic Information</h4>
                             <div className="result-row">
+                              <span className="result-label">Date of Birth:</span>
+                              <span className="result-value">{test.dob || 'N/A'}</span>
+                            </div>
+                            <div className="result-row">
                               <span className="result-label">Issue Date:</span>
                               <span className="result-value">
                                 {test.issueDate ? formatDateWithTime(test.issueDate, test.createdAt) : 'N/A'}
