@@ -49,12 +49,12 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
   const locationSelectValue = isCustomLocation ? 'Other' : formData.testLocation;
 
   return (
-    <FormSection title="Fit Test Details">
+    <FormSection title="Fit test details">
       <div className="form-row">
         <div className="respirator-mfg-group">
           <FormSelect
             id="testLocation"
-            label="Test Location"
+            label="Test location"
             value={locationSelectValue || ''}
             onChange={(e) => onChange('testLocation', e.target.value)}
             options={TEST_LOCATION_OPTIONS}
@@ -65,7 +65,7 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           {showLocationOtherInput && (
             <FormInput
               id="testLocationOther"
-              label="Specify Test Location"
+              label="Specify location"
               type="text"
               value={isCustomLocation ? formData.testLocation : ''}
               onChange={(e) => onChange('testLocation', e.target.value)}
@@ -78,7 +78,7 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
         </div>
         <FormInput
           id="issueDate"
-          label="Issue Date"
+          label="Issue date"
           type="text"
           value={formData.issueDate}
           onChange={(e) => onChange('issueDate', e.target.value)}
@@ -91,7 +91,7 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
       <div className="form-row">
         <FormSelect
           id="fitTestType"
-          label="Fit Test Type"
+          label="Fit test type"
           value={formData.fitTestType}
           onChange={(e) => onChange('fitTestType', e.target.value)}
           options={FIT_TEST_TYPE_OPTIONS}
@@ -106,9 +106,9 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           id="fitTestMethod"
           label="Fit test method"
           value={formData.fitTestMethod || 'Locked to Qualitative'}
-          onChange={() => {}} // Read-only, locked to Qualitative
+          onChange={() => {}}
           options={FIT_TEST_METHOD_OPTIONS}
-          disabled={false}
+          disabled
           error={fieldErrors?.fitTestMethod}
         />
       </div>
@@ -135,7 +135,7 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           {showOtherInput && (
             <FormInput
               id="respiratorMfgOther"
-              label="Specify Respirator MFG"
+              label="Specify manufacturer"
               type="text"
               value={isCustomMfg ? formData.respiratorMfg : ''}
               onChange={(e) => onChange('respiratorMfg', e.target.value)}
@@ -148,7 +148,7 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
         </div>
         <FormSelect
           id="testingAgent"
-          label="Testing Agent"
+          label="Testing agent"
           value={formData.testingAgent}
           onChange={(e) => onChange('testingAgent', e.target.value)}
           options={TESTING_AGENT_OPTIONS}
@@ -161,7 +161,7 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
       <div className="form-row">
         <FormSelect
           id="maskSize"
-          label="Mask Size"
+          label="Mask size"
           value={formData.maskSize}
           onChange={(e) => onChange('maskSize', e.target.value)}
           options={MASK_SIZE_OPTIONS}
@@ -193,13 +193,13 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
         />
         <FormInput
           id="fitTester"
-          label="Fit Tester"
+          label="Fit tester"
           type="text"
           value={formData.fitTester}
-          onChange={() => {}} // Read-only, no changes allowed
+          onChange={() => {}}
           placeholder="Enter fit tester name"
           required
-          disabled={true}
+          disabled
           error={fieldErrors?.fitTester}
         />
       </div>

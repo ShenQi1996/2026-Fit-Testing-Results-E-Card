@@ -1,52 +1,35 @@
-# Firestore Security Rules Setup
+# Firestore security rules
 
-## Quick Fix for "Missing or insufficient permissions" Error
+Public **verify** (`/verify/:token`) and **resend** (`/resend`) only work after these rules are published. If `/verify` says verification is not enabled, the live Firebase project is still on older rules.
 
-If you're getting the error: `FirebaseError: Missing or insufficient permissions`, you need to update your Firestore security rules.
+## Publish
 
-## Steps to Fix:
+1. Open [Firebase Console](https://console.firebase.google.com/) → your project
+2. **Firestore Database** → **Rules**
+3. Paste the full contents of [`firestore.rules`](./firestore.rules) from this repo
+4. Click **Publish**
+5. Reload the app and test `/verify/:token` and `/resend`
 
-1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Select your project
-3. Go to **Firestore Database** → **Rules** tab
-4. Replace the existing rules with the following:
+Do not invent a shorter rule set. Older snippets in past docs omitted `fitTestVerifications` and `fitTestLookups`, which breaks the public pages.
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Users collection - users can read/write their own user document
-    match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null && request.auth.uid == userId;
+## What the rules allow
 
-      // Saved solution profiles subcollection
-      match /solutionProfiles/{profileId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-    }
-    
-    // Fit tests collection - users can only read/write their own fit test records
-    match /fitTests/{fitTestId} {
-      allow read, write: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
-    }
-  }
-}
-```
+| Collection | Read | Write |
+|------------|------|--------|
+| `users` | Owner or admin | Create pending testers; owner cannot change `role`/`status`; admin can |
+| `solutionProfiles` / `schoolProfiles` | Approved owner | Approved owner |
+| `fitTests` | Approved owner or admin | Approved owner or admin |
+| `fitTestLookups/{lookupKey}` | Public **get** of one doc if the key is known | Approved staff create/update; owner or admin delete |
+| `fitTestVerifications/{token}` | Public **get** of one doc if the token is known | Approved staff create/update; owner or admin delete |
 
-5. Click **"Publish"** to save the rules
-6. Refresh your app - the error should be resolved
+`list` is denied on the public collections so they cannot be dumped.
 
-## What These Rules Do:
+Approved means the user document `status` is `approved`, or `status` is missing (older accounts).
 
-- **`users` collection**: Allows authenticated users to read and write their own user document (document ID = their UID). This is needed for role management.
-- **`users/{userId}/solutionProfiles` subcollection**: Allows authenticated users to create/read/update/delete their own saved solution profiles.
-- **`fitTests` collection**: Allows users to read/write only their own fit test records (where `userId` matches their UID).
+## Indexes
 
-## Security Notes:
+Test Results queries `fitTests` by `userId` and `createdAt`. If Firebase shows a missing-index error, use the link in the message or create:
 
-- Users can only access their own data
-- All operations require authentication (`request.auth != null`)
-- Users cannot access other users' data
-- Admin role checks are handled in the application code, not in security rules
+- Collection: `fitTests`
+- `userId` ascending
+- `createdAt` descending

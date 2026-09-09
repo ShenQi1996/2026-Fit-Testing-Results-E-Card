@@ -65,34 +65,13 @@ const firebaseConfig = {
 4. Choose a location (select closest to your users)
 5. Click **"Enable"**
 
-### Security Rules (Important for Production)
+### Security Rules (required for production, verify, and resend)
 
-After setup, go to **Rules** tab and update to:
+Do not leave Firestore in test mode. Open **Rules** and publish the file in this repo:
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Users collection - users can read/write their own user document
-    match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null && request.auth.uid == userId;
-    }
-    
-    // Fit tests collection - users can only read/write their own fit test records
-    match /fitTests/{fitTestId} {
-      allow read, write: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
-    }
-  }
-}
-```
+[`firestore.rules`](./firestore.rules)
 
-**Important:** These rules allow:
-- Users to read/write their own user document in the `users` collection (for role management)
-- Users to read/write their own fit test records in the `fitTests` collection
-
-Click **"Publish"** to save the rules.
+See [FIRESTORE_RULES_SETUP.md](./FIRESTORE_RULES_SETUP.md). Those rules include public **get** (not list) for `fitTestVerifications` and `fitTestLookups`. Without them, `/verify` and `/resend` fail.
 
 ## Step 6: Create Firestore Index (Required for Test Results)
 
@@ -134,14 +113,15 @@ npm install firebase
 
 ## Step 8: Test the Integration
 
-1. Start your development server:
+1. Start the development server (`nvm use 24` first):
 ```bash
 npm start
 ```
 
-2. Try signing up with a new account
-3. Check Firebase Console → Authentication to see the new user
-4. Check Firestore Database to see if fit test records are being saved
+Open [http://localhost:3000](http://localhost:3000) (home) or [http://localhost:3000/staff_login](http://localhost:3000/staff_login) (staff). Do not use `npm start dev`.
+
+2. New testers stay **pending** until an admin approves them. They cannot send records until then.
+3. Check Firebase Console → Authentication and Firestore (`users`, `fitTests`).
 
 ## Firebase Services Used
 
@@ -151,12 +131,11 @@ npm start
 - **Session Management**: Automatic session persistence
 
 ### Firestore Database
-- **fitTests Collection**: Stores all fit test records
-- Each record includes:
-  - `userId`: Links record to user
-  - Form data (clientName, dob, issueDate, etc.)
-  - `createdAt`: Timestamp when created
-  - `updatedAt`: Timestamp when last updated
+- **`users`**: name, email, `role` (`tester` / `admin`), `status` (`pending` / `approved`)
+- **`fitTests`**: form fields, signatures, consent, `verificationToken`, `expirationDate`, `userId`
+- **`fitTestVerifications/{token}`**: public verify lookup
+- **`fitTestLookups/{lookupKey}`**: public resend lookup
+- **`users/{uid}/solutionProfiles`** and **`schoolProfiles`**: saved defaults
 
 ## Data Structure
 
@@ -171,24 +150,12 @@ npm start
 ```
 
 ### Fit Test Record (in Firestore)
-```javascript
-{
-  userId: "firebase-user-id",
-  recipientEmail: "recipient@example.com",
-  clientName: "John Doe",
-  dob: "01/01/1990",
-  issueDate: "12/30/2025",
-  fitTestType: "N95",
-  respiratorMfg: "3M",
-  testingAgent: "Bitrex",
-  maskSize: "Regular",
-  model: "1870+",
-  result: "Pass",
-  fitTester: "David Morales",
-  createdAt: Timestamp,
-  updatedAt: Timestamp
-}
-```
+Includes form fields plus:
+- `userId`, `createdAt`, `updatedAt`
+- `verificationToken` (32 hex characters; QR uses `/verify/{token}`)
+- `expirationDate` (issue date + 1 year)
+- Consent flags and tester Yes/No (`testerMedicalRestrictionsReceived`)
+- Signature data URLs
 
 ## Benefits of Firebase
 
@@ -222,34 +189,18 @@ npm start
 - Check email format
 
 ### "Permission denied" in Firestore
-- Check your security rules
-- Make sure user is authenticated
-- Verify rules allow the operation
+- Publish [`firestore.rules`](./firestore.rules) — see [FIRESTORE_RULES_SETUP.md](./FIRESTORE_RULES_SETUP.md)
+- Confirm the tester is signed in and **approved**
+- Public pages only work with a known verify token or resend lookup key
 
 ### Can't see data in Firestore
 - Check that you're looking at the correct collection (`fitTests`)
-- Verify security rules allow reading
+- Verify security rules allow reading — publish [`firestore.rules`](./firestore.rules)
 - Check browser console for errors
 
-## Next Steps
+## Production
 
-1. ✅ Set up Firebase project
-2. ✅ Configure authentication
-3. ✅ Set up Firestore
-4. ✅ Update firebase.js with your config
-5. 🎉 Start using the app!
-
-## Migration from localStorage
-
-The app now uses Firebase instead of localStorage. Your old localStorage data will be ignored. Users will need to:
-1. Sign up again (or you can migrate existing users manually)
-2. All new fit test records will be stored in Firestore
-
-## Production Considerations
-
-1. **Security Rules**: Update Firestore rules for production
-2. **Environment Variables**: Move Firebase config to environment variables
-3. **Error Handling**: Add better error handling for network issues
-4. **Offline Support**: Consider enabling Firestore offline persistence
-5. **Backup**: Set up regular backups of Firestore data
+1. Publish [`firestore.rules`](./firestore.rules)
+2. Add the production hostname to Firebase authorized domains (see [PRODUCTION_SETUP.md](./PRODUCTION_SETUP.md))
+3. Keep EmailJS and Firebase keys out of public issues; they currently live in client files
 

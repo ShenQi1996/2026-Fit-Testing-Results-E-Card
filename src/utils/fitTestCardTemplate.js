@@ -1,5 +1,6 @@
 // Fit Testing Results E-Card Template
 import { calculateExpirationDate } from './dateUtils';
+import { getVerifyUrl } from './verificationToken';
 
 export const generateFitTestCard = (formData) => {
   const {
@@ -16,22 +17,25 @@ export const generateFitTestCard = (formData) => {
     result,
     fitTester,
     recipientEmail,
+    verificationToken,
   } = formData;
 
   const displayExpirationDate = expirationDate || calculateExpirationDate(issueDate);
 
-  // Route QR destination by selected testing location.
-  const LOCATION_QR_URLS = {
+  // Follow-up booking links by testing location. The QR itself verifies the card.
+  const LOCATION_BOOKING_URLS = {
     Harlem: 'https://next-leap-fit.vercel.app/',
     Brooklyn: 'https://next-leap-fit-bk-2026.vercel.app/',
   };
   // Custom "Other" locations have no booking site of their own and land here.
-  const DEFAULT_QR_URL = LOCATION_QR_URLS.Harlem;
-  const qrCodeUrl = LOCATION_QR_URLS[testLocation] || DEFAULT_QR_URL;
-  const qrCodePlaceholder = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrCodeUrl)}`;
+  const DEFAULT_BOOKING_URL = LOCATION_BOOKING_URLS.Harlem;
+  const bookingUrl = LOCATION_BOOKING_URLS[testLocation] || DEFAULT_BOOKING_URL;
+  const verifyUrl = getVerifyUrl(verificationToken);
+  const qrCodePlaceholder = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(verifyUrl)}`;
   const logoUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/logo-on-dark.png`
     : '/logo-on-dark.png';
+  const verifyCode = (verificationToken || '').trim().toLowerCase();
 
   return `
     <!DOCTYPE html>
@@ -93,23 +97,22 @@ export const generateFitTestCard = (formData) => {
                           <tr>
                             <!-- Left Column: QR Code and Client Info -->
                             <td width="200" valign="top" style="padding-right: 30px;">
-                              <!-- Reschedule Question and QR Code -->
-                              <table cellpadding="0" cellspacing="0" style="margin-bottom: 30px;">
+                              <table cellpadding="0" cellspacing="0" style="margin-bottom: 24px;">
                                 <tr>
                                   <td style="padding-bottom: 12px; text-align: center;">
                                     <p style="margin: 0; font-size: 14px; font-weight: 600; color: #0B2D4A; font-family: Arial, Helvetica, sans-serif;">
-                                      Need to reschedule?
+                                      Scan to verify this e-card
                                     </p>
                                   </td>
                                 </tr>
                                 <tr>
                                   <td style="text-align: center;">
-                                    <img src="${qrCodePlaceholder}" alt="QR Code - Scan to reschedule" style="width: 150px; height: 150px; border: 2px solid rgba(20, 184, 166, 0.45); border-radius: 8px; display: block; margin: 0 auto;" />
+                                    <a href="${verifyUrl}" style="text-decoration: none;">
+                                      <img src="${qrCodePlaceholder}" alt="QR Code - Scan to verify this e-card" style="width: 150px; height: 150px; border: 2px solid rgba(20, 184, 166, 0.45); border-radius: 8px; display: block; margin: 0 auto;" />
+                                    </a>
                                   </td>
                                 </tr>
                               </table>
-                              
-                              <!-- Client Information -->
                               <table width="100%" cellpadding="0" cellspacing="0">
                                 <tr>
                                   <td style="padding-bottom: 15px;">
@@ -120,7 +123,7 @@ export const generateFitTestCard = (formData) => {
                                   </td>
                                 </tr>
                                 <tr>
-                                  <td style="padding-bottom: 20px;">
+                                  <td>
                                     <span style="font-size: 14px; font-weight: 600; color: #0B2D4A; display: block; margin-bottom: 8px;">DOB:</span>
                                     <div style="padding: 9px 14px; background-color: #F7FAFC; border: 1px solid rgba(11, 45, 74, 0.10); border-radius: 6px; color: #4d6273; font-family: 'Courier New', monospace; font-size: 14px;">
                                       ${dob || '[Date of Birth]'}
@@ -130,9 +133,8 @@ export const generateFitTestCard = (formData) => {
                               </table>
                             </td>
                             
-                            <!-- Right Column: Fit Test Details -->
+                            <!-- Right Column: Fit Test Details, then confirm -->
                             <td valign="top">
-                              <!-- Fit Test Details -->
                               <table width="100%" cellpadding="0" cellspacing="0" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px;">
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Test Location:</td>
@@ -175,9 +177,30 @@ export const generateFitTestCard = (formData) => {
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${fitTester || '[Tester Name]'}</td>
                                 </tr>
                               </table>
+                              <table width="100%" cellpadding="0" cellspacing="0" style="margin-top: 18px; border-top: 1px solid rgba(11, 45, 74, 0.10);">
+                                ${verifyCode ? `
+                                <tr>
+                                  <td style="padding-top: 14px; font-size: 12px; font-weight: 600; color: #0B2D4A; font-family: Arial, Helvetica, sans-serif;">
+                                    Confirm this card
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td style="padding-top: 4px; font-size: 13px; letter-spacing: 0.02em; font-family: 'Courier New', monospace;">
+                                    <a href="${verifyUrl}" style="color: #0F9A8A; text-decoration: none;">${verifyCode}</a>
+                                  </td>
+                                </tr>` : ''}
+                                <tr>
+                                  <td style="padding-top: ${verifyCode ? '8px' : '14px'}; font-size: 13px; font-family: Arial, Helvetica, sans-serif;">
+                                    <a href="${bookingUrl}" style="color: #0F9A8A; font-weight: 600; text-decoration: none;">Book a follow-up</a>
+                                  </td>
+                                </tr>
+                              </table>
                             </td>
                           </tr>
                         </table>
+                        <p style="margin: 20px 0 0 0; font-size: 12px; line-height: 1.5; color: #7a8a99; font-family: Arial, Helvetica, sans-serif;">
+                          This record documents the result for the listed respirator and date. It is not medical clearance or an OSHA-issued certification.
+                        </p>
                       </td>
                     </tr>
                   </table>

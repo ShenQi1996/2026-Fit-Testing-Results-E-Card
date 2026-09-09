@@ -2,6 +2,7 @@ import React from 'react';
 import FormSection from '../common/FormSection';
 import FormInput from '../common/FormInput';
 import FormSelect from '../common/FormSelect';
+import FormCheckbox from '../common/FormCheckbox';
 
 const RespiratoryProtectionProgramSection = ({
   formData,
@@ -17,32 +18,20 @@ const RespiratoryProtectionProgramSection = ({
   fieldErrors,
 }) => {
   return (
-    <FormSection title="Written Respiratory Protection Program Verification">
-      <div className="form-group">
-        <label htmlFor="schoolsOnFile" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            id="schoolsOnFile"
-            checked={formData.schoolsOnFile || false}
-            onChange={(e) => onChange('schoolsOnFile', e.target.checked)}
-            disabled={isLoading}
-            style={{
-              width: '18px',
-              height: '18px',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              accentColor: 'var(--accent-teal)',
-            }}
-          />
-          <span>Schools are on file</span>
-        </label>
-        {fieldErrors?.schoolsOnFile && (
-          <span className="form-error-message">{fieldErrors.schoolsOnFile}</span>
-        )}
-      </div>
+    <FormSection title="Respiratory protection program">
+      <FormCheckbox
+        id="schoolsOnFile"
+        checked={formData.schoolsOnFile || false}
+        onChange={(checked) => onChange('schoolsOnFile', checked)}
+        disabled={isLoading}
+        error={fieldErrors?.schoolsOnFile}
+      >
+        Schools are on file
+      </FormCheckbox>
 
       <FormSelect
         id="schoolsList"
-        label="School / Client"
+        label="School / client"
         value={selectedSchoolOption || ''}
         onChange={(e) => onSchoolOptionChange(e.target.value)}
         options={schoolOptions}
@@ -54,7 +43,7 @@ const RespiratoryProtectionProgramSection = ({
         <>
           <FormInput
             id="schoolsListOther"
-            label="Specify School Name"
+            label="School name"
             type="text"
             value={formData.schoolsList || ''}
             onChange={(e) => onChange('schoolsList', e.target.value)}
@@ -64,36 +53,22 @@ const RespiratoryProtectionProgramSection = ({
             error={fieldErrors?.schoolsList}
           />
 
-          <div className="form-group" style={{ marginTop: '-6px' }}>
-            <label
-              htmlFor="setSchoolProfileAsDefault"
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-            >
-              <input
-                type="checkbox"
-                id="setSchoolProfileAsDefault"
-                checked={setSchoolProfileAsDefault}
-                onChange={(e) => onSetSchoolProfileAsDefaultChange(e.target.checked)}
-                disabled={isLoading}
-                style={{
-                  width: '18px',
-                  height: '18px',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  accentColor: 'var(--accent-teal)',
-                }}
-              />
-              <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>
-                Save as new default school
-              </span>
-            </label>
-          </div>
+          <FormCheckbox
+            id="setSchoolProfileAsDefault"
+            className="nested-checkbox"
+            checked={setSchoolProfileAsDefault}
+            onChange={onSetSchoolProfileAsDefaultChange}
+            disabled={isLoading}
+          >
+            Save as new default school
+          </FormCheckbox>
         </>
       )}
 
       <div className="form-row">
         <FormInput
           id="programAdministratorName"
-          label="Program Administrator Name"
+          label="Program administrator name"
           type="text"
           value={formData.programAdministratorName || ''}
           onChange={(e) => onChange('programAdministratorName', e.target.value)}
@@ -103,7 +78,7 @@ const RespiratoryProtectionProgramSection = ({
         />
         <FormInput
           id="programAdministratorContact"
-          label="Program Administrator Contact"
+          label="Program administrator contact"
           type="text"
           value={formData.programAdministratorContact || ''}
           onChange={(e) => onChange('programAdministratorContact', e.target.value)}

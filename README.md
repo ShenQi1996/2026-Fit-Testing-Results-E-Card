@@ -1,273 +1,118 @@
-# Fit Testing Results E-Card Application
+# Secure Fit LLC — Fit Test E-Card App
 
-A professional React application for Secure Fit LLC that enables medical fit testing agents to generate, send, and manage respiratory fit testing results via digital e-cards.
+Staff app for testers to record qualitative respirator fit tests, email branded e-cards, and keep digital records. Clients can verify a card or request a resend without signing in.
 
-## 📋 Table of Contents
+**Production:** [2026-fit-testing-results-e-card.vercel.app](https://2026-fit-testing-results-e-card.vercel.app)
 
-- [Project Overview](#project-overview)
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Getting Started](#getting-started)
-- [Project Structure](#project-structure)
-- [Configuration](#configuration)
-- [Documentation](#documentation)
-- [Development](#development)
-- [Build & Deploy](#build--deploy)
+## Routes
 
-## 🎯 Project Overview
+| Path | Who | What |
+|------|-----|------|
+| `/` | Public | Home: verify, resend, or open staff login |
+| `/verify` and `/verify/:token` | Public | Confirm an e-card is authentic |
+| `/resend` | Public | Resend a lost e-card (name, DOB, and email must match) |
+| `/staff_login` | Staff | Testers and admins only |
 
-This application streamlines the respiratory fit testing workflow for medical professionals. It allows fit testing agents to:
+A logged-in session does **not** take over `/`, `/verify`, or `/resend`. Staff work stays at `/staff_login`.
 
-- Create professional fit test result e-cards
-- Send results directly to clients via email
-- Manage and track all fit test records
-- Maintain compliance with OSHA regulations
-- Access historical test data organized by date
+## Features
 
-For detailed information, see [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)
+- Fit test form: client, respirator, protocol, hygiene, consent, and signatures
+- Participant consent (required): medical restrictions, participation, privacy, record delivery
+- Optional: employer/school release, marketing email
+- Tester attestation, including required **Were medical restrictions received?** (Yes/No; Yes opens a note)
+- E-card QR points to `/verify/:token` (not booking). Booking is a separate follow-up link (Harlem or Brooklyn)
+- Public verification statuses: valid, expired, failed (authentic, did not pass), invalid
+- Test results: month/school/location filters, CSV export, PDF, resend, admin edit/delete
+- Admin approval for new testers; Users page for admins
+- Records saved to Firestore **before** email so the QR works as soon as the card arrives
+- Fit tests older than three years are purged for the signed-in tester
 
-## ✨ Features
+Policies linked from the form: [next-leap-fit.vercel.app/legal](https://next-leap-fit.vercel.app/legal)
 
-### Core Functionality
-- **Professional E-Card Generation**: Beautifully formatted HTML e-cards with Secure Fit LLC branding
-- **Email Integration**: Send e-cards directly via EmailJS
-- **Digital Records Management**: Store and retrieve all fit test records in Firebase
-- **User Authentication**: Secure login/signup with Firebase Authentication (including Google Sign-In)
-- **Dark Mode**: Toggle between light and dark themes
-- **Responsive Design**: Works seamlessly on desktop, tablet, and mobile devices
+This app documents a qualitative fit-test result. It does **not** establish medical clearance or issue an OSHA certification.
 
-### Form Features
-- **Complete Fit Test Form**: All required fields for OSHA-compliant documentation
-- **Test Location**: Harlem / Brooklyn / Other, with location-based QR routing on e-cards
-- **School / Client Profiles**: Save reusable school names (plus Helene College of Nursing default)
-- **Respiratory Protection Program Verification**: Track schools on file, program administrator information
-- **Saved Solution Profiles**: Reuse solution type/open/expiration settings
-- **Auto-Fill Capabilities**: 
-  - Issue date defaults to today
-  - Fit tester auto-fills with logged-in user's name
-  - Date of Birth auto-formats to MM/DD/YYYY
-  - Schools on file checkbox defaults to checked
-- **Live Preview**: See exactly how the e-card will look before sending
-- **Form Validation**: Visual feedback with red borders for required fields
-- **QR Code Generation**: Automatic QR codes linking to rescheduling page
-- **Digital Signature**: Canvas-based signature pad with clear functionality
+## Run locally
 
-### Results Management
-- **Fit Test Results Page**: View all fit test records organized by month
-- **Filters**: Filter by month, school/client, and test location
-- **CSV Export**: Export filtered results as a Standard Report CSV
-- **PDF Preview & Download**: Regenerate any saved record's e-card as a PDF
-- **Inline Editing** (admin): Edit records directly from the results page, including test location
-- **Resend E-Cards**: Resend e-cards to clients with updated timestamps
-- **Delete Records** (admin): Remove records with confirmation modal
-- **Sorting**: Results sorted by issue date (newest first)
-- **Calendar View**: Monthly grouping for easy navigation
+Use **Node 24** (required). Do not run `npm start dev` — webpack treats `dev` as an extra entry and fails.
 
-### User Features
-- **Account Management**: Edit profile, saved solution profiles, and school profiles
-- **Admin Approval Flow**: New accounts stay pending until an admin approves
-- **Users Management** (admin): Add/edit/delete users and view per-user test counts
-- **Session Persistence**: Stay logged in across browser sessions
-- **Google Sign-In**: Quick authentication with Google account
-
-## 🛠 Tech Stack
-
-- **Frontend Framework**: React 18.2.0
-- **Build Tool**: Webpack 5
-- **Styling**: CSS with CSS Variables (dark mode support)
-- **Authentication**: Firebase Authentication
-- **Database**: Firebase Firestore
-- **Email Service**: EmailJS
-- **State Management**: React Context API
-- **Icons**: Emoji-based icons
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- Node.js 24.x (required by Vercel)
-- npm or yarn
-- Firebase account
-- EmailJS account (optional, for email sending)
-
-Use `nvm` to match the project version quickly:
 ```bash
 nvm install 24
 nvm use 24
-node --version
-npm --version
+cd email-form-app
+npm install
+npm start
 ```
 
-### Quick Start
-
-1. **Clone the repository**
-   ```bash
-   cd email-form-app
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Configure Firebase**
-   - See [FIREBASE_SETUP.md](./FIREBASE_SETUP.md) for detailed instructions
-   - Update `src/config/firebase.js` with your Firebase credentials
-
-4. **Configure EmailJS** (Optional)
-   - See [EMAILJS_SETUP.md](./EMAILJS_SETUP.md) for detailed instructions
-   - Update `src/services/emailService.js` with your EmailJS credentials
-
-5. **Start development server**
-   ```bash
-   npm start
-   ```
-
-6. **Open in browser**
-   - Navigate to `http://localhost:3000` (or the port shown in terminal)
-
-For detailed setup instructions, see [HOW_TO_RUN.md](./HOW_TO_RUN.md)
-
-## 📁 Project Structure
-
-```
-email-form-app/
-├── src/
-│   ├── components/
-│   │   ├── auth/              # Authentication components
-│   │   │   ├── Login.js
-│   │   │   ├── Signup.js
-│   │   │   ├── EditAccount.js
-│   │   │   ├── Auth.css
-│   │   │   └── EditAccount.css
-│   │   ├── common/            # Reusable components
-│   │   │   ├── Header.js
-│   │   │   ├── Sidebar.js
-│   │   │   ├── CardPreview.js
-│   │   │   ├── FormInput.js
-│   │   │   ├── FormSelect.js
-│   │   │   ├── FormSection.js
-│   │   │   └── StatusMessage.js
-│   │   ├── forms/             # Form section components
-│   │   │   ├── FitTestForm.js         # Main form container
-│   │   │   ├── FitTestForm.css        # Form styles
-│   │   │   ├── RecipientInfoSection.js
-│   │   │   ├── ClientInfoSection.js
-│   │   │   ├── FitTestDetailsSection.js
-│   │   │   ├── RespiratoryProtectionProgramSection.js
-│   │   │   ├── SignatureSection.js
-│   │   │   ├── SignaturePad.js
-│   │   │   └── SubmitButton.js
-│   │   └── results/           # Test results components
-│   │       ├── FitTestResults.js
-│   │       └── FitTestResults.css
-│   ├── context/               # React Context providers
-│   │   ├── AuthContext.js
-│   │   └── ThemeContext.js
-│   ├── hooks/                 # Custom React hooks
-│   │   └── useFitTestForm.js  # Fit test form logic hook
-│   ├── services/              # External service integrations
-│   │   ├── emailService.js
-│   │   ├── firebaseAuth.js
-│   │   └── firebaseDb.js
-│   ├── utils/                 # Utility functions
-│   │   ├── dateUtils.js
-│   │   ├── validators.js
-│   │   └── fitTestCardTemplate.js  # E-card HTML templates
-│   ├── config/                # Configuration files
-│   │   └── firebase.js
-│   ├── styles/                # Global styles
-│   │   └── App.css
-│   ├── App.js                 # Main app component
-│   └── index.js               # Entry point
-├── public/                     # Static files
-├── docs/                       # Documentation files
-└── package.json
-```
-
-For detailed structure information, see [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md)
-
-## ⚙️ Configuration
-
-### Firebase Configuration
-
-1. Create a Firebase project at [Firebase Console](https://console.firebase.google.com/)
-2. Enable Authentication (Email/Password and Google)
-3. Create a Firestore database
-4. Copy your config to `src/config/firebase.js`
-
-### EmailJS Configuration
-
-1. Sign up at [EmailJS](https://www.emailjs.com/)
-2. Create an email service
-3. Create an email template
-4. Update `src/services/emailService.js` with your credentials
-
-See individual setup guides for detailed instructions.
-
-## 📚 Documentation
-
-- **[HOW_TO_RUN.md](./HOW_TO_RUN.md)**: Step-by-step setup and running instructions
-- **[PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)**: Detailed project description and features
-- **[PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md)**: Code organization and architecture
-- **[FIREBASE_SETUP.md](./FIREBASE_SETUP.md)**: Firebase configuration guide
-- **[EMAILJS_SETUP.md](./EMAILJS_SETUP.md)**: EmailJS setup and template configuration
-- **[USER_SYSTEM_GUIDE.md](./USER_SYSTEM_GUIDE.md)**: User authentication system documentation
-
-## 💻 Development
-
-### Available Scripts
-
-- `npm start` - Start the development server with hot reload (use this while coding)
-- `npm run build` - Build for production
-- `npm run build:dev` - Generate a development-mode bundle (does not start a server)
-
-### Which command should I use during development?
-
-- Use `npm start` for day-to-day development and testing in the browser.
-- Use `npm run build:dev` only when you want a compiled development bundle output.
-
-### Development Guidelines
-
-- Follow the existing component structure
-- Use CSS variables for theming (dark mode support)
-- Keep components small and focused
-- Use custom hooks for reusable logic
-- Follow React best practices
-
-## 🏗 Build & Deploy
-
-### Production Build
+Open [http://localhost:3000](http://localhost:3000). Staff app: [http://localhost:3000/staff_login](http://localhost:3000/staff_login).
 
 ```bash
-npm run build
+npm run build      # production bundle in dist/
+npm run build:dev  # development bundle only; does not start a server
 ```
 
-The production build will be in the `dist` folder.
+## Firestore (required for verify and resend)
 
-### Deployment Options
+Public verify and resend read one document by known key. Listing those collections is denied.
 
-- **Vercel**: Connect your GitHub repo for automatic deployments
-- **Netlify**: Drag and drop the `dist` folder
-- **Firebase Hosting**: Use `firebase deploy`
-- **Any static hosting**: Upload the `dist` folder contents
+1. Open Firebase Console → Firestore → **Rules**
+2. Publish the contents of [`firestore.rules`](./firestore.rules) in this repo
+3. Create the composite index if Test Results asks for it: `fitTests` with `userId` ascending, `createdAt` descending
 
-## 🔒 Security Notes
+Until `fitTestVerifications` rules are published, `/verify` cannot confirm cards.
 
-- Firebase handles authentication securely
-- Passwords are hashed by Firebase
-- All data is stored in Firebase (not localStorage)
-- EmailJS credentials should be kept secure
-- For production, consider environment variables for sensitive config
+Collections:
 
-## 📝 License
+- `users` — testers/admins (`role`, `status`)
+- `users/{uid}/solutionProfiles` and `schoolProfiles`
+- `fitTests` — records (owner or admin)
+- `fitTestLookups/{lookupKey}` — public get for resend
+- `fitTestVerifications/{token}` — public get for verify
 
-ISC
+## Staff workflow
 
-## 👥 Support
+1. Sign in at `/staff_login` (approved testers only)
+2. Complete the form with the participant
+3. Confirm required consents and tester Yes/No items
+4. Sign, then send — record is stored, then the e-card is emailed
+5. Use **Test results** to resend, export, or inspect full consent
 
-For issues or questions, please refer to the documentation files or create an issue in the repository.
+New accounts need **admin approval** before they can send records.
+
+## Project layout
+
+```
+src/
+  App.js                         # Public vs staff routing
+  components/
+    auth/                        # Login, signup (admin-created), account
+    admin/                       # Users management
+    common/                      # Header, sidebar, home, form controls
+    forms/                       # Fit test form sections + consent
+    lookup/                      # Verify and resend pages
+    results/                     # Test results
+  constants/                     # Consent copy, form options
+  context/                       # Auth and theme
+  hooks/useFitTestForm.js
+  services/                      # Firebase + EmailJS
+  utils/                         # Card HTML, tokens, PDF, CSV, dates
+firestore.rules
+vercel.json                      # SPA rewrites to index.html
+```
+
+## Documentation
+
+- [FIRESTORE_RULES_SETUP.md](./FIRESTORE_RULES_SETUP.md) — publish rules for verify/resend
+- [FIREBASE_SETUP.md](./FIREBASE_SETUP.md) — project, Auth, Firestore, indexes
+- [EMAILJS_SETUP.md](./EMAILJS_SETUP.md) — e-card email template
+- [PRODUCTION_SETUP.md](./PRODUCTION_SETUP.md) — Vercel domain and Google sign-in
+
+## Deploy
+
+Vercel build: `npm run build`, output `dist/`. See [`vercel.json`](./vercel.json) for SPA rewrites.
+
+Add the production hostname to Firebase **Authorized domains** before testing Google sign-in. Per-deployment `*.vercel.app` URLs are not authorized.
 
 ---
 
-**Secure Fit LLC** - Precision in every breath.
+**Secure Fit LLC** — Precision in every breath.

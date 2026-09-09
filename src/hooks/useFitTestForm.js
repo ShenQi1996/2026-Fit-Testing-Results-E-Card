@@ -11,6 +11,7 @@ import {
   saveUserSchoolProfile,
 } from '../services/firebaseDb';
 import { TESTING_AGENT_OPTIONS, SCHOOLS_OPTIONS } from '../constants/fitTestOptions';
+import { createVerificationToken } from '../utils/verificationToken';
 
 const INITIAL_FORM_DATA = {
   recipientEmail: '',
@@ -55,13 +56,28 @@ const INITIAL_FORM_DATA = {
   cleaningMethod: 'Condition acceptable',
   hoodCleaned: true, // Default checked
   nebulizerCleaned: true, // Default checked
-  // Consent section
-  studentClearanceConfirmed: false, // Default unchecked
+  // Consent section — required choices stay unchecked until the participant confirms
+  studentClearanceConfirmed: false,
+  consentToFitTest: false,
+  privacyPolicyAcknowledged: false,
+  recordDeliveryConfirmed: false,
+  optionalOrganizationRelease: false,
+  organizationReleaseRecipient: '',
+  optionalMarketingEmail: false,
   // Tester attestation checkboxes
   testerAttestationProtocolFollowed: true, // Default checked
-  testerAttestationMedicalClearanceVerified: true, // Default checked
+  testerAttestationConsentWitnessed: true, // Default checked
   testerAttestationRespiratorMatchesRecord: true, // Default checked
+  testerMedicalRestrictionsReceived: null,
+  testerMedicalRestrictionsNote: '',
 };
+
+const createInitialFormData = (overrides = {}) => ({
+  ...INITIAL_FORM_DATA,
+  issueDate: getTodayDate(),
+  verificationToken: createVerificationToken(),
+  ...overrides,
+});
 
 const NEW_SOLUTION_PROFILE_OPTION = '__new_solution_profile__';
 const BASE_SOLUTION_OPTION_PREFIX = 'base:';
@@ -75,7 +91,7 @@ const getDefaultBaseSchool = () => SCHOOLS_OPTIONS[0]?.value || '';
 
 export const useFitTestForm = () => {
   const { user } = useAuth();
-  const [formData, setFormData] = useState(INITIAL_FORM_DATA);
+  const [formData, setFormData] = useState(() => createInitialFormData());
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState({ type: '', message: '' });
   const [fieldErrors, setFieldErrors] = useState({});
@@ -527,6 +543,9 @@ export const useFitTestForm = () => {
         // Clear failure reason fields if UI is not visible
         failureReason: showFailureReasonUI ? formData.failureReason : '',
         correctiveActionNote: showFailureReasonUI ? formData.correctiveActionNote : '',
+        testerMedicalRestrictionsNote: formData.testerMedicalRestrictionsReceived === true
+          ? (formData.testerMedicalRestrictionsNote || '').trim()
+          : '',
       };
       
       // Calculate expiration date (test date + 1 year)
@@ -537,21 +556,18 @@ export const useFitTestForm = () => {
         signatureDataUrl,
         testerSignatureDataUrl,
         expirationDate, // Add expiration date (issueDate + 1 year)
+        verificationToken: cleanedFormData.verificationToken || createVerificationToken(),
       };
-      
-      // Step 1: Send email via EmailJS first
-      await sendFitTestCard(formDataWithSignature);
-      
-      // Step 2: If email sent successfully, save record to Firebase Firestore
+
+      // Save first so the e-card QR can verify as soon as the email arrives.
       if (user && user.uid) {
         try {
           await saveFitTest(user.uid, formDataWithSignature);
         } catch (dbError) {
           console.error('Error saving to database:', dbError);
-          // Email was sent but DB save failed - show warning
-          setStatus({ 
-            type: 'warning', 
-            message: 'E-card sent successfully, but failed to save record to database. Please try again.' 
+          setStatus({
+            type: 'error',
+            message: 'Could not save the fit test record, so the e-card was not sent. Please try again.',
           });
           setIsLoading(false);
           return;
@@ -559,21 +575,33 @@ export const useFitTestForm = () => {
       } else {
         console.warn('User not logged in, skipping database save');
       }
+
+      try {
+        await sendFitTestCard(formDataWithSignature);
+      } catch (emailError) {
+        console.error('Error sending email:', emailError);
+        setStatus({
+          type: 'warning',
+          message: user?.uid
+            ? 'Record saved, but the e-card email failed. You can resend it from Results.'
+            : 'Failed to send e-card. Please try again later.',
+        });
+        setIsLoading(false);
+        return;
+      }
       
       setStatus({ type: 'success', message: 'Fit Testing Results E-card sent successfully!' });
       
       // Reset form but keep issue date as today and auto-fill fitTester
       const defaultProfile = latestSolutionProfiles.find((profile) => profile.isDefault);
       const defaultSchoolProfile = latestSchoolProfiles.find((profile) => profile.isDefault);
-      setFormData({
-        ...INITIAL_FORM_DATA,
-        issueDate: getTodayDate(),
+      setFormData(createInitialFormData({
         fitTester: user?.name || '',
         solutionType: defaultProfile?.solutionType || getDefaultBaseSolutionType(),
         solutionOpenDate: defaultProfile?.solutionOpenDate || '',
         solutionExpirationDate: defaultProfile?.solutionExpirationDate || '',
         schoolsList: defaultSchoolProfile?.schoolName || getDefaultBaseSchool(),
-      });
+      }));
       setSelectedSolutionOption(
         defaultProfile
           ? `${PROFILE_SOLUTION_OPTION_PREFIX}${defaultProfile.id}`
@@ -614,15 +642,13 @@ export const useFitTestForm = () => {
   const resetForm = () => {
     const defaultProfile = solutionProfiles.find((profile) => profile.isDefault);
     const defaultSchoolProfile = schoolProfiles.find((profile) => profile.isDefault);
-    setFormData({
-      ...INITIAL_FORM_DATA,
-      issueDate: getTodayDate(),
+    setFormData(createInitialFormData({
       fitTester: user?.name || '',
       solutionType: defaultProfile?.solutionType || getDefaultBaseSolutionType(),
       solutionOpenDate: defaultProfile?.solutionOpenDate || '',
       solutionExpirationDate: defaultProfile?.solutionExpirationDate || '',
       schoolsList: defaultSchoolProfile?.schoolName || getDefaultBaseSchool(),
-    });
+    }));
     setSelectedSolutionOption(
       defaultProfile
         ? `${PROFILE_SOLUTION_OPTION_PREFIX}${defaultProfile.id}`

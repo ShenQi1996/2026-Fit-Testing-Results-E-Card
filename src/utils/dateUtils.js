@@ -135,3 +135,26 @@ export const isFitTestPastRetention = (record, now = new Date()) => {
   return recordDate < cutoff;
 };
 
+/**
+ * True when the expiration calendar day has already ended.
+ * The expiration date itself remains valid through the end of that local day.
+ * @param {string} expirationDateString - MM/DD/YYYY
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+export const isExpirationDatePast = (expirationDateString, now = new Date()) => {
+  const expirationDate = parseDateString(expirationDateString);
+  if (!expirationDate) return false;
+
+  const endOfExpirationDay = new Date(
+    expirationDate.getFullYear(),
+    expirationDate.getMonth(),
+    expirationDate.getDate(),
+    23,
+    59,
+    59,
+    999
+  );
+  return now.getTime() > endOfExpirationDay.getTime();
+};
+

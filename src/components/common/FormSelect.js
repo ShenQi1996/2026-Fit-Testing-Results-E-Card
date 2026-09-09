@@ -14,7 +14,7 @@ const FormSelect = ({
   return (
     <div className="form-group">
       <label htmlFor={id}>
-        {label} {required && <span style={{ color: '#dc3545' }}>*</span>}
+        {label} {required ? <span className="required-mark">*</span> : null}
       </label>
       <select
         id={id}

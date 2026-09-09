@@ -322,6 +322,25 @@ html:has(.auth-page) body {
   min-height: 100vh;
 }
 
+.loading-animation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.loading-animation-lottie {
+  width: 160px;
+  height: 160px;
+}
+
+.loading-animation-label {
+  margin: 8px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--teal-dark);
+  font-family: var(--font-heading);
+}
+
 .loading-spinner {
   font-size: 18px;
   color: var(--accent-teal);

@@ -31,7 +31,7 @@ fails with `auth/unauthorized-domain` even though production works fine. They ar
 also gated behind Vercel's deployment protection, which serves a Vercel login page
 to anyone without a session.
 
-Always test Google sign-in on the production domain. Firebase does not support
+Always test Google sign-in on the production domain (`https://2026-fit-testing-results-e-card.vercel.app/staff_login`). Firebase does not support
 wildcards, so authorizing preview deployments would mean adding each hostname by
 hand — set up a custom domain instead if you need them to work.
 
@@ -93,7 +93,7 @@ const firebaseConfig = {
 ## Step 5: Test in Production
 
 1. Deploy your app to Vercel
-2. Visit your production URL
+2. Visit `https://2026-fit-testing-results-e-card.vercel.app/staff_login`
 3. Try Google sign-in
 4. Check browser console for any errors
 

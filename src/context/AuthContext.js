@@ -35,10 +35,8 @@ export const AuthProvider = ({ children }) => {
     const checkRedirect = async () => {
       try {
         await handleGoogleRedirect();
-        // If redirect was successful, onAuthStateChange will update the user
-      } catch (error) {
-        // No redirect or redirect failed, continue normally
-        console.log('No Google redirect detected');
+      } catch {
+        // No Google redirect result on this load.
       }
     };
     

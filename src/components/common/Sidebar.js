@@ -28,18 +28,18 @@ const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
   }, [loadTestCount, currentPage]);
 
   const testResultsLabel =
-    testCount === null ? '📋 Test Results' : `📋 Test Results (${testCount})`;
+    testCount === null ? 'Test results' : `Test results (${testCount})`;
 
   return (
     <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
       <div className="sidebar-content">
-        <h2 className="sidebar-title">Navigation</h2>
+        <h2 className="sidebar-title">Menu</h2>
         <nav className="sidebar-nav">
           <button
             className={`sidebar-button ${currentPage === 'form' ? 'active' : ''}`}
             onClick={() => onNavigate('form')}
           >
-            📧 Send E-Card
+            Send e-card
           </button>
           <button
             className={`sidebar-button ${currentPage === 'results' ? 'active' : ''}`}
@@ -52,7 +52,7 @@ const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
               className={`sidebar-button ${currentPage === 'users' ? 'active' : ''}`}
               onClick={() => onNavigate('users')}
             >
-              👥 Users Management
+              Users
             </button>
           )}
         </nav>

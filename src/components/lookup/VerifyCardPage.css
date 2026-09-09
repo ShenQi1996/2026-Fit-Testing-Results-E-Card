@@ -1,0 +1,121 @@
+.verify-card {
+  max-width: 560px;
+}
+
+.verify-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 24px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.verify-status-badge--valid {
+  background: rgba(20, 184, 166, 0.14);
+  color: #0F9A8A;
+}
+
+.verify-status-badge--expired {
+  background: rgba(196, 123, 23, 0.14);
+  color: #9a5c0c;
+}
+
+.verify-status-badge--failed {
+  background: rgba(220, 53, 69, 0.12);
+  color: #b42333;
+}
+
+.verify-status-badge--invalid,
+.verify-status-badge--error {
+  background: rgba(11, 45, 74, 0.08);
+  color: #0B2D4A;
+}
+
+.verify-animation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 auto 8px;
+}
+
+.verify-animation-lottie {
+  width: 160px;
+  height: 160px;
+}
+
+.verify-card .loading-animation {
+  margin: 8px 0 16px;
+}
+
+.verify-card .loading-animation-lottie {
+  width: 148px;
+  height: 148px;
+}
+
+.verify-details {
+  margin: 0 0 28px;
+  padding: 8px 20px;
+  border: 1px solid rgba(11, 45, 74, 0.1);
+  border-radius: 12px;
+  background: #F7FAFC;
+}
+
+.verify-details-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(11, 45, 74, 0.08);
+}
+
+.verify-details-row:last-child {
+  border-bottom: none;
+}
+
+.verify-details dt {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0B2D4A;
+}
+
+.verify-details dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #4d6273;
+  text-align: right;
+  word-break: break-word;
+}
+
+.verify-result--pass {
+  color: #0F9A8A;
+  font-weight: 700;
+}
+
+.verify-result--fail {
+  color: #dc3545;
+  font-weight: 700;
+}
+
+.verify-token-input {
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 480px) {
+  .verify-details-row {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .verify-details dd {
+    text-align: left;
+  }
+}
