@@ -10,11 +10,11 @@ const ClientInfoSection = ({ formData, onChange, isLoading, fieldErrors }) => {
   };
 
   return (
-    <FormSection title="Client Information">
+    <FormSection title="Client">
       <div className="form-row">
         <FormInput
           id="clientName"
-          label="Client Name"
+          label="Client name"
           type="text"
           value={formData.clientName}
           onChange={(e) => onChange('clientName', e.target.value)}
@@ -25,7 +25,7 @@ const ClientInfoSection = ({ formData, onChange, isLoading, fieldErrors }) => {
         />
         <FormInput
           id="dob"
-          label="Date of Birth"
+          label="Date of birth"
           type="text"
           value={formData.dob}
           onChange={handleDobChange}

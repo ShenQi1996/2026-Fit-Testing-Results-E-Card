@@ -1,14 +1,61 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { getUserFitTests, deleteFitTest, updateFitTest } from '../../services/firebaseDb';
+import { getUserFitTests, deleteFitTest, updateFitTest, ensureFitTestVerification } from '../../services/firebaseDb';
 import { sendFitTestCard } from '../../services/emailService';
 import { formatDateInput, calculateExpirationDate } from '../../utils/dateUtils';
 import { downloadFitTestPdf, previewFitTestPdf } from '../../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../../utils/csvUtils';
 import { TEST_LOCATION_OPTIONS } from '../../constants/fitTestOptions';
+import {
+  PARTICIPANT_CONSENT_ITEMS,
+  OPTIONAL_CONSENT_ITEMS,
+  RECORD_DISCLAIMER,
+  TESTER_ATTESTATION_TEXT,
+  TESTER_ATTESTATION_ITEMS,
+} from '../../constants/consentCopy';
 import './FitTestResults.css';
 
 const FILTER_ALL = '__all__';
+
+const hasConsentOrSignature = (test) => Boolean(
+  test.printedName ||
+  test.signatureDataUrl ||
+  test.testerSignatureDataUrl ||
+  test.studentClearanceConfirmed !== undefined ||
+  test.consentToFitTest !== undefined ||
+  test.privacyPolicyAcknowledged !== undefined ||
+  test.recordDeliveryConfirmed !== undefined ||
+  test.optionalOrganizationRelease !== undefined ||
+  test.optionalMarketingEmail !== undefined ||
+  test.testerAttestationProtocolFollowed !== undefined ||
+  test.testerAttestationConsentWitnessed !== undefined ||
+  test.testerAttestationMedicalClearanceVerified !== undefined ||
+  test.testerAttestationRespiratorMatchesRecord !== undefined ||
+  test.testerMedicalRestrictionsReceived === true ||
+  test.testerMedicalRestrictionsReceived === false ||
+  test.testerNoMedicalRestrictionsReceived !== undefined ||
+  test.testerMedicalRestrictionsNote
+);
+
+const hasTesterAttestation = (test) =>
+  test.testerAttestationProtocolFollowed !== undefined ||
+  test.testerAttestationConsentWitnessed !== undefined ||
+  test.testerAttestationMedicalClearanceVerified !== undefined ||
+  test.testerAttestationRespiratorMatchesRecord !== undefined ||
+  test.testerMedicalRestrictionsReceived === true ||
+  test.testerMedicalRestrictionsReceived === false ||
+  test.testerNoMedicalRestrictionsReceived !== undefined ||
+  Boolean(test.testerMedicalRestrictionsNote);
+
+const medicalRestrictionsReceivedAnswer = (test) => {
+  if (test.testerMedicalRestrictionsReceived === true || test.testerMedicalRestrictionsReceived === false) {
+    return test.testerMedicalRestrictionsReceived;
+  }
+  if (test.testerNoMedicalRestrictionsReceived === true || test.testerNoMedicalRestrictionsReceived === false) {
+    return test.testerNoMedicalRestrictionsReceived;
+  }
+  return undefined;
+};
 
 const FitTestResults = () => {
   const { user } = useAuth();
@@ -350,7 +397,27 @@ const FitTestResults = () => {
     model: test.model || '',
     result: test.result || '',
     fitTester: test.fitTester || '',
+    verificationToken: test.verificationToken || '',
   });
+
+  const resolveCardFormData = async (test) => {
+    let record = test;
+    try {
+      record = await ensureFitTestVerification(test, user?.uid);
+      if (record?.verificationToken && record.verificationToken !== test.verificationToken) {
+        setFitTests((prev) =>
+          prev.map((item) =>
+            item.id === test.id
+              ? { ...item, verificationToken: record.verificationToken }
+              : item
+          )
+        );
+      }
+    } catch (err) {
+      console.error('Could not attach verification token:', err);
+    }
+    return getEcardFormDataFromTest(record);
+  };
 
   const handlePreviewResultPdf = async (test) => {
     if (!test.clientName?.trim()) {
@@ -361,7 +428,7 @@ const FitTestResults = () => {
     try {
       setPdfLoading({ id: test.id, action: 'preview' });
       setError('');
-      await previewFitTestPdf(getEcardFormDataFromTest(test));
+      await previewFitTestPdf(await resolveCardFormData(test));
     } catch (err) {
       console.error('Error previewing PDF:', err);
       setError(err.message || 'Failed to generate PDF preview. Please try again.');
@@ -380,7 +447,7 @@ const FitTestResults = () => {
     try {
       setPdfLoading({ id: test.id, action: 'download' });
       setError('');
-      await downloadFitTestPdf(getEcardFormDataFromTest(test));
+      await downloadFitTestPdf(await resolveCardFormData(test));
     } catch (err) {
       console.error('Error downloading PDF:', err);
       setError(err.message || 'Failed to download PDF. Please try again.');
@@ -403,7 +470,7 @@ const FitTestResults = () => {
       setError('');
 
       // Prepare form data from the CURRENT saved test record (uses latest data)
-      const formData = getEcardFormDataFromTest(test);
+      const formData = await resolveCardFormData(test);
 
       // Send email via EmailJS
       await sendFitTestCard(formData);
@@ -1162,15 +1229,42 @@ const FitTestResults = () => {
                           )}
 
                           {/* Consent and Signatures */}
-                          {(test.printedName || test.studentClearanceConfirmed !== undefined || test.signatureDataUrl || test.testerSignatureDataUrl || test.testerAttestationProtocolFollowed !== undefined || test.testerAttestationMedicalClearanceVerified !== undefined || test.testerAttestationRespiratorMatchesRecord !== undefined) && (
+                          {hasConsentOrSignature(test) && (
                             <div className="result-section">
                               <h4 className="result-section-title">Consent</h4>
-                              {test.studentClearanceConfirmed !== undefined && (
-                                <div className="result-row">
-                                  <span className="result-label">Student clearance confirmed:</span>
-                                  <span className="result-value">{test.studentClearanceConfirmed ? 'Yes' : 'No'}</span>
-                                </div>
-                              )}
+
+                              <h5 className="result-subsection-title">Participant</h5>
+                              {PARTICIPANT_CONSENT_ITEMS.map((item) => (
+                                test[item.key] !== undefined ? (
+                                  <div className="result-consent-item" key={item.key}>
+                                    <div className="result-row">
+                                      <span className="result-label">{item.title}:</span>
+                                      <span className="result-value">{test[item.key] ? 'Yes' : 'No'}</span>
+                                    </div>
+                                    <p className="result-consent-text">{item.text}</p>
+                                  </div>
+                                ) : null
+                              ))}
+
+                              <p className="result-consent-disclaimer">{RECORD_DISCLAIMER}</p>
+
+                              <h5 className="result-subsection-title">Optional</h5>
+                              {OPTIONAL_CONSENT_ITEMS.map((item) => (
+                                test[item.key] !== undefined ? (
+                                  <div className="result-consent-item" key={item.key}>
+                                    <div className="result-row">
+                                      <span className="result-label">{item.title}:</span>
+                                      <span className="result-value">
+                                        {item.key === 'optionalOrganizationRelease' && test.optionalOrganizationRelease
+                                          ? (test.organizationReleaseRecipient || 'Yes')
+                                          : (test[item.key] ? 'Yes' : 'No')}
+                                      </span>
+                                    </div>
+                                    <p className="result-consent-text">{item.text}</p>
+                                  </div>
+                                ) : null
+                              ))}
+
                               {test.printedName && (
                                 <div className="result-row">
                                   <span className="result-label">Printed name:</span>
@@ -1180,52 +1274,65 @@ const FitTestResults = () => {
                               {test.signatureDataUrl && (
                                 <div className="signature-display-section">
                                   <div className="signature-display">
-                                    <span className="result-label">Student Signature:</span>
+                                    <span className="result-label">Participant signature:</span>
                                     <div className="signature-image-container">
                                       <img 
                                         src={test.signatureDataUrl} 
-                                        alt="Student Signature" 
+                                        alt="Participant signature" 
                                         className="signature-image"
                                       />
                                     </div>
                                   </div>
                                 </div>
                               )}
-                              {test.testerSignatureDataUrl && (
-                                <div className="signature-display-section">
-                                  <div className="signature-display">
-                                    <span className="result-label">Tester Signature:</span>
-                                    <div className="signature-image-container">
-                                      <img 
-                                        src={test.testerSignatureDataUrl} 
-                                        alt="Tester Signature" 
-                                        className="signature-image"
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                              {(test.testerAttestationProtocolFollowed !== undefined || test.testerAttestationMedicalClearanceVerified !== undefined || test.testerAttestationRespiratorMatchesRecord !== undefined) && (
-                                <div className="result-subsection" style={{ marginTop: '16px' }}>
-                                  <h5 className="result-subsection-title">Tester Attestation</h5>
-                                  {test.testerAttestationProtocolFollowed !== undefined && (
+
+                              {hasTesterAttestation(test) && (
+                                <div className="result-subsection">
+                                  <h5 className="result-subsection-title">Tester attestation</h5>
+                                  <p className="result-consent-text">{TESTER_ATTESTATION_TEXT}</p>
+                                  {TESTER_ATTESTATION_ITEMS.map((item) => (
+                                    test[item.key] !== undefined ? (
+                                      <div className="result-row" key={item.key}>
+                                        <span className="result-label">{item.title}:</span>
+                                        <span className="result-value">{test[item.key] ? 'Yes' : 'No'}</span>
+                                      </div>
+                                    ) : null
+                                  ))}
+                                  {medicalRestrictionsReceivedAnswer(test) !== undefined && (
                                     <div className="result-row">
-                                      <span className="result-label">Protocol followed:</span>
-                                      <span className="result-value">{test.testerAttestationProtocolFollowed ? 'Yes' : 'No'}</span>
+                                      <span className="result-label">Medical restrictions received:</span>
+                                      <span className="result-value">{medicalRestrictionsReceivedAnswer(test) ? 'Yes' : 'No'}</span>
                                     </div>
                                   )}
+                                  {medicalRestrictionsReceivedAnswer(test) === true && test.testerMedicalRestrictionsNote ? (
+                                    <div className="result-consent-item">
+                                      <div className="result-row">
+                                        <span className="result-label">Restrictions received:</span>
+                                        <span className="result-value result-value--wrap">{test.testerMedicalRestrictionsNote}</span>
+                                      </div>
+                                    </div>
+                                  ) : null}
                                   {test.testerAttestationMedicalClearanceVerified !== undefined && (
                                     <div className="result-row">
                                       <span className="result-label">Medical clearance verified:</span>
                                       <span className="result-value">{test.testerAttestationMedicalClearanceVerified ? 'Yes' : 'No'}</span>
                                     </div>
                                   )}
-                                  {test.testerAttestationRespiratorMatchesRecord !== undefined && (
-                                    <div className="result-row">
-                                      <span className="result-label">Respirator matches record:</span>
-                                      <span className="result-value">{test.testerAttestationRespiratorMatchesRecord ? 'Yes' : 'No'}</span>
+                                </div>
+                              )}
+
+                              {test.testerSignatureDataUrl && (
+                                <div className="signature-display-section">
+                                  <div className="signature-display">
+                                    <span className="result-label">Tester signature:</span>
+                                    <div className="signature-image-container">
+                                      <img 
+                                        src={test.testerSignatureDataUrl} 
+                                        alt="Tester signature" 
+                                        className="signature-image"
+                                      />
                                     </div>
-                                  )}
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -1234,7 +1341,7 @@ const FitTestResults = () => {
                           )}
 
                           {/* Show All / Show Less Button */}
-                          <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                          <div className="show-all-wrap">
                             <button
                               onClick={() => toggleCardExpansion(test.id)}
                               className="show-all-button"

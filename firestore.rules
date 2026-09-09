@@ -76,5 +76,17 @@ service cloud.firestore {
         isApproved() &&
         (isAdmin() || request.auth.uid == resource.data.userId);
     }
+
+    // Public verify: guests can read one verification doc only if they know the token.
+    // Listing is denied so the collection cannot be dumped.
+    match /fitTestVerifications/{token} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isSignedIn() && isApproved();
+      allow delete: if
+        isSignedIn() &&
+        isApproved() &&
+        (isAdmin() || request.auth.uid == resource.data.userId);
+    }
   }
 }

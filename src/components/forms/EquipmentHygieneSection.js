@@ -2,6 +2,7 @@ import React from 'react';
 import FormSection from '../common/FormSection';
 import FormInput from '../common/FormInput';
 import FormSelect from '../common/FormSelect';
+import FormCheckbox from '../common/FormCheckbox';
 import { formatDateInput } from '../../utils/dateUtils';
 
 const CLEANING_METHOD_OPTIONS = [
@@ -23,19 +24,16 @@ const EquipmentHygieneSection = ({
   fieldErrors,
 }) => {
   const handleOpenDateChange = (e) => {
-    const formattedValue = formatDateInput(e.target.value);
-    onChange('solutionOpenDate', formattedValue);
+    onChange('solutionOpenDate', formatDateInput(e.target.value));
   };
 
   const handleExpirationDateChange = (e) => {
-    const formattedValue = formatDateInput(e.target.value);
-    onChange('solutionExpirationDate', formattedValue);
+    onChange('solutionExpirationDate', formatDateInput(e.target.value));
   };
 
   return (
-    <FormSection title="Equipment hygiene and solution control">
-      {/* Saved and base solution profile selector */}
-      <div className="form-row" style={{ gridTemplateColumns: '1fr' }}>
+    <FormSection title="Equipment and solution">
+      <div className="form-row form-row-full">
         <FormSelect
           id="solutionProfileSelection"
           label="Saved solution profiles"
@@ -47,28 +45,15 @@ const EquipmentHygieneSection = ({
       </div>
 
       {isAddingNewSolutionProfile && (
-        <div className="form-row" style={{ marginTop: '-6px' }}>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label htmlFor="setSolutionProfileAsDefault" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                id="setSolutionProfileAsDefault"
-                checked={setSolutionProfileAsDefault}
-                onChange={(e) => onSetSolutionProfileAsDefaultChange(e.target.checked)}
-                disabled={isLoading}
-                style={{
-                  width: '18px',
-                  height: '18px',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  accentColor: 'var(--accent-teal)',
-                }}
-              />
-              <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>
-                Set as new default solution
-              </span>
-            </label>
-          </div>
-        </div>
+        <FormCheckbox
+          id="setSolutionProfileAsDefault"
+          className="nested-checkbox"
+          checked={setSolutionProfileAsDefault}
+          onChange={onSetSolutionProfileAsDefaultChange}
+          disabled={isLoading}
+        >
+          Set as new default solution
+        </FormCheckbox>
       )}
 
       {isAddingNewSolutionProfile && (
@@ -122,61 +107,27 @@ const EquipmentHygieneSection = ({
         />
       </div>
 
-      {/* Daily cleaning record */}
-      <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '2px solid var(--border-color)' }}>
-        <h4 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--accent-blue)', marginBottom: '16px' }}>Daily cleaning record</h4>
-        <div style={{ 
-          padding: '16px', 
-          backgroundColor: 'var(--bg-secondary)', 
-          borderRadius: '8px',
-          border: '1px solid var(--border-color)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px'
-        }}>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label htmlFor="hoodCleaned" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                id="hoodCleaned"
-                checked={formData.hoodCleaned !== undefined ? formData.hoodCleaned : true}
-                onChange={(e) => onChange('hoodCleaned', e.target.checked)}
-                disabled={isLoading}
-                style={{
-                  width: '18px',
-                  height: '18px',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  accentColor: 'var(--accent-teal)',
-                }}
-              />
-              <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)' }}>Hood cleaned</span>
-            </label>
-            {fieldErrors?.hoodCleaned && (
-              <span className="form-error-message">{fieldErrors.hoodCleaned}</span>
-            )}
-          </div>
-
-          <div className="form-group" style={{ margin: 0 }}>
-            <label htmlFor="nebulizerCleaned" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                id="nebulizerCleaned"
-                checked={formData.nebulizerCleaned !== undefined ? formData.nebulizerCleaned : true}
-                onChange={(e) => onChange('nebulizerCleaned', e.target.checked)}
-                disabled={isLoading}
-                style={{
-                  width: '18px',
-                  height: '18px',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  accentColor: 'var(--accent-teal)',
-                }}
-              />
-              <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)' }}>Nebulizer cleaned</span>
-            </label>
-            {fieldErrors?.nebulizerCleaned && (
-              <span className="form-error-message">{fieldErrors.nebulizerCleaned}</span>
-            )}
-          </div>
+      <div className="subsection-block">
+        <h4 className="consent-subsection-title">Daily cleaning</h4>
+        <div className="daily-cleaning">
+          <FormCheckbox
+            id="hoodCleaned"
+            checked={formData.hoodCleaned !== undefined ? formData.hoodCleaned : true}
+            onChange={(checked) => onChange('hoodCleaned', checked)}
+            disabled={isLoading}
+            error={fieldErrors?.hoodCleaned}
+          >
+            Hood cleaned
+          </FormCheckbox>
+          <FormCheckbox
+            id="nebulizerCleaned"
+            checked={formData.nebulizerCleaned !== undefined ? formData.nebulizerCleaned : true}
+            onChange={(checked) => onChange('nebulizerCleaned', checked)}
+            disabled={isLoading}
+            error={fieldErrors?.nebulizerCleaned}
+          >
+            Nebulizer cleaned
+          </FormCheckbox>
         </div>
       </div>
     </FormSection>

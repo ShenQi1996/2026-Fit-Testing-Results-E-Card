@@ -1,5 +1,6 @@
 import React from 'react';
 import FormSection from '../common/FormSection';
+import FormCheckbox from '../common/FormCheckbox';
 
 const EXERCISE_CHECKLIST_ITEMS = [
   { id: 'exerciseNormalBreathing', label: 'Normal breathing' },
@@ -13,29 +14,18 @@ const EXERCISE_CHECKLIST_ITEMS = [
 
 const ExerciseChecklistSection = ({ formData, onChange, isLoading, fieldErrors }) => {
   return (
-    <FormSection title="Required exercise checklist">
+    <FormSection title="Required exercises">
       {EXERCISE_CHECKLIST_ITEMS.map((item) => (
-        <div key={item.id} className="form-group">
-          <label htmlFor={item.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              id={item.id}
-              checked={formData[item.id] !== undefined ? formData[item.id] : true}
-              onChange={(e) => onChange(item.id, e.target.checked)}
-              disabled={isLoading}
-              style={{
-                width: '18px',
-                height: '18px',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                accentColor: 'var(--accent-teal)',
-              }}
-            />
-            <span>{item.label}</span>
-          </label>
-          {fieldErrors?.[item.id] && (
-            <span className="form-error-message">{fieldErrors[item.id]}</span>
-          )}
-        </div>
+        <FormCheckbox
+          key={item.id}
+          id={item.id}
+          checked={formData[item.id] !== undefined ? formData[item.id] : true}
+          onChange={(checked) => onChange(item.id, checked)}
+          disabled={isLoading}
+          error={fieldErrors?.[item.id]}
+        >
+          {item.label}
+        </FormCheckbox>
       ))}
     </FormSection>
   );

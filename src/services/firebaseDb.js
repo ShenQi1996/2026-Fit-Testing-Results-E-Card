@@ -19,6 +19,7 @@ import {
 import { db } from '../config/firebase';
 import {
   calculateExpirationDate,
+  isExpirationDatePast,
   isFitTestPastRetention,
   parseDateString,
 } from '../utils/dateUtils';
@@ -28,11 +29,17 @@ import {
   normalizeDob,
   normalizeEmail,
 } from '../utils/lookupKey';
+import {
+  createVerificationToken,
+  isValidVerificationToken,
+  normalizeVerificationToken,
+} from '../utils/verificationToken';
 
 const FIRESTORE_BATCH_LIMIT = 400;
 
 const FIT_TESTS_COLLECTION = 'fitTests';
 const FIT_TEST_LOOKUPS_COLLECTION = 'fitTestLookups';
+const FIT_TEST_VERIFICATIONS_COLLECTION = 'fitTestVerifications';
 const USERS_COLLECTION = 'users';
 
 const LOOKUP_CARD_FIELDS = [
@@ -49,6 +56,20 @@ const LOOKUP_CARD_FIELDS = [
   'model',
   'result',
   'fitTester',
+  'verificationToken',
+];
+
+const VERIFY_CARD_FIELDS = [
+  'clientName',
+  'testLocation',
+  'issueDate',
+  'expirationDate',
+  'fitTestType',
+  'respiratorMfg',
+  'maskSize',
+  'model',
+  'result',
+  'fitTester',
 ];
 
 const toLookupCardData = (record = {}) => {
@@ -57,6 +78,41 @@ const toLookupCardData = (record = {}) => {
     data[field] = record[field] || '';
   });
   return data;
+};
+
+const toVerifyCardData = (record = {}) => {
+  const data = {};
+  VERIFY_CARD_FIELDS.forEach((field) => {
+    data[field] = record[field] || '';
+  });
+  if (!data.expirationDate && data.issueDate) {
+    data.expirationDate = calculateExpirationDate(data.issueDate);
+  }
+  return data;
+};
+
+const resolveVerificationToken = (record = {}) => {
+  const existing = normalizeVerificationToken(record.verificationToken);
+  return isValidVerificationToken(existing) ? existing : createVerificationToken();
+};
+
+const upsertFitTestVerification = async (token, record, fitTestId, userId) => {
+  const verificationToken = normalizeVerificationToken(token);
+  if (!isValidVerificationToken(verificationToken) || !fitTestId) return;
+
+  await setDoc(doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken), {
+    ...toVerifyCardData({ ...record, verificationToken }),
+    userId: userId || record.userId || '',
+    fitTestId,
+    verificationToken,
+    updatedAt: Timestamp.now(),
+  });
+};
+
+const deleteFitTestVerification = async (token) => {
+  const verificationToken = normalizeVerificationToken(token);
+  if (!isValidVerificationToken(verificationToken)) return;
+  await deleteDoc(doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken));
 };
 
 const toMillis = (value) => {
@@ -138,14 +194,26 @@ const syncLookupsForFitTests = async (tests = []) => {
   for (const test of sorted) {
     try {
       const lookupKey = await resolveLookupKey(test);
-      if (!lookupKey || seenKeys.has(lookupKey)) continue;
-      seenKeys.add(lookupKey);
+      const verificationToken = resolveVerificationToken(test);
+      const recordUpdates = {};
 
-      if (test.lookupKey !== lookupKey) {
+      if (lookupKey && test.lookupKey !== lookupKey) {
         // Drops any key from an older format still stored on the record.
-        await updateDoc(doc(db, FIT_TESTS_COLLECTION, test.id), { lookupKey });
+        recordUpdates.lookupKey = lookupKey;
       }
-      await upsertFitTestLookup(lookupKey, test, test.id, test.userId);
+      if (test.verificationToken !== verificationToken) {
+        recordUpdates.verificationToken = verificationToken;
+        test.verificationToken = verificationToken;
+      }
+      if (Object.keys(recordUpdates).length > 0) {
+        await updateDoc(doc(db, FIT_TESTS_COLLECTION, test.id), recordUpdates);
+      }
+
+      if (lookupKey && !seenKeys.has(lookupKey)) {
+        seenKeys.add(lookupKey);
+        await upsertFitTestLookup(lookupKey, test, test.id, test.userId);
+      }
+      await upsertFitTestVerification(verificationToken, test, test.id, test.userId);
     } catch (error) {
       console.error('Error syncing fit test lookup:', error);
     }
@@ -201,16 +269,22 @@ const serializeUserDoc = (docSnap) => {
 export const saveFitTest = async (userId, fitTestData) => {
   try {
     const lookupKey = await resolveLookupKey(fitTestData);
+    const verificationToken = resolveVerificationToken(fitTestData);
+    const recordToSave = {
+      ...fitTestData,
+      verificationToken,
+    };
     const docRef = await addDoc(collection(db, FIT_TESTS_COLLECTION), {
       userId,
-      ...fitTestData,
+      ...recordToSave,
       lookupKey: lookupKey || null,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     });
     if (lookupKey) {
-      await upsertFitTestLookup(lookupKey, fitTestData, docRef.id, userId);
+      await upsertFitTestLookup(lookupKey, recordToSave, docRef.id, userId);
     }
+    await upsertFitTestVerification(verificationToken, recordToSave, docRef.id, userId);
     return docRef.id;
   } catch (error) {
     console.error('Error saving fit test:', error);
@@ -240,6 +314,11 @@ const deleteExpiredFitTestDocuments = async (docs = []) => {
           if (lookupSnap.exists() && lookupSnap.data()?.fitTestId === docSnap.id) {
             lookupRefsToDelete.push(lookupRef);
           }
+        }
+
+        const verificationToken = normalizeVerificationToken(data.verificationToken);
+        if (isValidVerificationToken(verificationToken)) {
+          lookupRefsToDelete.push(doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken));
         }
       } catch (error) {
         console.error('Error resolving expired fit test lookup:', error);
@@ -476,6 +555,107 @@ export const lookupFitTestForResend = async (clientName, dob, recipientEmail) =>
   }
 };
 
+const VERIFY_RATE_LIMIT_KEY = 'sf_verify_hits';
+const VERIFY_RATE_WINDOW_MS = 60_000;
+const VERIFY_RATE_MAX = 30;
+
+const assertVerifyRateLimit = () => {
+  if (typeof sessionStorage === 'undefined') return;
+  const now = Date.now();
+  let hits = [];
+  try {
+    hits = JSON.parse(sessionStorage.getItem(VERIFY_RATE_LIMIT_KEY) || '[]');
+  } catch {
+    hits = [];
+  }
+  hits = hits.filter((time) => now - time < VERIFY_RATE_WINDOW_MS);
+  if (hits.length >= VERIFY_RATE_MAX) {
+    const error = new Error('Too many verification checks. Please wait a moment and try again.');
+    error.code = 'RATE_LIMITED';
+    throw error;
+  }
+  hits.push(now);
+  sessionStorage.setItem(VERIFY_RATE_LIMIT_KEY, JSON.stringify(hits));
+};
+
+/**
+ * Public e-card verification by unguessable token. Never list this collection.
+ * @param {string} token
+ * @returns {Promise<{status: 'invalid'|'expired'|'failed'|'valid', card: object|null}>}
+ */
+export const lookupFitTestForVerification = async (token) => {
+  const verificationToken = normalizeVerificationToken(token);
+  if (!isValidVerificationToken(verificationToken)) {
+    return { status: 'invalid', card: null };
+  }
+
+  try {
+    assertVerifyRateLimit();
+    const verifySnap = await getDoc(
+      doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken)
+    );
+    if (!verifySnap.exists()) {
+      return { status: 'invalid', card: null };
+    }
+
+    const card = toVerifyCardData(verifySnap.data() || {});
+    const expired = isExpirationDatePast(card.expirationDate);
+    const passed = (card.result || '').trim().toLowerCase() === 'pass';
+
+    let status = 'valid';
+    if (expired) status = 'expired';
+    else if (!passed) status = 'failed';
+
+    return { status, card };
+  } catch (error) {
+    console.error('Error looking up fit test for verification:', error);
+    if (error.code === 'RATE_LIMITED') throw error;
+    if (error.code === 'permission-denied') {
+      throw new Error('E-card verification is not enabled yet. Please contact Secure Fit.');
+    }
+    throw new Error('Unable to verify the e-card right now. Please try again.');
+  }
+};
+
+/**
+ * Attach a verification token to an existing record so PDFs and resends scan correctly.
+ * @param {object} record
+ * @param {string} [userId]
+ * @returns {Promise<object>}
+ */
+export const ensureFitTestVerification = async (record, userId) => {
+  if (!record) return record;
+
+  const verificationToken = resolveVerificationToken(record);
+  const nextRecord = { ...record, verificationToken };
+
+  if (record.id && record.verificationToken !== verificationToken) {
+    try {
+      await updateDoc(doc(db, FIT_TESTS_COLLECTION, record.id), {
+        verificationToken,
+        updatedAt: Timestamp.now(),
+      });
+    } catch (error) {
+      console.error('Error saving verification token on fit test:', error);
+    }
+  }
+
+  if (record.id) {
+    await upsertFitTestVerification(
+      verificationToken,
+      nextRecord,
+      record.id,
+      userId || record.userId
+    );
+    const lookupKey = await resolveLookupKey(nextRecord);
+    if (lookupKey) {
+      await upsertFitTestLookup(lookupKey, nextRecord, record.id, userId || record.userId);
+    }
+  }
+
+  return nextRecord;
+};
+
 /**
  * Update a fit test record
  * @param {string} fitTestId - Fit test document ID
@@ -503,10 +683,13 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const nextRecord = { ...existing, ...updates };
     const previousKey = await resolveLookupKey(existing);
     const nextKey = await resolveLookupKey(nextRecord);
+    const verificationToken = resolveVerificationToken(nextRecord);
+    nextRecord.verificationToken = verificationToken;
 
     await updateDoc(docRef, {
       ...updates,
       lookupKey: nextKey || null,
+      verificationToken,
       updatedAt: Timestamp.now(),
     });
 
@@ -525,6 +708,12 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     if (nextKey) {
       await upsertFitTestLookup(nextKey, nextRecord, fitTestId, existing.userId || userId);
     }
+    await upsertFitTestVerification(
+      verificationToken,
+      nextRecord,
+      fitTestId,
+      existing.userId || userId
+    );
   } catch (error) {
     console.error('Error updating fit test:', error);
     // Re-throw permission denied errors
@@ -566,6 +755,7 @@ export const deleteFitTest = async (fitTestId, userId) => {
       await deleteFitTestLookupIfCurrent(key, fitTestId);
     }
 
+    await deleteFitTestVerification(existing.verificationToken);
     await repointLookupToLatestRemaining(lookupKey, fitTestId, existing.userId || userId);
   } catch (error) {
     console.error('Error deleting fit test:', error);

@@ -167,14 +167,9 @@ const Signup = ({ onSwitchToLogin }) => {
           </svg>
           Sign up with Google
         </button>
-        <p className="auth-subtitle" style={{ marginTop: '8px', marginBottom: '0' }}>
+        <p className="auth-subtitle auth-subtitle-compact">
           After sign up, your account will be pending admin approval.
         </p>
-        {/*}
-        <div className="auth-switch">
-          <p>Already have an account? <button type="button" onClick={onSwitchToLogin} className="auth-link">Login</button></p>
-        </div>
-        */}
       </div>
     </div>
   );

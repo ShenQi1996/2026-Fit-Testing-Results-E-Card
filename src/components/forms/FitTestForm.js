@@ -142,15 +142,14 @@ const FitTestForm = () => {
 
       <CardPreview formData={formData} />
 
-      {/* Display all validation errors */}
       {Object.keys(fieldErrors).length > 0 && (
         <div className="validation-errors-summary">
-          <div style={{ fontWeight: 600, marginBottom: '8px', color: '#dc3545' }}>
+          <div className="validation-errors-summary-title">
             Please fix the following errors:
           </div>
-          <ul style={{ margin: 0, paddingLeft: '20px', color: '#dc3545' }}>
+          <ul>
             {Object.values(fieldErrors).map((error, index) => (
-              <li key={index} style={{ marginBottom: '4px' }}>{error}</li>
+              <li key={index}>{error}</li>
             ))}
           </ul>
         </div>
@@ -180,11 +179,17 @@ const FitTestForm = () => {
           disabled={
             !formData.printedName?.trim() || 
             !hasStrokes || 
-            !formData.studentClearanceConfirmed || 
+            !formData.studentClearanceConfirmed ||
+            !formData.consentToFitTest ||
+            !formData.privacyPolicyAcknowledged ||
+            !formData.recordDeliveryConfirmed ||
+            (formData.optionalOrganizationRelease && !formData.organizationReleaseRecipient?.trim()) ||
             !hasTesterStrokes ||
             formData.testerAttestationProtocolFollowed === false ||
-            formData.testerAttestationMedicalClearanceVerified === false ||
-            formData.testerAttestationRespiratorMatchesRecord === false
+            formData.testerAttestationConsentWitnessed === false ||
+            formData.testerAttestationRespiratorMatchesRecord === false ||
+            (formData.testerMedicalRestrictionsReceived !== true && formData.testerMedicalRestrictionsReceived !== false) ||
+            (formData.testerMedicalRestrictionsReceived === true && !formData.testerMedicalRestrictionsNote?.trim())
           }
         />
       </div>

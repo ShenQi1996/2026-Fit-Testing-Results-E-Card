@@ -84,9 +84,24 @@ export const validateFitTestForm = (formData, hasStrokes = false, hasTesterStrok
     fieldErrors.signature = 'Please provide your signature.';
   }
 
-  // Validate student clearance confirmation
   if (!formData.studentClearanceConfirmed) {
-    fieldErrors.studentClearanceConfirmed = 'Please confirm student clearance.';
+    fieldErrors.studentClearanceConfirmed = 'Please confirm medical restrictions.';
+  }
+
+  if (!formData.consentToFitTest) {
+    fieldErrors.consentToFitTest = 'Please confirm fit-testing participation consent.';
+  }
+
+  if (!formData.privacyPolicyAcknowledged) {
+    fieldErrors.privacyPolicyAcknowledged = 'Please acknowledge the Privacy Policy.';
+  }
+
+  if (!formData.recordDeliveryConfirmed) {
+    fieldErrors.recordDeliveryConfirmed = 'Please confirm record delivery to the email on this form.';
+  }
+
+  if (formData.optionalOrganizationRelease && !formData.organizationReleaseRecipient?.trim()) {
+    fieldErrors.organizationReleaseRecipient = 'Please name the employer or school recipient.';
   }
 
   // Validate tester signature
@@ -99,12 +114,20 @@ export const validateFitTestForm = (formData, hasStrokes = false, hasTesterStrok
     fieldErrors.testerAttestationProtocolFollowed = 'Please confirm that protocol was followed.';
   }
 
-  if (!formData.testerAttestationMedicalClearanceVerified) {
-    fieldErrors.testerAttestationMedicalClearanceVerified = 'Please confirm that medical clearance was verified.';
+  if (!formData.testerAttestationConsentWitnessed) {
+    fieldErrors.testerAttestationConsentWitnessed = 'Please confirm that you witnessed the client\'s consent.';
   }
 
   if (!formData.testerAttestationRespiratorMatchesRecord) {
     fieldErrors.testerAttestationRespiratorMatchesRecord = 'Please confirm that respirator matches record.';
+  }
+
+  if (formData.testerMedicalRestrictionsReceived !== true && formData.testerMedicalRestrictionsReceived !== false) {
+    fieldErrors.testerMedicalRestrictionsReceived = 'Please select yes or no for medical restrictions received.';
+  }
+
+  if (formData.testerMedicalRestrictionsReceived === true && !formData.testerMedicalRestrictionsNote?.trim()) {
+    fieldErrors.testerMedicalRestrictionsNote = 'Please type the medical restrictions received.';
   }
 
   // Validate fit test invalidation conditions

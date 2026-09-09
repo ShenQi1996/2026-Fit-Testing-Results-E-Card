@@ -101,25 +101,10 @@ const EMAILJS_CONFIG = {
 
 ## Step 6: Test It!
 
-1. Make sure your development server is running:
-   ```bash
-   npm start
-   ```
-
-2. Go to the **"Send E-Card"** page in your app
-
-3. Fill out the form with test data:
-   - Enter a recipient email (use your own email for testing)
-   - Fill in client name, DOB, and all other fields
-   - Make sure all required fields are filled (they'll show red borders if missing)
-
-4. Click **"Send Fit Test Results E-Card"** button
-
-5. You should see a success message if it worked
-
-6. **Check the recipient's email inbox** (and spam folder if needed)
-   - You should receive a beautifully formatted e-card with all the fit test information
-   - The email will have the company branding, QR code, and all test details
+1. Use Node 24 (`nvm use 24`) and start the app with `npm start` (not `npm start dev`).
+2. Open [http://localhost:3000/staff_login](http://localhost:3000/staff_login) and sign in as an approved tester.
+3. Fill out the form (required consents and tester Yes/No must be completed).
+4. Send the e-card. The QR code opens `/verify/:token` so a third party can confirm the record.
 
 ## Troubleshooting
 
@@ -178,7 +163,8 @@ Before testing, make sure you have:
 - [ ] Copied Public Key from Account → General
 - [ ] Updated all three values in `src/services/emailService.js`
 - [ ] Saved the file
-- [ ] Started your app with `npm start`
+- [ ] Started the app with `nvm use 24` then `npm start` (not `npm start dev`)
+- [ ] Opened `/staff_login` as an approved tester
 
 ## Alternative: Use Environment Variables (Optional)
 

@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import BrandMark from '../common/BrandMark';
 import './Auth.css';
 
-const Login = ({ onSwitchToSignup }) => {
+const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -107,7 +107,7 @@ const Login = ({ onSwitchToSignup }) => {
           </svg>
           Sign in with Google
         </button>
-        <p className="auth-subtitle" style={{ marginTop: '8px', marginBottom: '0' }}>
+        <p className="auth-subtitle auth-subtitle-compact">
           New accounts require admin approval before access is granted.
         </p>
         <div className="auth-switch">
@@ -115,11 +115,6 @@ const Login = ({ onSwitchToSignup }) => {
             <a href="/" className="auth-link">Back to home</a>
           </p>
         </div>
-        {/*}
-        <div className="auth-switch">
-          <p>Don't have an account? <button type="button" onClick={onSwitchToSignup} className="auth-link">Sign up</button></p>
-        </div>
-        */}
       </div>
     </div>
   );

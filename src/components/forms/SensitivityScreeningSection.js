@@ -1,52 +1,29 @@
 import React from 'react';
 import FormSection from '../common/FormSection';
+import FormCheckbox from '../common/FormCheckbox';
 
 const SensitivityScreeningSection = ({ formData, onChange, isLoading, fieldErrors }) => {
   return (
-    <FormSection title="Sensitivity screening documentation">
-      <div className="form-group">
-        <label htmlFor="sensitivityScreeningPerformed" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            id="sensitivityScreeningPerformed"
-            checked={formData.sensitivityScreeningPerformed || false}
-            onChange={(e) => onChange('sensitivityScreeningPerformed', e.target.checked)}
-            disabled={isLoading}
-            style={{
-              width: '18px',
-              height: '18px',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              accentColor: 'var(--accent-teal)',
-            }}
-          />
-          <span>Sensitivity screening performed</span>
-        </label>
-        {fieldErrors?.sensitivityScreeningPerformed && (
-          <span className="form-error-message">{fieldErrors.sensitivityScreeningPerformed}</span>
-        )}
-      </div>
+    <FormSection title="Sensitivity screening">
+      <FormCheckbox
+        id="sensitivityScreeningPerformed"
+        checked={formData.sensitivityScreeningPerformed || false}
+        onChange={(checked) => onChange('sensitivityScreeningPerformed', checked)}
+        disabled={isLoading}
+        error={fieldErrors?.sensitivityScreeningPerformed}
+      >
+        Sensitivity screening performed
+      </FormCheckbox>
 
-      <div className="form-group">
-        <label htmlFor="sensitivityDetected" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            id="sensitivityDetected"
-            checked={formData.sensitivityDetected || false}
-            onChange={(e) => onChange('sensitivityDetected', e.target.checked)}
-            disabled={isLoading}
-            style={{
-              width: '18px',
-              height: '18px',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              accentColor: 'var(--accent-teal)',
-            }}
-          />
-          <span>Sensitivity detected</span>
-        </label>
-        {fieldErrors?.sensitivityDetected && (
-          <span className="form-error-message">{fieldErrors.sensitivityDetected}</span>
-        )}
-      </div>
+      <FormCheckbox
+        id="sensitivityDetected"
+        checked={formData.sensitivityDetected || false}
+        onChange={(checked) => onChange('sensitivityDetected', checked)}
+        disabled={isLoading}
+        error={fieldErrors?.sensitivityDetected}
+      >
+        Sensitivity detected
+      </FormCheckbox>
     </FormSection>
   );
 };

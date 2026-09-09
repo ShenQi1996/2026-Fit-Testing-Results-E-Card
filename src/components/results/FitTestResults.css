@@ -412,6 +412,42 @@
   transition: color 0.3s ease;
 }
 
+.result-value--wrap {
+  font-family: inherit;
+  text-align: left;
+  max-width: 60%;
+  white-space: pre-wrap;
+}
+
+.result-consent-item {
+  padding-bottom: 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.result-consent-item .result-row {
+  border-bottom: none;
+  padding-bottom: 4px;
+}
+
+.result-consent-text,
+.result-consent-disclaimer {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.result-consent-disclaimer {
+  padding: 10px 12px;
+  background: rgba(11, 45, 74, 0.04);
+  border-radius: 8px;
+}
+
+.result-section .result-subsection-title {
+  margin-top: 12px;
+}
+
 .result-section {
   margin-bottom: 24px;
   padding-bottom: 20px;
@@ -449,6 +485,11 @@
   color: var(--text-primary);
   margin: 0 0 8px 0;
   transition: color 0.3s ease;
+}
+
+.show-all-wrap {
+  margin-top: 16px;
+  text-align: center;
 }
 
 .show-all-button {

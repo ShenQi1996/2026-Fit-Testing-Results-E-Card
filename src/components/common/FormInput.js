@@ -11,11 +11,12 @@ const FormInput = ({
   disabled = false,
   className = '',
   error = '',
+  maxLength,
 }) => {
   return (
     <div className="form-group">
       <label htmlFor={id}>
-        {label} {required && <span style={{ color: '#dc3545' }}>*</span>}
+        {label} {required ? <span className="required-mark">*</span> : null}
       </label>
       <input
         type={type}
@@ -26,6 +27,7 @@ const FormInput = ({
         onChange={onChange}
         disabled={disabled}
         required={required}
+        maxLength={maxLength}
       />
       {error && <span className="form-error-message">{error}</span>}
     </div>

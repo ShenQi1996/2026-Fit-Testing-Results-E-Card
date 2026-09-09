@@ -4,10 +4,10 @@ import FormInput from '../common/FormInput';
 
 const RecipientInfoSection = ({ formData, onChange, isLoading, fieldErrors }) => {
   return (
-    <FormSection title="Recipient Information">
+    <FormSection title="Recipient">
       <FormInput
         id="recipientEmail"
-        label="Recipient Email Address"
+        label="Recipient email"
         type="email"
         value={formData.recipientEmail}
         onChange={(e) => onChange('recipientEmail', e.target.value)}

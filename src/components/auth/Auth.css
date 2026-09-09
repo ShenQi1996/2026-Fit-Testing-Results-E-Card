@@ -49,12 +49,9 @@
   color: var(--teal);
 }
 
-.auth-subtitle {
-  font-size: 14px;
-  color: #4d6273;
-  text-align: center;
-  margin-bottom: 30px;
-  line-height: 1.6;
+.auth-subtitle-compact {
+  margin-top: 8px;
+  margin-bottom: 0;
 }
 
 .auth-form {

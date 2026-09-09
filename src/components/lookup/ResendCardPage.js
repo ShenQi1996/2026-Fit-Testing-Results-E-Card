@@ -61,7 +61,7 @@ const ResendCardPage = () => {
           <BrandMark />
         </div>
         <p className="auth-kicker">Lost e-card</p>
-        <h2 className="auth-title">Resend E-Card</h2>
+        <h2 className="auth-title">Resend e-card</h2>
         <p className="auth-subtitle">
           Enter the name, date of birth, and email from your fit test. We will send your most recent
           e-card to that email.
