@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import BrandMark from '../common/BrandMark';
 import './Auth.css';
 
 const Signup = ({ onSwitchToLogin }) => {
@@ -69,6 +70,10 @@ const Signup = ({ onSwitchToLogin }) => {
   return (
     <div className="auth-container">
       <div className="auth-card">
+        <div className="auth-brand">
+          <BrandMark />
+        </div>
+        <p className="auth-kicker">Staff access</p>
         <h2 className="auth-title">Sign Up</h2>
         <p className="auth-subtitle">Create an account to get started.</p>
         

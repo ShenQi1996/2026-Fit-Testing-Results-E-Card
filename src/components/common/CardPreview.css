@@ -21,8 +21,8 @@
 
 .card-preview-wrapper {
   background: var(--bg-primary);
-  border: 2px solid var(--border-color);
-  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
   padding: 24px;
   min-height: 280px;
   max-height: 720px;

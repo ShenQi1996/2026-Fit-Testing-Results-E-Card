@@ -7,8 +7,9 @@
 .edit-account-card {
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px var(--shadow);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 28px var(--shadow);
   padding: 40px;
   width: 100%;
   max-width: 600px;
@@ -27,29 +28,29 @@
 
 .edit-account-title {
   font-size: 32px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--accent-blue);
   margin: 0;
-  font-family: 'Georgia', serif;
+  font-family: var(--font-heading);
+  letter-spacing: -0.6px;
   transition: color 0.3s ease;
 }
 
 .back-button {
-  background: #6c757d;
-  color: white;
-  border: none;
+  background: #fff;
+  color: var(--teal-dark);
+  border: 2px solid var(--teal);
   padding: 10px 20px;
   border-radius: 8px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.3s ease;
+  font-family: inherit;
 }
 
 .back-button:hover {
-  background: #5a6268;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(108, 117, 125, 0.3);
+  background: rgba(20, 184, 166, 0.1);
 }
 
 .edit-account-form {
@@ -100,14 +101,15 @@
 }
 
 .solution-add-button {
-  background: linear-gradient(135deg, var(--accent-teal) 0%, #17a2b8 100%);
+  background: var(--teal);
   color: #fff;
-  border: none;
+  border: 2px solid var(--teal);
   border-radius: 8px;
   padding: 10px 14px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   margin-bottom: 14px;
+  font-family: inherit;
 }
 
 .solution-add-button:disabled {
@@ -141,12 +143,12 @@
 }
 
 .solution-default-badge {
-  background: #e6f4ff;
-  color: #1d4ed8;
+  background: rgba(20, 184, 166, 0.12);
+  color: var(--teal-dark);
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .solution-profile-actions {

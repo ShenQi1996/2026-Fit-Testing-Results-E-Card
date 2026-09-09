@@ -17,8 +17,9 @@
   background: var(--bg-secondary);
   color: var(--text-primary);
   padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px var(--shadow);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 24px var(--shadow);
   transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -33,10 +34,11 @@
 
 .results-title {
   font-size: 28px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--accent-blue);
   margin: 0;
-  font-family: 'Georgia', serif;
+  font-family: var(--font-heading);
+  letter-spacing: -0.5px;
   transition: color 0.3s ease;
 }
 
@@ -112,11 +114,11 @@
 }
 
 .export-csv-button {
-  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+  background: var(--navy);
 }
 
 .refresh-button {
-  background: linear-gradient(135deg, #20b2aa 0%, #17a2b8 100%);
+  background: var(--teal);
 }
 
 .export-csv-button:hover,
@@ -125,11 +127,11 @@
 }
 
 .export-csv-button:hover {
-  box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);
+  box-shadow: 0 4px 12px rgba(11, 45, 74, 0.28);
 }
 
 .refresh-button:hover {
-  box-shadow: 0 4px 12px rgba(32, 178, 170, 0.3);
+  box-shadow: 0 8px 20px rgba(20, 184, 166, 0.25);
 }
 
 .export-csv-button:disabled {
@@ -146,8 +148,9 @@
   font-size: 18px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border-radius: 12px;
-  box-shadow: 0 2px 8px var(--shadow);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 24px var(--shadow);
   transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -235,13 +238,13 @@
 .retry-button {
   display: block;
   margin: 20px auto 0;
-  background: var(--accent-blue);
+  background: var(--teal);
   color: white;
-  border: none;
+  border: 2px solid var(--teal);
   padding: 12px 24px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.3s ease;
 }
@@ -256,8 +259,9 @@
   padding: 60px 20px;
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  border-radius: 12px;
-  box-shadow: 0 2px 8px var(--shadow);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 24px var(--shadow);
   transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -276,9 +280,9 @@
 .month-section {
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 24px;
-  box-shadow: 0 2px 8px var(--shadow);
+  box-shadow: 0 8px 24px var(--shadow);
   border: 1px solid var(--border-color);
   transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
 }
@@ -302,18 +306,18 @@
   font-weight: 600;
   color: var(--accent-blue);
   margin: 0;
-  font-family: 'Georgia', serif;
+  font-family: var(--font-heading);
   text-transform: capitalize;
   transition: color 0.3s ease;
 }
 
 .month-count {
-  background: #20b2aa;
+  background: var(--teal);
   color: white;
   padding: 6px 14px;
-  border-radius: 20px;
+  border-radius: 999px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .results-grid {
@@ -325,9 +329,10 @@
 .result-card {
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 20px;
-  box-shadow: 0 2px 8px var(--shadow);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 24px var(--shadow);
   transition: all 0.3s ease;
 }
 
@@ -364,8 +369,8 @@
 }
 
 .result-badge.pass {
-  background-color: #d4edda;
-  color: #155724;
+  background-color: rgba(20, 184, 166, 0.14);
+  color: var(--teal-dark);
 }
 
 .result-badge.fail {
@@ -462,7 +467,7 @@
   background: var(--accent-blue);
   color: white;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 2px 8px rgba(11, 45, 74, 0.25);
 }
 
 .result-card-footer {
@@ -477,8 +482,8 @@
 }
 
 .result-card.editing {
-  border: 2px solid var(--accent-blue);
-  box-shadow: 0 4px 16px rgba(30, 58, 138, 0.2);
+  border: 2px solid var(--accent-teal);
+  box-shadow: 0 4px 16px rgba(20, 184, 166, 0.2);
 }
 
 .edit-mode {
@@ -517,7 +522,7 @@
 .edit-select:focus {
   outline: none;
   border-color: var(--accent-teal);
-  box-shadow: 0 0 0 3px rgba(32, 178, 170, 0.1);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.15);
 }
 
 .edit-client-name {
@@ -539,7 +544,7 @@
 }
 
 .edit-button {
-  background: linear-gradient(135deg, #20b2aa 0%, #17a2b8 100%);
+  background: var(--teal);
   color: white;
   border: none;
   padding: 8px 16px;
@@ -555,7 +560,7 @@
 
 .edit-button:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(32, 178, 170, 0.3);
+  box-shadow: 0 4px 8px rgba(20, 184, 166, 0.3);
 }
 
 .edit-button:disabled {
@@ -564,7 +569,7 @@
 }
 
 .save-button {
-  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+  background: var(--teal-dark);
   color: white;
   border: none;
   padding: 8px 16px;
@@ -589,20 +594,21 @@
 }
 
 .cancel-button {
-  background: #6c757d;
-  color: white;
-  border: none;
+  background: #fff;
+  color: var(--navy);
+  border: 2px solid var(--border-color);
   padding: 8px 16px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.3s ease;
 }
 
 .cancel-button:hover:not(:disabled) {
-  background: #5a6268;
-  transform: translateY(-1px);
+  border-color: var(--teal);
+  color: var(--teal-dark);
+  background: rgba(20, 184, 166, 0.08);
 }
 
 .cancel-button:disabled {
@@ -611,7 +617,7 @@
 }
 
 .resend-button {
-  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+  background: var(--navy);
   color: white;
   border: none;
   padding: 8px 16px;
@@ -627,7 +633,7 @@
 
 .resend-button:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(30, 58, 138, 0.3);
+  box-shadow: 0 4px 8px rgba(11, 45, 74, 0.28);
 }
 
 .resend-button:disabled {
@@ -636,7 +642,7 @@
 }
 
 .result-pdf-preview-button {
-  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+  background: var(--teal);
   color: white;
   border: none;
   padding: 8px 16px;
@@ -661,7 +667,7 @@
 }
 
 .result-pdf-download-button {
-  background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+  background: var(--navy);
   color: white;
   border: none;
   padding: 8px 16px;
@@ -759,7 +765,8 @@
 .modal-content h3 {
   margin-top: 0;
   margin-bottom: 16px;
-  color: #1e3a8a;
+  color: var(--navy);
+  font-family: var(--font-heading);
   font-size: 24px;
 }
 
@@ -793,13 +800,15 @@
 }
 
 .cancel-button {
-  background: #6c757d;
-  color: white;
+  background: #fff;
+  color: var(--navy);
+  border: 2px solid var(--border-color);
 }
 
 .cancel-button:hover:not(:disabled) {
-  background: #5a6268;
-  transform: translateY(-1px);
+  background: rgba(20, 184, 166, 0.08);
+  border-color: var(--teal);
+  color: var(--teal-dark);
 }
 
 .confirm-delete-button {

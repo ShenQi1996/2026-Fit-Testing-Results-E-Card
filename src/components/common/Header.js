@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import BrandMark from './BrandMark';
 import './Header.css';
 
 const Header = ({ onEditAccount, onMenuToggle, sidebarOpen }) => {
@@ -11,17 +12,15 @@ const Header = ({ onEditAccount, onMenuToggle, sidebarOpen }) => {
     <header className="app-header">
       <div className="header-content">
         <div className="header-left">
-          <button 
+          <button
             className="mobile-menu-button"
             onClick={onMenuToggle}
-            aria-label="Toggle menu"
+            aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={sidebarOpen}
           >
             {sidebarOpen ? '✕' : '☰'}
           </button>
-          <h1 className="header-title">
-            <span className="header-title-full">Fit Testing Results E-Card</span>
-            <span className="header-title-short">Fit Test E-Card</span>
-          </h1>
+          <BrandMark compact={false} />
         </div>
         <div className="header-right">
           <button onClick={toggleTheme} className="theme-toggle-button" title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
@@ -48,4 +47,3 @@ const Header = ({ onEditAccount, onMenuToggle, sidebarOpen }) => {
 };
 
 export default Header;
-

@@ -5,8 +5,9 @@
 .users-management-card {
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border-radius: 12px;
-  box-shadow: 0 2px 8px var(--shadow);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 24px var(--shadow);
   padding: 24px;
   transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
@@ -23,9 +24,10 @@
 .users-management-title {
   margin: 0;
   font-size: 28px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--accent-blue);
-  font-family: 'Georgia', serif;
+  font-family: var(--font-heading);
+  letter-spacing: -0.5px;
 }
 
 .users-management-subtitle {
@@ -53,14 +55,14 @@
 }
 
 .users-primary-button {
-  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+  background: var(--teal);
   color: #fff;
 }
 
 .users-secondary-button {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  background: #fff;
+  color: var(--teal-dark);
+  border: 2px solid var(--teal);
 }
 
 .users-danger-button {
@@ -241,13 +243,13 @@
 }
 
 .user-badge.role-admin {
-  background: #e8f2f8;
-  color: #005889;
+  background: rgba(11, 45, 74, 0.08);
+  color: var(--navy);
 }
 
 .user-badge.role-tester {
-  background: #e8f8f4;
-  color: #007e66;
+  background: rgba(20, 184, 166, 0.14);
+  color: var(--teal-dark);
 }
 
 .user-badge.status-approved {
@@ -266,8 +268,8 @@
 }
 
 .user-badge.you {
-  background: #dbeafe;
-  color: #1e40af;
+  background: rgba(20, 184, 166, 0.14);
+  color: var(--navy);
 }
 
 .user-meta {

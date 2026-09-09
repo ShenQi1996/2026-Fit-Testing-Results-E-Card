@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { ThemeProvider } from './context/ThemeContext';
+import { ThemeProvider, useTheme } from './context/ThemeContext';
 import FitTestForm from './components/forms/FitTestForm';
 import Login from './components/auth/Login';
 import Signup from './components/auth/Signup';
@@ -24,12 +24,17 @@ const getPublicPath = () => {
 
 const AppContent = () => {
   const { isAuthenticated, loading, user } = useAuth();
+  const { setForceLight } = useTheme();
   const [showSignup, setShowSignup] = useState(false);
   const [currentPage, setCurrentPage] = useState('form'); // 'form', 'results', 'users', or 'editAccount'
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const publicPath = getPublicPath();
   const isStaffLoginPage = publicPath === STAFF_LOGIN_PATH;
   const isResendPage = publicPath === RESEND_PATH;
+
+  useEffect(() => {
+    setForceLight(!isAuthenticated);
+  }, [isAuthenticated, setForceLight]);
 
   const handleNavigate = (page) => {
     if (page === 'users' && user?.role !== 'admin') {
@@ -69,7 +74,7 @@ const AppContent = () => {
     if (isStaffLoginPage) {
       if (loading) {
         return (
-          <div className="app">
+          <div className="app auth-page">
             <div className="loading-container">
               <div className="loading-spinner">Loading...</div>
             </div>

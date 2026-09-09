@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import BrandMark from '../common/BrandMark';
 import './Auth.css';
 
 const Login = ({ onSwitchToSignup }) => {
@@ -41,8 +42,12 @@ const Login = ({ onSwitchToSignup }) => {
   return (
     <div className="auth-container">
       <div className="auth-card">
+        <div className="auth-brand">
+          <BrandMark />
+        </div>
+        <p className="auth-kicker">Staff access</p>
         <h2 className="auth-title">Staff Login</h2>
-        <p className="auth-subtitle">Welcome back! Please login to continue.</p>
+        <p className="auth-subtitle">Welcome back. Sign in to send and manage e-cards.</p>
         
         {error && <div className="auth-error">{error}</div>}
         

@@ -1,34 +1,38 @@
 /* CSS Variables for Easy Theme Customization */
 :root {
-  /* Light Mode Colors */
-  --bg-primary: #e8e8e8;
+  --navy: #0B2D4A;
+  --teal: #14B8A6;
+  --teal-dark: #0F9A8A;
+  --aqua: #A7E3E0;
+  --bg-primary: #F7FAFC;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #f8f9fa;
-  --text-primary: #333333;
-  --text-secondary: #666666;
-  --text-tertiary: #999999;
-  --border-color: #e0e0e0;
-  --shadow: rgba(0, 0, 0, 0.1);
-  --shadow-hover: rgba(0, 0, 0, 0.15);
-  --accent-blue: #1e3a8a;
-  --accent-teal: #20b2aa;
-  --accent-blue-light: #3b82f6;
+  --bg-tertiary: #eef5f7;
+  --text-primary: #0B2D4A;
+  --text-secondary: #4d6273;
+  --text-tertiary: #7a8a99;
+  --border-color: rgba(11, 45, 74, 0.1);
+  --shadow: rgba(11, 45, 74, 0.08);
+  --shadow-hover: rgba(20, 184, 166, 0.18);
+  --accent-blue: #0B2D4A;
+  --accent-teal: #14B8A6;
+  --accent-blue-light: #0F9A8A;
+  --font-heading: 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
+  --font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
 }
 
-/* Dark Mode Colors */
 .dark-mode {
-  --bg-primary: #1a1a1a;
-  --bg-secondary: #2d2d2d;
-  --bg-tertiary: #3a3a3a;
-  --text-primary: #ffffff;
-  --text-secondary: #cccccc;
-  --text-tertiary: #999999;
-  --border-color: #404040;
-  --shadow: rgba(0, 0, 0, 0.3);
-  --shadow-hover: rgba(0, 0, 0, 0.4);
-  --accent-blue: #4a90e2;
-  --accent-teal: #20b2aa;
-  --accent-blue-light: #5ba3f5;
+  --bg-primary: #071824;
+  --bg-secondary: #0e2a3d;
+  --bg-tertiary: #123348;
+  --text-primary: #F7FAFC;
+  --text-secondary: #A7E3E0;
+  --text-tertiary: #8aa3b5;
+  --border-color: rgba(167, 227, 224, 0.18);
+  --shadow: rgba(0, 0, 0, 0.4);
+  --shadow-hover: rgba(20, 184, 166, 0.25);
+  --accent-blue: #A7E3E0;
+  --accent-teal: #14B8A6;
+  --accent-blue-light: #14B8A6;
 }
 
 * {
@@ -38,9 +42,7 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: var(--bg-primary);
@@ -50,31 +52,114 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+html:has(.auth-page),
+html:has(.auth-page) body {
+  color-scheme: light;
+  background-color: #F7FAFC;
+  color: #0B2D4A;
+}
+
 .app {
   min-height: 100vh;
   overflow-x: hidden;
 }
 
 .app.auth-page {
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
-  --text-primary: #f0f3f6;
-  --text-secondary: #b1bac4;
-  --text-tertiary: #8b949e;
-  --border-color: #30363d;
-  --shadow: rgba(0, 0, 0, 0.5);
-  --shadow-hover: rgba(0, 0, 0, 0.65);
-  --accent-blue: #58a6ff;
-  --accent-teal: #3dcdc0;
-  --accent-blue-light: #79c0ff;
+  --navy: #0B2D4A;
+  --teal: #14B8A6;
+  --teal-dark: #0F9A8A;
+  --aqua: #A7E3E0;
+  --bg-primary: #F7FAFC;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #eef5f7;
+  --text-primary: #0B2D4A;
+  --text-secondary: #4d6273;
+  --text-tertiary: #7a8a99;
+  --border-color: rgba(11, 45, 74, 0.1);
+  --shadow: rgba(11, 45, 74, 0.08);
+  --shadow-hover: rgba(20, 184, 166, 0.18);
+  --accent-blue: #0B2D4A;
+  --accent-teal: #14B8A6;
+  --accent-blue-light: #0F9A8A;
+  color-scheme: light;
   display: flex;
   justify-content: center;
   align-items: center;
   padding: 20px;
   background:
-    radial-gradient(ellipse at top, rgba(0, 126, 102, 0.18), transparent 55%),
-    #0d1117;
+    radial-gradient(ellipse at top, rgba(20, 184, 166, 0.16), transparent 55%),
+    #F7FAFC;
+  color: #0B2D4A;
+}
+
+.app.auth-page .brand-mark-title,
+.app.auth-page .brand-mark-tagline {
+  color: #0B2D4A;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+
+.brand-mark-logo {
+  width: 52px;
+  height: 56px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.brand-mark-logo-dark {
+  display: none;
+}
+
+.dark-mode .brand-mark-logo-light {
+  display: none;
+}
+
+.dark-mode .brand-mark-logo-dark {
+  display: block;
+}
+
+.app.auth-page .brand-mark-logo-light {
+  display: block;
+}
+
+.app.auth-page .brand-mark-logo-dark {
+  display: none;
+}
+
+.brand-mark-title {
+  display: block;
+  font-family: var(--font-heading);
+  font-size: 1.12rem;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.3px;
+  line-height: 1.15;
+}
+
+.brand-mark-title span {
+  color: var(--teal);
+  font-weight: 700;
+}
+
+.brand-mark-tagline {
+  display: block;
+  margin-top: 0.18rem;
+  color: var(--navy);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+}
+
+.dark-mode .brand-mark-title,
+.dark-mode .brand-mark-tagline {
   color: var(--text-primary);
 }
 
@@ -111,8 +196,9 @@ body {
 .main-content .container {
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px var(--shadow);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 28px var(--shadow);
   padding: 40px;
   width: 100%;
   max-width: 1000px;
@@ -123,12 +209,10 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
-/* Sidebar overlay for mobile */
 .sidebar-overlay {
   display: none;
 }
 
-/* Responsive layout */
 @media (max-width: 768px) {
   .app-layout {
     position: relative;
@@ -152,17 +236,32 @@ body {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(11, 45, 74, 0.45);
     z-index: 150;
     transition: opacity 0.3s ease;
+  }
+
+  .brand-mark-logo {
+    width: 44px;
+    height: 48px;
+  }
+
+  .brand-mark-title {
+    font-size: 1rem;
+  }
+
+  .brand-mark-tagline {
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
   }
 }
 
 .container {
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px var(--shadow);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 28px var(--shadow);
   padding: 40px;
   width: 100%;
   max-width: 1000px;
@@ -183,21 +282,20 @@ body {
 
 .title {
   font-size: 32px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--accent-blue);
   text-align: center;
   margin-bottom: 30px;
-  font-family: 'Georgia', serif;
+  font-family: var(--font-heading);
+  letter-spacing: -0.6px;
   transition: color 0.3s ease;
 }
 
-
-/* Responsive design */
 @media (max-width: 768px) {
   .container {
     padding: 20px 15px;
     max-width: 100%;
-    border-radius: 8px;
+    border-radius: 12px;
   }
 
   .title {
@@ -226,8 +324,8 @@ body {
 
 .loading-spinner {
   font-size: 18px;
-  color: var(--accent-blue);
-  font-weight: 500;
+  color: var(--accent-teal);
+  font-weight: 600;
+  font-family: var(--font-heading);
   transition: color 0.3s ease;
 }
-

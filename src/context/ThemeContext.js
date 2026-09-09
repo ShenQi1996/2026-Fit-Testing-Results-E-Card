@@ -11,31 +11,30 @@ export const useTheme = () => {
 };
 
 export const ThemeProvider = ({ children }) => {
-  // Get initial theme from localStorage or default to light
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedTheme = localStorage.getItem('theme');
     return savedTheme === 'dark';
   });
+  const [forceLight, setForceLight] = useState(true);
 
-  // Update document class and localStorage when theme changes
   useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark-mode');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark-mode');
-      localStorage.setItem('theme', 'light');
-    }
+    localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
   }, [isDarkMode]);
 
-  // Toggle dark mode
+  useEffect(() => {
+    const applyDark = isDarkMode && !forceLight;
+    document.documentElement.classList.toggle('dark-mode', applyDark);
+    document.documentElement.style.colorScheme = applyDark ? 'dark' : 'light';
+  }, [isDarkMode, forceLight]);
+
   const toggleTheme = () => {
-    setIsDarkMode(prev => !prev);
+    setIsDarkMode((prev) => !prev);
   };
 
   const value = {
     isDarkMode,
     toggleTheme,
+    setForceLight,
   };
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

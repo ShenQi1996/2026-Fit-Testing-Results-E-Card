@@ -3,6 +3,7 @@ import { lookupFitTestForResend } from '../../services/firebaseDb';
 import { sendFitTestCard } from '../../services/emailService';
 import { formatDateInput, parseDateString } from '../../utils/dateUtils';
 import { validateEmail } from '../../utils/validators';
+import BrandMark from '../common/BrandMark';
 import '../auth/Auth.css';
 
 const SENT_MESSAGE = 'The e-card was sent to the email on file.';
@@ -56,6 +57,10 @@ const ResendCardPage = () => {
   return (
     <div className="auth-container">
       <div className="auth-card">
+        <div className="auth-brand">
+          <BrandMark />
+        </div>
+        <p className="auth-kicker">Lost e-card</p>
         <h2 className="auth-title">Resend E-Card</h2>
         <p className="auth-subtitle">
           Enter the name, date of birth, and email from your fit test. We will send your most recent

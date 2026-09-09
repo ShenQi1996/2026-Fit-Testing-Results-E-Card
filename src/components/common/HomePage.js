@@ -1,13 +1,18 @@
 import React from 'react';
+import BrandMark from './BrandMark';
 import '../auth/Auth.css';
 
 const HomePage = () => {
   return (
     <div className="auth-container">
       <div className="auth-card">
-        <h2 className="auth-title">Secure Fit LLC</h2>
+        <div className="auth-brand">
+          <BrandMark />
+        </div>
+        <p className="auth-kicker">E-card portal</p>
+        <h2 className="auth-title">Choose how to continue</h2>
         <p className="auth-subtitle">
-          Choose how you would like to continue.
+          Look up a lost fit-test card, or sign in if you send records for Secure Fit LLC.
         </p>
 
         <div className="home-actions">

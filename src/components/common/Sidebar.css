@@ -2,13 +2,13 @@
   width: 250px;
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border-right: 2px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
   min-height: 100vh;
   position: fixed;
   left: 0;
   top: 80px;
   padding-top: 20px;
-  box-shadow: 2px 0 8px var(--shadow);
+  box-shadow: 2px 0 16px var(--shadow);
   z-index: 100;
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
@@ -18,13 +18,15 @@
 }
 
 .sidebar-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--accent-blue);
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--teal-dark);
   margin-bottom: 20px;
   padding-bottom: 12px;
   border-bottom: 2px solid var(--accent-teal);
-  font-family: 'Georgia', serif;
+  font-family: var(--font-heading);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   transition: color 0.3s ease, border-color 0.3s ease;
 }
 
@@ -39,9 +41,9 @@
   padding: 14px 20px;
   background: var(--bg-tertiary);
   border: 2px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-primary);
   cursor: pointer;
   transition: all 0.3s ease;
@@ -49,6 +51,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  font-family: inherit;
 }
 
 .sidebar-button-label {
@@ -62,17 +65,16 @@
 .sidebar-button:hover {
   background: var(--bg-secondary);
   border-color: var(--accent-teal);
-  transform: translateX(4px);
+  color: var(--teal-dark);
 }
 
 .sidebar-button.active {
-  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+  background: var(--teal);
   color: white;
-  border-color: #1e3a8a;
-  box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);
+  border-color: var(--teal);
+  box-shadow: 0 8px 20px rgba(20, 184, 166, 0.25);
 }
 
-/* Mobile sidebar styles */
 @media (max-width: 768px) {
   .sidebar {
     width: 280px;
@@ -88,7 +90,7 @@
   .sidebar-button {
     font-size: 16px;
     padding: 14px 20px;
-    min-height: 48px; /* Better touch target */
+    min-height: 48px;
   }
 }
 
@@ -98,7 +100,7 @@
   }
 
   .sidebar-title {
-    font-size: 18px;
+    font-size: 0.72rem;
   }
 
   .sidebar-button {
@@ -106,4 +108,3 @@
     padding: 12px 16px;
   }
 }
-
