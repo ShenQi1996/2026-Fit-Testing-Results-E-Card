@@ -49,6 +49,15 @@
   color: var(--teal);
 }
 
+.auth-subtitle {
+  margin: 4px auto 28px;
+  max-width: 34em;
+  color: #4d6273;
+  font-size: 15px;
+  line-height: 1.55;
+  text-align: center;
+}
+
 .auth-subtitle-compact {
   margin-top: 8px;
   margin-bottom: 0;

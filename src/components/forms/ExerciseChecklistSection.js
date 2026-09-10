@@ -1,16 +1,7 @@
 import React from 'react';
 import FormSection from '../common/FormSection';
 import FormCheckbox from '../common/FormCheckbox';
-
-const EXERCISE_CHECKLIST_ITEMS = [
-  { id: 'exerciseNormalBreathing', label: 'Normal breathing' },
-  { id: 'exerciseDeepBreathing', label: 'Deep breathing' },
-  { id: 'exerciseHeadSideToSide', label: 'Head side to side' },
-  { id: 'exerciseHeadUpAndDown', label: 'Head up and down' },
-  { id: 'exerciseTalking', label: 'Talking' },
-  { id: 'exerciseBendingOverOrJogging', label: 'Bending over, or jogging in place' },
-  { id: 'exerciseNormalBreathingAgain', label: 'Normal breathing again' },
-];
+import { EXERCISE_CHECKLIST_ITEMS } from '../../constants/fitTestOptions';
 
 const ExerciseChecklistSection = ({ formData, onChange, isLoading, fieldErrors }) => {
   return (

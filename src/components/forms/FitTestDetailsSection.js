@@ -2,49 +2,23 @@ import React from 'react';
 import FormSection from '../common/FormSection';
 import FormInput from '../common/FormInput';
 import FormSelect from '../common/FormSelect';
-import { TESTING_AGENT_OPTIONS, TEST_LOCATION_OPTIONS } from '../../constants/fitTestOptions';
-
-const FIT_TEST_TYPE_OPTIONS = [
-  { value: 'N95', label: 'N95' },
-  { value: 'N99', label: 'N99' },
-  { value: 'N100', label: 'N100' },
-  { value: 'P100', label: 'P100' },
-  { value: 'Half Face', label: 'Half Face' },
-  { value: 'Full Face', label: 'Full Face' },
-];
-
-const RESPIRATOR_MFG_OPTIONS = [
-  { value: '3M', label: '3M' },
-  { value: 'Honeywell', label: 'Honeywell' },
-  { value: 'Moldex', label: 'Moldex' },
-  { value: 'Kimberly-Clark', label: 'Kimberly-Clark' },
-  { value: 'Other', label: 'Other' },
-];
-
-const MASK_SIZE_OPTIONS = [
-  { value: 'Small', label: 'Small' },
-  { value: 'Regular', label: 'Regular' },
-  { value: 'Large', label: 'Large' },
-];
-
-const RESULT_OPTIONS = [
-  { value: 'Pass', label: 'Pass' },
-  { value: 'Fail', label: 'Fail' },
-];
-
-const FIT_TEST_METHOD_OPTIONS = [
-  { value: 'Locked to Qualitative', label: 'Locked to Qualitative' },
-];
+import {
+  TESTING_AGENT_OPTIONS,
+  TEST_LOCATION_OPTIONS,
+  FIT_TEST_TYPE_OPTIONS,
+  RESPIRATOR_MFG_OPTIONS,
+  MASK_SIZE_OPTIONS,
+  RESULT_OPTIONS,
+  FIT_TEST_METHOD_OPTIONS,
+  isCustomOptionValue,
+} from '../../constants/fitTestOptions';
 
 const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) => {
-  // Check if current respiratorMfg value is a custom "Other" value
-  const isCustomMfg = formData.respiratorMfg && !RESPIRATOR_MFG_OPTIONS.find(opt => opt.value === formData.respiratorMfg);
+  const isCustomMfg = isCustomOptionValue(formData.respiratorMfg, RESPIRATOR_MFG_OPTIONS);
   const showOtherInput = formData.respiratorMfg === 'Other' || isCustomMfg;
   const selectValue = isCustomMfg ? 'Other' : formData.respiratorMfg;
 
-  const isCustomLocation =
-    formData.testLocation &&
-    !TEST_LOCATION_OPTIONS.find((opt) => opt.value === formData.testLocation);
+  const isCustomLocation = isCustomOptionValue(formData.testLocation, TEST_LOCATION_OPTIONS);
   const showLocationOtherInput = formData.testLocation === 'Other' || isCustomLocation;
   const locationSelectValue = isCustomLocation ? 'Other' : formData.testLocation;
 
@@ -208,4 +182,3 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
 };
 
 export default FitTestDetailsSection;
-

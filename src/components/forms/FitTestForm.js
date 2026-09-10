@@ -55,32 +55,18 @@ const FitTestForm = () => {
     await previewFitTestPdf(formData);
   };
 
+  const fieldProps = { formData, onChange: handleInputChange, isLoading, fieldErrors };
+
   return (
     <form className="fit-test-form" onSubmit={handleSubmit}>
-      <RecipientInfoSection
-        formData={formData}
-        onChange={handleInputChange}
-        isLoading={isLoading}
-        fieldErrors={fieldErrors}
-      />
+      <RecipientInfoSection {...fieldProps} />
 
-      <ClientInfoSection
-        formData={formData}
-        onChange={handleInputChange}
-        isLoading={isLoading}
-        fieldErrors={fieldErrors}
-      />
+      <ClientInfoSection {...fieldProps} />
 
-      <FitTestDetailsSection
-        formData={formData}
-        onChange={handleInputChange}
-        isLoading={isLoading}
-        fieldErrors={fieldErrors}
-      />
+      <FitTestDetailsSection {...fieldProps} />
 
       <RespiratoryProtectionProgramSection
-        formData={formData}
-        onChange={handleInputChange}
+        {...fieldProps}
         schoolOptions={schoolOptions}
         selectedSchoolOption={selectedSchoolOption}
         onSchoolOptionChange={handleSchoolOptionChange}
@@ -88,34 +74,16 @@ const FitTestForm = () => {
         onSetSchoolProfileAsDefaultChange={setSetSchoolProfileAsDefault}
         isAddingNewSchoolProfile={isAddingNewSchoolProfile}
         isLoadingSchoolProfiles={isLoadingSchoolProfiles}
-        isLoading={isLoading}
-        fieldErrors={fieldErrors}
       />
 
-      <FitTestInvalidationSection
-        formData={formData}
-        onChange={handleInputChange}
-        isLoading={isLoading}
-        fieldErrors={fieldErrors}
-      />
+      <FitTestInvalidationSection {...fieldProps} />
 
-      <SensitivityScreeningSection
-        formData={formData}
-        onChange={handleInputChange}
-        isLoading={isLoading}
-        fieldErrors={fieldErrors}
-      />
+      <SensitivityScreeningSection {...fieldProps} />
 
-      <ExerciseChecklistSection
-        formData={formData}
-        onChange={handleInputChange}
-        isLoading={isLoading}
-        fieldErrors={fieldErrors}
-      />
+      <ExerciseChecklistSection {...fieldProps} />
 
       <EquipmentHygieneSection
-        formData={formData}
-        onChange={handleInputChange}
+        {...fieldProps}
         solutionTypeOptions={solutionTypeOptions}
         selectedSolutionOption={selectedSolutionOption}
         onSolutionOptionChange={handleSolutionOptionChange}
@@ -123,15 +91,10 @@ const FitTestForm = () => {
         onSetSolutionProfileAsDefaultChange={setSetSolutionProfileAsDefault}
         isAddingNewSolutionProfile={isAddingNewSolutionProfile}
         isLoadingSolutionProfiles={isLoadingSolutionProfiles}
-        isLoading={isLoading}
-        fieldErrors={fieldErrors}
       />
 
       <SignatureSection
-        formData={formData}
-        onChange={handleInputChange}
-        isLoading={isLoading}
-        fieldErrors={fieldErrors}
+        {...fieldProps}
         onSignatureStroke={handleSignatureStroke}
         onSignatureClear={handleSignatureClear}
         setSignatureCanvasRef={setSignatureCanvasRef}

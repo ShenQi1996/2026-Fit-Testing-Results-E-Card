@@ -4,10 +4,9 @@ import {
   isValidVerificationToken,
   normalizeVerificationToken,
 } from '../../utils/verificationToken';
-import BrandMark from '../common/BrandMark';
+import AuthPageShell, { AuthFooterLinks, AuthHomeLink } from '../common/AuthPageShell';
 import LoadingAnimation from '../common/LoadingAnimation';
 import VerifyAnimation from './VerifyAnimation';
-import '../auth/Auth.css';
 import './VerifyCardPage.css';
 
 const STATUS_COPY = {
@@ -148,76 +147,71 @@ const VerifyCardPage = ({ initialToken = '' }) => {
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card verify-card">
-        <div className="auth-brand">
-          <BrandMark />
-        </div>
-        {status === 'loading' ? (
-          <>
-            <LoadingAnimation label="Checking this e-card" />
-            <p className="auth-subtitle">Looking up the record issued by Secure Fit LLC.</p>
-          </>
-        ) : (
-          <>
-        {status === 'valid' && <VerifyAnimation />}
-        <p className="auth-kicker">{copy.kicker}</p>
-        <h2 className="auth-title">{copy.title}</h2>
-        <p className="auth-subtitle">{copy.subtitle}</p>
+    <AuthPageShell cardClassName="verify-card">
+      {status === 'loading' ? (
+        <>
+          <LoadingAnimation label="Checking this e-card" />
+          <p className="auth-subtitle">Looking up the record issued by Secure Fit LLC.</p>
+        </>
+      ) : (
+        <>
+          {status === 'valid' && <VerifyAnimation />}
+          <p className="auth-kicker">{copy.kicker}</p>
+          <h2 className="auth-title">{copy.title}</h2>
+          <p className="auth-subtitle">{copy.subtitle}</p>
 
-        {status !== 'idle' && (status !== 'invalid' || activeToken) && (
-          <div
-            className={`verify-status-badge verify-status-badge--${status}`}
-            role="status"
-          >
-            {status === 'valid' && 'Verified by Secure Fit LLC'}
-            {status === 'expired' && 'Expired — issued by Secure Fit LLC'}
-            {status === 'failed' && 'Authentic — did not pass'}
-            {status === 'invalid' && 'Not found'}
-            {status === 'error' && 'Try again shortly'}
-          </div>
-        )}
-
-        {card && (status === 'valid' || status === 'expired' || status === 'failed') && (
-          <dl className="verify-details">
-            {DETAIL_FIELDS.map(({ key, label }) => (
-              <div className="verify-details-row" key={key}>
-                <dt>{label}</dt>
-                <dd className={key === 'result' ? `verify-result verify-result--${(card.result || '').toLowerCase()}` : undefined}>
-                  {card[key] || '—'}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-
-        {(!activeToken || status === 'invalid' || status === 'error' || status === 'idle') && (
-          <form onSubmit={handleSubmit} className="auth-form">
-            {status === 'error' && error && activeToken && (
-              <div className="auth-error" role="alert">{error}</div>
-            )}
-            <div className="form-group">
-              <label htmlFor="verify-token">Verification code</label>
-              <input
-                type="text"
-                id="verify-token"
-                className="form-input verify-token-input"
-                placeholder="Paste the code from the e-card"
-                value={tokenInput}
-                onChange={(event) => setTokenInput(event.target.value)}
-                autoComplete="off"
-                spellCheck="false"
-                inputMode="text"
-              />
+          {status !== 'idle' && (status !== 'invalid' || activeToken) && (
+            <div
+              className={`verify-status-badge verify-status-badge--${status}`}
+              role="status"
+            >
+              {status === 'valid' && 'Verified by Secure Fit LLC'}
+              {status === 'expired' && 'Expired — issued by Secure Fit LLC'}
+              {status === 'failed' && 'Authentic — did not pass'}
+              {status === 'invalid' && 'Not found'}
+              {status === 'error' && 'Try again shortly'}
             </div>
-            <button type="submit" className="auth-button" disabled={status === 'loading'}>
-              Verify e-card
-            </button>
-          </form>
-        )}
+          )}
 
-        <div className="auth-switch">
-          <p>
+          {card && (status === 'valid' || status === 'expired' || status === 'failed') && (
+            <dl className="verify-details">
+              {DETAIL_FIELDS.map(({ key, label }) => (
+                <div className="verify-details-row" key={key}>
+                  <dt>{label}</dt>
+                  <dd className={key === 'result' ? `verify-result verify-result--${(card.result || '').toLowerCase()}` : undefined}>
+                    {card[key] || '—'}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+
+          {(!activeToken || status === 'invalid' || status === 'error' || status === 'idle') && (
+            <form onSubmit={handleSubmit} className="auth-form">
+              {status === 'error' && error && activeToken && (
+                <div className="auth-error" role="alert">{error}</div>
+              )}
+              <div className="form-group">
+                <label htmlFor="verify-token">Verification code</label>
+                <input
+                  type="text"
+                  id="verify-token"
+                  className="form-input verify-token-input"
+                  placeholder="Paste the code from the e-card"
+                  value={tokenInput}
+                  onChange={(event) => setTokenInput(event.target.value)}
+                  autoComplete="off"
+                  spellCheck="false"
+                  inputMode="text"
+                />
+              </div>
+              <button type="submit" className="auth-button" disabled={status === 'loading'}>
+                Verify e-card
+              </button>
+            </form>
+          )}
+
+          <AuthFooterLinks>
             {(status === 'valid' || status === 'expired' || status === 'failed') && (
               <>
                 <a href="/verify" className="auth-link">Check another e-card</a>
@@ -226,13 +220,11 @@ const VerifyCardPage = ({ initialToken = '' }) => {
             )}
             <a href="/resend" className="auth-link">Lost your e-card?</a>
             <span> · </span>
-            <a href="/" className="auth-link">Back to home</a>
-          </p>
-        </div>
-          </>
-        )}
-      </div>
-    </div>
+            <AuthHomeLink />
+          </AuthFooterLinks>
+        </>
+      )}
+    </AuthPageShell>
   );
 };
 

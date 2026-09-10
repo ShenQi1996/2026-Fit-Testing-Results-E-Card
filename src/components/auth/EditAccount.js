@@ -14,8 +14,31 @@ import {
   getPendingUsers,
   updateUserApprovalStatus,
 } from '../../services/firebaseDb';
-import { formatDateInput } from '../../utils/dateUtils';
+import { useSavedProfiles } from '../../hooks/useSavedProfiles';
+import SavedProfilesPanel from './SavedProfilesPanel';
 import './EditAccount.css';
+
+const EMPTY_SOLUTION_FORM = {
+  solutionType: '',
+  solutionOpenDate: '',
+  solutionExpirationDate: '',
+  setAsDefault: false,
+};
+
+const toSolutionPayload = (data) => ({
+  solutionType: data.solutionType.trim(),
+  solutionOpenDate: data.solutionOpenDate.trim(),
+  solutionExpirationDate: data.solutionExpirationDate.trim(),
+});
+
+const toSchoolPayload = (data) => ({
+  schoolName: data.schoolName.trim(),
+});
+
+const EMPTY_SCHOOL_FORM = {
+  schoolName: '',
+  setAsDefault: false,
+};
 
 const EditAccount = ({ onBack }) => {
   const { user, updateUser } = useAuth();
@@ -29,60 +52,33 @@ const EditAccount = ({ onBack }) => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [solutionProfiles, setSolutionProfiles] = useState([]);
-  const [solutionProfileData, setSolutionProfileData] = useState({
-    solutionType: '',
-    solutionOpenDate: '',
-    solutionExpirationDate: '',
-    setAsDefault: false,
-  });
-  const [solutionProfilesLoading, setSolutionProfilesLoading] = useState(false);
-  const [solutionProfileSaving, setSolutionProfileSaving] = useState(false);
-  const [solutionProfilesError, setSolutionProfilesError] = useState('');
-  const [solutionProfilesSuccess, setSolutionProfilesSuccess] = useState('');
-  const [schoolProfiles, setSchoolProfiles] = useState([]);
-  const [schoolProfileData, setSchoolProfileData] = useState({
-    schoolName: '',
-    setAsDefault: false,
-  });
-  const [schoolProfilesLoading, setSchoolProfilesLoading] = useState(false);
-  const [schoolProfileSaving, setSchoolProfileSaving] = useState(false);
-  const [schoolProfilesError, setSchoolProfilesError] = useState('');
-  const [schoolProfilesSuccess, setSchoolProfilesSuccess] = useState('');
   const [pendingUsers, setPendingUsers] = useState([]);
   const [pendingUsersLoading, setPendingUsersLoading] = useState(false);
   const [pendingUsersError, setPendingUsersError] = useState('');
   const [pendingUsersSuccess, setPendingUsersSuccess] = useState('');
 
-  const loadSolutionProfiles = async () => {
-    if (!user?.uid) return;
+  const solutionProfiles = useSavedProfiles({
+    userId: user?.uid,
+    fetchAll: getUserSolutionProfiles,
+    save: saveUserSolutionProfile,
+    remove: deleteUserSolutionProfile,
+    reorder: reorderUserSolutionProfiles,
+    setDefault: setDefaultSolutionProfile,
+    emptyForm: EMPTY_SOLUTION_FORM,
+    toPayload: toSolutionPayload,
+    dateFields: ['solutionOpenDate', 'solutionExpirationDate'],
+  });
 
-    setSolutionProfilesLoading(true);
-    setSolutionProfilesError('');
-    try {
-      const profiles = await getUserSolutionProfiles(user.uid);
-      setSolutionProfiles(profiles);
-    } catch (err) {
-      setSolutionProfilesError(err.message || 'Failed to load saved solution profiles.');
-    } finally {
-      setSolutionProfilesLoading(false);
-    }
-  };
-
-  const loadSchoolProfiles = async () => {
-    if (!user?.uid) return;
-
-    setSchoolProfilesLoading(true);
-    setSchoolProfilesError('');
-    try {
-      const profiles = await getUserSchoolProfiles(user.uid);
-      setSchoolProfiles(profiles);
-    } catch (err) {
-      setSchoolProfilesError(err.message || 'Failed to load saved school profiles.');
-    } finally {
-      setSchoolProfilesLoading(false);
-    }
-  };
+  const schoolProfiles = useSavedProfiles({
+    userId: user?.uid,
+    fetchAll: getUserSchoolProfiles,
+    save: saveUserSchoolProfile,
+    remove: deleteUserSchoolProfile,
+    reorder: reorderUserSchoolProfiles,
+    setDefault: setDefaultSchoolProfile,
+    emptyForm: EMPTY_SCHOOL_FORM,
+    toPayload: toSchoolPayload,
+  });
 
   useEffect(() => {
     if (user) {
@@ -95,12 +91,6 @@ const EditAccount = ({ onBack }) => {
       });
     }
   }, [user]);
-
-  useEffect(() => {
-    loadSolutionProfiles();
-    loadSchoolProfiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid]);
 
   const loadPendingUsers = async () => {
     if (!user?.uid || user?.role !== 'admin') return;
@@ -130,216 +120,6 @@ const EditAccount = ({ onBack }) => {
     setSuccess('');
   };
 
-  const handleSolutionProfileChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    const isDateField = name === 'solutionOpenDate' || name === 'solutionExpirationDate';
-    const nextValue = isDateField ? formatDateInput(value) : value;
-    setSolutionProfileData((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : nextValue,
-    }));
-    setSolutionProfilesError('');
-    setSolutionProfilesSuccess('');
-  };
-
-  const handleAddSolutionProfile = async (e) => {
-    e.preventDefault();
-    if (!user?.uid) return;
-
-    setSolutionProfilesError('');
-    setSolutionProfilesSuccess('');
-
-    if (!solutionProfileData.solutionType.trim()) {
-      setSolutionProfilesError('Please enter solution type.');
-      return;
-    }
-    if (!solutionProfileData.solutionOpenDate.trim()) {
-      setSolutionProfilesError('Please enter open date.');
-      return;
-    }
-    if (!solutionProfileData.solutionExpirationDate.trim()) {
-      setSolutionProfilesError('Please enter expiration date.');
-      return;
-    }
-
-    setSolutionProfileSaving(true);
-    try {
-      await saveUserSolutionProfile(
-        user.uid,
-        {
-          solutionType: solutionProfileData.solutionType.trim(),
-          solutionOpenDate: solutionProfileData.solutionOpenDate.trim(),
-          solutionExpirationDate: solutionProfileData.solutionExpirationDate.trim(),
-        },
-        solutionProfileData.setAsDefault
-      );
-
-      setSolutionProfileData({
-        solutionType: '',
-        solutionOpenDate: '',
-        solutionExpirationDate: '',
-        setAsDefault: false,
-      });
-      setSolutionProfilesSuccess('Saved solution profile added.');
-      await loadSolutionProfiles();
-    } catch (err) {
-      setSolutionProfilesError(err.message || 'Failed to add solution profile.');
-    } finally {
-      setSolutionProfileSaving(false);
-    }
-  };
-
-  const handleDeleteSolutionProfile = async (profileId) => {
-    if (!user?.uid) return;
-    setSolutionProfilesError('');
-    setSolutionProfilesSuccess('');
-
-    try {
-      await deleteUserSolutionProfile(user.uid, profileId);
-      setSolutionProfilesSuccess('Solution profile deleted.');
-      await loadSolutionProfiles();
-    } catch (err) {
-      setSolutionProfilesError(err.message || 'Failed to delete solution profile.');
-    }
-  };
-
-  const handleMoveSolutionProfile = async (currentIndex, direction) => {
-    if (!user?.uid) return;
-    const nextIndex = currentIndex + direction;
-    if (nextIndex < 0 || nextIndex >= solutionProfiles.length) return;
-
-    const reordered = [...solutionProfiles];
-    const temp = reordered[currentIndex];
-    reordered[currentIndex] = reordered[nextIndex];
-    reordered[nextIndex] = temp;
-
-    setSolutionProfiles(reordered);
-    setSolutionProfilesError('');
-    setSolutionProfilesSuccess('');
-
-    try {
-      await reorderUserSolutionProfiles(
-        user.uid,
-        reordered.map((profile) => profile.id)
-      );
-      setSolutionProfilesSuccess('Solution profile order updated.');
-    } catch (err) {
-      setSolutionProfilesError(err.message || 'Failed to reorder solution profiles.');
-      await loadSolutionProfiles();
-    }
-  };
-
-  const handleSetDefaultSolutionProfile = async (profileId) => {
-    if (!user?.uid) return;
-
-    setSolutionProfilesError('');
-    setSolutionProfilesSuccess('');
-    try {
-      await setDefaultSolutionProfile(user.uid, profileId);
-      setSolutionProfilesSuccess('Default solution profile updated.');
-      await loadSolutionProfiles();
-    } catch (err) {
-      setSolutionProfilesError(err.message || 'Failed to set default solution profile.');
-    }
-  };
-
-  const handleSchoolProfileChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setSchoolProfileData((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value,
-    }));
-    setSchoolProfilesError('');
-    setSchoolProfilesSuccess('');
-  };
-
-  const handleAddSchoolProfile = async (e) => {
-    e.preventDefault();
-    if (!user?.uid) return;
-
-    setSchoolProfilesError('');
-    setSchoolProfilesSuccess('');
-
-    if (!schoolProfileData.schoolName.trim()) {
-      setSchoolProfilesError('Please enter school name.');
-      return;
-    }
-
-    setSchoolProfileSaving(true);
-    try {
-      await saveUserSchoolProfile(
-        user.uid,
-        { schoolName: schoolProfileData.schoolName.trim() },
-        schoolProfileData.setAsDefault
-      );
-
-      setSchoolProfileData({
-        schoolName: '',
-        setAsDefault: false,
-      });
-      setSchoolProfilesSuccess('Saved school profile added.');
-      await loadSchoolProfiles();
-    } catch (err) {
-      setSchoolProfilesError(err.message || 'Failed to add school profile.');
-    } finally {
-      setSchoolProfileSaving(false);
-    }
-  };
-
-  const handleDeleteSchoolProfile = async (profileId) => {
-    if (!user?.uid) return;
-    setSchoolProfilesError('');
-    setSchoolProfilesSuccess('');
-
-    try {
-      await deleteUserSchoolProfile(user.uid, profileId);
-      setSchoolProfilesSuccess('School profile deleted.');
-      await loadSchoolProfiles();
-    } catch (err) {
-      setSchoolProfilesError(err.message || 'Failed to delete school profile.');
-    }
-  };
-
-  const handleMoveSchoolProfile = async (currentIndex, direction) => {
-    if (!user?.uid) return;
-    const nextIndex = currentIndex + direction;
-    if (nextIndex < 0 || nextIndex >= schoolProfiles.length) return;
-
-    const reordered = [...schoolProfiles];
-    const temp = reordered[currentIndex];
-    reordered[currentIndex] = reordered[nextIndex];
-    reordered[nextIndex] = temp;
-
-    setSchoolProfiles(reordered);
-    setSchoolProfilesError('');
-    setSchoolProfilesSuccess('');
-
-    try {
-      await reorderUserSchoolProfiles(
-        user.uid,
-        reordered.map((profile) => profile.id)
-      );
-      setSchoolProfilesSuccess('School profile order updated.');
-    } catch (err) {
-      setSchoolProfilesError(err.message || 'Failed to reorder school profiles.');
-      await loadSchoolProfiles();
-    }
-  };
-
-  const handleSetDefaultSchoolProfile = async (profileId) => {
-    if (!user?.uid) return;
-
-    setSchoolProfilesError('');
-    setSchoolProfilesSuccess('');
-    try {
-      await setDefaultSchoolProfile(user.uid, profileId);
-      setSchoolProfilesSuccess('Default school profile updated.');
-      await loadSchoolProfiles();
-    } catch (err) {
-      setSchoolProfilesError(err.message || 'Failed to set default school profile.');
-    }
-  };
-
   const handleApprovalAction = async (targetUserId, nextStatus) => {
     if (!user?.uid || user?.role !== 'admin') return;
     setPendingUsersError('');
@@ -363,7 +143,6 @@ const EditAccount = ({ onBack }) => {
     setError('');
     setSuccess('');
 
-    // Validate password change if new password is provided
     if (formData.newPassword) {
       if (!formData.currentPassword) {
         setError('Please enter your current password to change it');
@@ -391,8 +170,7 @@ const EditAccount = ({ onBack }) => {
         newPassword: formData.newPassword || undefined,
       });
       setSuccess('Account updated successfully!');
-      
-      // Clear password fields after successful update
+
       setFormData({
         ...formData,
         currentPassword: '',
@@ -422,7 +200,7 @@ const EditAccount = ({ onBack }) => {
         <form onSubmit={handleSubmit} className="edit-account-form">
           <div className="form-section">
             <h3 className="section-title">Personal Information</h3>
-            
+
             <div className="form-group">
               <label htmlFor="name">Full Name</label>
               <input
@@ -455,9 +233,9 @@ const EditAccount = ({ onBack }) => {
 
             <div className="form-group">
               <label htmlFor="role">Account Role</label>
-              <div style={{ 
-                padding: '10px 12px', 
-                backgroundColor: 'var(--bg-secondary, #f5f5f5)', 
+              <div style={{
+                padding: '10px 12px',
+                backgroundColor: 'var(--bg-secondary, #f5f5f5)',
                 border: '1px solid var(--border-color, #ddd)',
                 borderRadius: '4px',
                 cursor: 'not-allowed',
@@ -468,8 +246,8 @@ const EditAccount = ({ onBack }) => {
                 {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Tester'}
               </div>
               <small style={{ display: 'block', marginTop: '4px', color: 'var(--text-secondary, #666)', fontSize: '12px' }}>
-                {user?.role === 'admin' 
-                  ? 'You have admin privileges and can edit/delete test results.' 
+                {user?.role === 'admin'
+                  ? 'You have admin privileges and can edit/delete test results.'
                   : 'You have tester privileges. Contact an admin to change your role.'}
               </small>
             </div>
@@ -478,7 +256,7 @@ const EditAccount = ({ onBack }) => {
           <div className="form-section">
             <h3 className="section-title">Change Password (Optional)</h3>
             <p className="section-description">Leave blank if you don't want to change your password</p>
-            
+
             <div className="form-group">
               <label htmlFor="currentPassword">Current Password</label>
               <input
@@ -522,237 +300,82 @@ const EditAccount = ({ onBack }) => {
             </div>
           </div>
 
-          <div className="form-section">
-            <h3 className="section-title">Saved Solution Profiles</h3>
-            <p className="section-description">
-              Add, reorder, set default, or delete your own saved solution options.
-            </p>
+          <SavedProfilesPanel
+            title="Saved Solution Profiles"
+            description="Add, reorder, set default, or delete your own saved solution options."
+            error={solutionProfiles.error}
+            success={solutionProfiles.success}
+            fields={[
+              { name: 'solutionType', label: 'Solution Type', placeholder: 'Enter solution type', defaultId: 'setAsDefault', defaultLabel: 'Set as new default solution' },
+              { name: 'solutionOpenDate', label: 'Open Date', placeholder: 'MM/DD/YYYY', date: true },
+              { name: 'solutionExpirationDate', label: 'Expiration Date', placeholder: 'MM/DD/YYYY', date: true },
+            ]}
+            formData={solutionProfiles.formData}
+            onChange={solutionProfiles.handleChange}
+            onAdd={(e) => solutionProfiles.handleAdd(e, (data) => {
+              if (!data.solutionType.trim()) return 'Please enter solution type.';
+              if (!data.solutionOpenDate.trim()) return 'Please enter open date.';
+              if (!data.solutionExpirationDate.trim()) return 'Please enter expiration date.';
+              return '';
+            }, 'Saved solution profile added.')}
+            addLabel="+ Add Solution Profile"
+            savingLabel="Saving..."
+            saving={solutionProfiles.saving}
+            disabled={isLoading}
+            profiles={solutionProfiles.profiles}
+            loading={solutionProfiles.loading}
+            loadingLabel="Loading saved solutions..."
+            emptyLabel="No saved solution profiles yet."
+            renderDetails={(profile) => (
+              <>
+                <strong>{profile.solutionType}</strong>
+                <span>Open: {profile.solutionOpenDate}</span>
+                <span>Exp: {profile.solutionExpirationDate}</span>
+              </>
+            )}
+            onMove={(index, direction) =>
+              solutionProfiles.handleMove(index, direction, 'Solution profile order updated.')
+            }
+            onSetDefault={(id) =>
+              solutionProfiles.handleSetDefault(id, 'Default solution profile updated.')
+            }
+            onDelete={(id) =>
+              solutionProfiles.handleDelete(id, 'Solution profile deleted.')
+            }
+          />
 
-            {solutionProfilesError && <div className="auth-error">{solutionProfilesError}</div>}
-            {solutionProfilesSuccess && <div className="auth-success">{solutionProfilesSuccess}</div>}
-
-            <div className="solution-profile-add-grid">
-              <div className="form-group">
-                <label htmlFor="solutionType">Solution Type</label>
-                <input
-                  type="text"
-                  id="solutionType"
-                  name="solutionType"
-                  className="form-input"
-                  placeholder="Enter solution type"
-                  value={solutionProfileData.solutionType}
-                  onChange={handleSolutionProfileChange}
-                  disabled={solutionProfileSaving || isLoading}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="solutionOpenDate">Open Date</label>
-                <input
-                  type="text"
-                  id="solutionOpenDate"
-                  name="solutionOpenDate"
-                  className="form-input"
-                  placeholder="MM/DD/YYYY"
-                  value={solutionProfileData.solutionOpenDate}
-                  onChange={handleSolutionProfileChange}
-                  inputMode="numeric"
-                  maxLength={10}
-                  disabled={solutionProfileSaving || isLoading}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="solutionExpirationDate">Expiration Date</label>
-                <input
-                  type="text"
-                  id="solutionExpirationDate"
-                  name="solutionExpirationDate"
-                  className="form-input"
-                  placeholder="MM/DD/YYYY"
-                  value={solutionProfileData.solutionExpirationDate}
-                  onChange={handleSolutionProfileChange}
-                  inputMode="numeric"
-                  maxLength={10}
-                  disabled={solutionProfileSaving || isLoading}
-                />
-              </div>
-            </div>
-
-            <div className="form-group solution-default-toggle">
-              <label htmlFor="setAsDefault">
-                <input
-                  type="checkbox"
-                  id="setAsDefault"
-                  name="setAsDefault"
-                  checked={solutionProfileData.setAsDefault}
-                  onChange={handleSolutionProfileChange}
-                  disabled={solutionProfileSaving || isLoading}
-                />
-                Set as new default solution
-              </label>
-            </div>
-
-            <button
-              type="button"
-              className="solution-add-button"
-              onClick={handleAddSolutionProfile}
-              disabled={solutionProfileSaving || isLoading}
-            >
-              {solutionProfileSaving ? 'Saving...' : '+ Add Solution Profile'}
-            </button>
-
-            <div className="solution-profile-list">
-              {solutionProfilesLoading ? (
-                <div className="solution-empty">Loading saved solutions...</div>
-              ) : solutionProfiles.length === 0 ? (
-                <div className="solution-empty">No saved solution profiles yet.</div>
-              ) : (
-                solutionProfiles.map((profile, index) => (
-                  <div key={profile.id} className="solution-profile-item">
-                    <div className="solution-profile-details">
-                      <strong>{profile.solutionType}</strong>
-                      <span>Open: {profile.solutionOpenDate}</span>
-                      <span>Exp: {profile.solutionExpirationDate}</span>
-                      {profile.isDefault && <span className="solution-default-badge">Default</span>}
-                    </div>
-                    <div className="solution-profile-actions">
-                      <button
-                        type="button"
-                        onClick={() => handleMoveSolutionProfile(index, -1)}
-                        disabled={index === 0 || isLoading}
-                        title="Move up"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleMoveSolutionProfile(index, 1)}
-                        disabled={index === solutionProfiles.length - 1 || isLoading}
-                        title="Move down"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSetDefaultSolutionProfile(profile.id)}
-                        disabled={profile.isDefault || isLoading}
-                        title="Set as default"
-                      >
-                        ⭐
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSolutionProfile(profile.id)}
-                        disabled={isLoading}
-                        title="Delete"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="form-section">
-            <h3 className="section-title">Saved School / Client Profiles</h3>
-            <p className="section-description">
-              Add, reorder, set default, or delete schools/clients used on the fit test form.
-            </p>
-
-            {schoolProfilesError && <div className="auth-error">{schoolProfilesError}</div>}
-            {schoolProfilesSuccess && <div className="auth-success">{schoolProfilesSuccess}</div>}
-
-            <div className="solution-profile-add-grid school-profile-add-grid">
-              <div className="form-group">
-                <label htmlFor="schoolName">School Name</label>
-                <input
-                  type="text"
-                  id="schoolName"
-                  name="schoolName"
-                  className="form-input"
-                  placeholder="Enter school name"
-                  value={schoolProfileData.schoolName}
-                  onChange={handleSchoolProfileChange}
-                  disabled={schoolProfileSaving || isLoading}
-                />
-              </div>
-            </div>
-
-            <div className="form-group solution-default-toggle">
-              <label htmlFor="schoolSetAsDefault">
-                <input
-                  type="checkbox"
-                  id="schoolSetAsDefault"
-                  name="setAsDefault"
-                  checked={schoolProfileData.setAsDefault}
-                  onChange={handleSchoolProfileChange}
-                  disabled={schoolProfileSaving || isLoading}
-                />
-                Set as new default school
-              </label>
-            </div>
-
-            <button
-              type="button"
-              className="solution-add-button"
-              onClick={handleAddSchoolProfile}
-              disabled={schoolProfileSaving || isLoading}
-            >
-              {schoolProfileSaving ? 'Saving...' : '+ Add School Profile'}
-            </button>
-
-            <div className="solution-profile-list">
-              {schoolProfilesLoading ? (
-                <div className="solution-empty">Loading saved schools...</div>
-              ) : schoolProfiles.length === 0 ? (
-                <div className="solution-empty">No saved school profiles yet.</div>
-              ) : (
-                schoolProfiles.map((profile, index) => (
-                  <div key={profile.id} className="solution-profile-item">
-                    <div className="solution-profile-details">
-                      <strong>{profile.schoolName}</strong>
-                      {profile.isDefault && <span className="solution-default-badge">Default</span>}
-                    </div>
-                    <div className="solution-profile-actions">
-                      <button
-                        type="button"
-                        onClick={() => handleMoveSchoolProfile(index, -1)}
-                        disabled={index === 0 || isLoading}
-                        title="Move up"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleMoveSchoolProfile(index, 1)}
-                        disabled={index === schoolProfiles.length - 1 || isLoading}
-                        title="Move down"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSetDefaultSchoolProfile(profile.id)}
-                        disabled={profile.isDefault || isLoading}
-                        title="Set as default"
-                      >
-                        ⭐
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSchoolProfile(profile.id)}
-                        disabled={isLoading}
-                        title="Delete"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          <SavedProfilesPanel
+            title="Saved School / Client Profiles"
+            description="Add, reorder, set default, or delete schools/clients used on the fit test form."
+            error={schoolProfiles.error}
+            success={schoolProfiles.success}
+            fields={[
+              { name: 'schoolName', id: 'schoolName', label: 'School Name', placeholder: 'Enter school name', defaultId: 'schoolSetAsDefault', defaultLabel: 'Set as new default school' },
+            ]}
+            formData={schoolProfiles.formData}
+            onChange={schoolProfiles.handleChange}
+            onAdd={(e) => schoolProfiles.handleAdd(e, (data) => (
+              data.schoolName.trim() ? '' : 'Please enter school name.'
+            ), 'Saved school profile added.')}
+            addLabel="+ Add School Profile"
+            savingLabel="Saving..."
+            saving={schoolProfiles.saving}
+            disabled={isLoading}
+            profiles={schoolProfiles.profiles}
+            loading={schoolProfiles.loading}
+            loadingLabel="Loading saved schools..."
+            emptyLabel="No saved school profiles yet."
+            renderDetails={(profile) => <strong>{profile.schoolName}</strong>}
+            onMove={(index, direction) =>
+              schoolProfiles.handleMove(index, direction, 'School profile order updated.')
+            }
+            onSetDefault={(id) =>
+              schoolProfiles.handleSetDefault(id, 'Default school profile updated.')
+            }
+            onDelete={(id) =>
+              schoolProfiles.handleDelete(id, 'School profile deleted.')
+            }
+          />
 
           {user?.role === 'admin' && (
             <div className="form-section">
@@ -817,8 +440,8 @@ const EditAccount = ({ onBack }) => {
             </div>
           )}
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             className="auth-button"
             disabled={isLoading}
           >
@@ -831,4 +454,3 @@ const EditAccount = ({ onBack }) => {
 };
 
 export default EditAccount;
-
