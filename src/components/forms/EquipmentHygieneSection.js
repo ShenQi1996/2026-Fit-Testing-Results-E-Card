@@ -4,11 +4,7 @@ import FormInput from '../common/FormInput';
 import FormSelect from '../common/FormSelect';
 import FormCheckbox from '../common/FormCheckbox';
 import { formatDateInput } from '../../utils/dateUtils';
-
-const CLEANING_METHOD_OPTIONS = [
-  { value: 'Condition acceptable', label: 'Condition acceptable' },
-  { value: 'Removed from service', label: 'Removed from service' },
-];
+import { CLEANING_METHOD_OPTIONS } from '../../constants/fitTestOptions';
 
 const EquipmentHygieneSection = ({
   formData,

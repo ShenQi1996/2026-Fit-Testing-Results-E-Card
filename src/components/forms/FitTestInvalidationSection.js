@@ -2,13 +2,8 @@ import React from 'react';
 import FormSection from '../common/FormSection';
 import FormSelect from '../common/FormSelect';
 import FormCheckbox from '../common/FormCheckbox';
-
-const FAILURE_REASON_OPTIONS = [
-  { value: 'Improper seal', label: 'Improper seal' },
-  { value: 'Taste detected', label: 'Taste detected' },
-  { value: 'Respirator movement', label: 'Respirator movement' },
-  { value: 'Other', label: 'Other' },
-];
+import FormTextarea from '../common/FormTextarea';
+import { FAILURE_REASON_OPTIONS } from '../../constants/fitTestOptions';
 
 const FitTestInvalidationSection = ({ formData, onChange, isLoading, fieldErrors }) => {
   const showFailureReasonUI = formData.facialHairInterfering === true || formData.respiratorDonnedCorrectly === false;
@@ -71,24 +66,16 @@ const FitTestInvalidationSection = ({ formData, onChange, isLoading, fieldErrors
             error={fieldErrors?.failureReason}
           />
 
-          <div className="form-group">
-            <label htmlFor="correctiveActionNote">
-              Corrective action note <span className="required-mark">*</span>
-            </label>
-            <textarea
-              id="correctiveActionNote"
-              className={`form-textarea ${fieldErrors?.correctiveActionNote ? 'form-input-error' : ''}`}
-              value={formData.correctiveActionNote || ''}
-              onChange={(e) => onChange('correctiveActionNote', e.target.value)}
-              placeholder="Enter corrective action note"
-              required
-              disabled={isLoading}
-              rows={4}
-            />
-            {fieldErrors?.correctiveActionNote && (
-              <span className="form-error-message">{fieldErrors.correctiveActionNote}</span>
-            )}
-          </div>
+          <FormTextarea
+            id="correctiveActionNote"
+            label="Corrective action note"
+            value={formData.correctiveActionNote || ''}
+            onChange={(e) => onChange('correctiveActionNote', e.target.value)}
+            placeholder="Enter corrective action note"
+            required
+            disabled={isLoading}
+            error={fieldErrors?.correctiveActionNote}
+          />
         </>
       )}
     </FormSection>

@@ -13,28 +13,55 @@ import VerifyCardPage from './components/lookup/VerifyCardPage';
 import HomePage from './components/common/HomePage';
 import LoadingAnimation from './components/common/LoadingAnimation';
 import { purgeExpiredFitTests } from './services/firebaseDb';
-import { getVerifyTokenFromPath } from './utils/verificationToken';
+import { resolveAppRoute } from './utils/appRoute';
 import './styles/App.css';
 
-const STAFF_LOGIN_PATH = '/staff_login';
-const RESEND_PATH = '/resend';
+const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }) => (
+  <div className="app">
+    <Header
+      onEditAccount={() => onNavigate('editAccount')}
+      onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
+      sidebarOpen={sidebarOpen}
+    />
+    <div className="app-layout">
+      <Sidebar
+        currentPage={currentPage}
+        onNavigate={onNavigate}
+        isOpen={sidebarOpen}
+      />
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>}
+      <div className="main-content">
+        {currentPage === 'editAccount' ? (
+          <div className="container">
+            <EditAccount onBack={() => onNavigate('form')} />
+          </div>
+        ) : currentPage === 'results' ? (
+          <FitTestResults />
+        ) : currentPage === 'users' && user?.role === 'admin' ? (
+          <div className="container">
+            <UsersManagement />
+          </div>
+        ) : (
+          <div className="container">
+            <FitTestForm />
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+);
 
-const getPublicPath = () => {
-  if (typeof window === 'undefined') return '/';
-  return window.location.pathname.replace(/\/+$/, '') || '/';
-};
+const PublicPage = ({ children }) => (
+  <div className="app auth-page">{children}</div>
+);
 
 const AppContent = () => {
   const { isAuthenticated, loading, user } = useAuth();
   const { setForceLight } = useTheme();
-  const [currentPage, setCurrentPage] = useState('form'); // 'form', 'results', 'users', or 'editAccount'
+  const [currentPage, setCurrentPage] = useState('form');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const publicPath = getPublicPath();
-  const isStaffLoginPage = publicPath === STAFF_LOGIN_PATH;
-  const isResendPage = publicPath === RESEND_PATH;
-  const verifyToken = getVerifyTokenFromPath(publicPath);
-  const isVerifyPage = verifyToken !== null;
-  const isPublicPage = isVerifyPage || isResendPage || !isStaffLoginPage;
+  const route = resolveAppRoute();
+  const isPublicPage = route.kind !== 'staff';
 
   useEffect(() => {
     setForceLight(!isAuthenticated || isPublicPage);
@@ -66,81 +93,56 @@ const AppContent = () => {
     return undefined;
   }, [isAuthenticated, user?.uid]);
 
-  if (isVerifyPage) {
+  if (route.kind === 'verify') {
     return (
-      <div className="app auth-page">
-        <VerifyCardPage initialToken={verifyToken} />
-      </div>
+      <PublicPage>
+        <VerifyCardPage initialToken={route.token} />
+      </PublicPage>
     );
   }
 
-  if (isResendPage) {
+  if (route.kind === 'resend') {
     return (
-      <div className="app auth-page">
+      <PublicPage>
         <ResendCardPage />
-      </div>
+      </PublicPage>
     );
   }
 
-  if (!isStaffLoginPage) {
+  if (route.kind === 'home') {
     return (
-      <div className="app auth-page">
+      <PublicPage>
         <HomePage />
-      </div>
+      </PublicPage>
     );
   }
 
   if (!isAuthenticated) {
     if (loading) {
       return (
-        <div className="app auth-page">
+        <PublicPage>
           <div className="loading-container">
             <LoadingAnimation label="Loading…" />
           </div>
-        </div>
+        </PublicPage>
       );
     }
 
     return (
-      <div className="app auth-page">
+      <PublicPage>
         <Login />
-      </div>
+      </PublicPage>
     );
   }
 
   return (
-    <div className="app">
-      <Header 
-        onEditAccount={() => setCurrentPage('editAccount')} 
-        onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
-        sidebarOpen={sidebarOpen}
-      />
-      <div className="app-layout">
-        <Sidebar 
-          currentPage={currentPage} 
-          onNavigate={handleNavigate}
-          isOpen={sidebarOpen}
-        />
-        {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>}
-        <div className="main-content">
-          {currentPage === 'editAccount' ? (
-            <div className="container">
-              <EditAccount onBack={() => setCurrentPage('form')} />
-            </div>
-          ) : currentPage === 'results' ? (
-            <FitTestResults />
-          ) : currentPage === 'users' && user?.role === 'admin' ? (
-            <div className="container">
-              <UsersManagement />
-            </div>
-          ) : (
-            <div className="container">
-              <FitTestForm />
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+    <StaffApp
+      user={user}
+      currentPage={currentPage}
+      onNavigate={handleNavigate}
+      sidebarOpen={sidebarOpen}
+      setSidebarOpen={setSidebarOpen}
+    />
   );
 };
 
@@ -155,4 +157,3 @@ function App() {
 }
 
 export default App;
-
