@@ -10,8 +10,11 @@ exports.updatePassword = asyncNoop;
 exports.reauthenticateWithCredential = asyncNoop;
 exports.EmailAuthProvider = { credential: noop };
 exports.onAuthStateChanged = () => noop;
-exports.signInWithPopup = asyncNoop;
-exports.signInWithRedirect = asyncNoop;
-exports.getRedirectResult = asyncNoop;
-exports.GoogleAuthProvider = function GoogleAuthProvider() {};
+exports.signInWithPopup = jest.fn(asyncNoop);
+exports.signInWithRedirect = jest.fn(asyncNoop);
+exports.getRedirectResult = jest.fn(asyncNoop);
+exports.GoogleAuthProvider = function GoogleAuthProvider() {
+  this.addScope = () => {};
+  this.setCustomParameters = () => {};
+};
 exports.getAuth = () => ({});

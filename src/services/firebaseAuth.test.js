@@ -1,6 +1,17 @@
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import {
+  getRedirectResult,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+} from 'firebase/auth';
 import { getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import * as authApi from './firebaseAuth';
 import { getAuthErrorMessage, signIn } from './firebaseAuth';
+
+const SIGN_IN_EXPORTS = ['signIn', 'signInWithGoogle', 'handleGoogleRedirect'];
+
+const isSignInExport = (name) =>
+  name === 'handleGoogleRedirect' || name.startsWith('signIn');
 
 const PENDING_MESSAGE = 'Your account is pending admin approval. Please contact an administrator.';
 
@@ -77,4 +88,48 @@ describe('signIn user profile', () => {
     expect(updatePayload).not.toHaveProperty('status');
     expect(updatePayload).not.toHaveProperty('role');
   });
+});
+
+describe('sign-in profile coverage', () => {
+  test('the sign-in export list matches the module', () => {
+    expect(Object.keys(authApi).filter(isSignInExport).sort())
+      .toEqual([...SIGN_IN_EXPORTS].sort());
+  });
+
+  test.each(SIGN_IN_EXPORTS)(
+    '%s ensures a profile for its Firebase user before it finishes',
+    async (name) => {
+      const uid = `uid-${name}`;
+      const user = {
+        uid,
+        email: `${name}@example.com`,
+        displayName: 'Pat Tester',
+        metadata: { creationTime: '2026-01-01T00:00:00.000Z' },
+        providerData: [{ providerId: 'google.com' }],
+      };
+
+      signInWithEmailAndPassword.mockReset();
+      signInWithPopup.mockReset();
+      getRedirectResult.mockReset();
+      signOut.mockReset();
+      getDoc.mockReset();
+      setDoc.mockReset();
+      updateDoc.mockReset();
+      signInWithEmailAndPassword.mockResolvedValue({ user });
+      signInWithPopup.mockResolvedValue({ user });
+      getRedirectResult.mockResolvedValue({ user });
+      signOut.mockResolvedValue();
+      getDoc.mockResolvedValue({ exists: () => false, data: () => undefined });
+      setDoc.mockResolvedValue();
+      updateDoc.mockResolvedValue();
+
+      const args = name === 'signIn' ? [user.email, 'secret'] : [];
+      await expect(authApi[name](...args)).rejects.toThrow(PENDING_MESSAGE);
+
+      const wroteProfile = [...setDoc.mock.calls, ...updateDoc.mock.calls].some(
+        (call) => call[0]?.args?.[2] === uid
+      );
+      expect(wroteProfile).toBe(true);
+    }
+  );
 });
