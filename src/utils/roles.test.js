@@ -16,10 +16,12 @@ describe('role helpers', () => {
     expect(isSuperAdmin('admin')).toBe(false);
   });
 
-  test('only a super admin is offered admin and superadmin on an existing user', () => {
-    expect(rolesAssignableBy('superadmin')).toEqual(['tester', 'admin', 'superadmin']);
+  test('client role choices are tester or admin, never superadmin', () => {
+    expect(rolesAssignableBy('superadmin')).toEqual(['tester', 'admin']);
     expect(rolesAssignableBy('admin')).toEqual(['tester']);
     expect(rolesAssignableBy('tester')).toEqual(['tester']);
+    expect(rolesAssignableBy('superadmin')).not.toContain('superadmin');
+    expect(rolesAssignableBy('admin')).not.toContain('superadmin');
   });
 
   test('nobody can create a superadmin from the client role list', () => {

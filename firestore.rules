@@ -63,22 +63,27 @@ service cloud.firestore {
       // Owners cannot change role, status, approvedBy, or approvedAt, so nobody
       // can self-escalate. .get(..., null) keeps a missing field from failing
       // the whole rule. A super admin cannot demote or delete themselves.
-      // Role changes to or from admin or superadmin are super-admin only.
+      // No client update may set role to superadmin unless that role is unchanged.
+      // Role changes to or from admin are super-admin only.
       // A regular admin may update only role and status on a tester doc
       // (plus approval bookkeeping). The role must stay tester.
       allow update: if
-        (isOwner(userId)
-          && request.resource.data.get('role', null) == resource.data.get('role', null)
-          && request.resource.data.get('status', null) == resource.data.get('status', null)
-          && request.resource.data.get('approvedBy', null) == resource.data.get('approvedBy', null)
-          && request.resource.data.get('approvedAt', null) == resource.data.get('approvedAt', null))
-        || (isSuperAdmin() && request.auth.uid != userId)
-        || (isAdmin() && !isSuperAdmin()
-          && request.auth.uid != userId
-          && roleOf(resource.data) == 'tester'
-          && roleOf(request.resource.data) == 'tester'
-          && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'updatedAt']));
+        (request.resource.data.get('role', null) != 'superadmin'
+          || request.resource.data.get('role', null) == resource.data.get('role', null))
+        && (
+          (isOwner(userId)
+            && request.resource.data.get('role', null) == resource.data.get('role', null)
+            && request.resource.data.get('status', null) == resource.data.get('status', null)
+            && request.resource.data.get('approvedBy', null) == resource.data.get('approvedBy', null)
+            && request.resource.data.get('approvedAt', null) == resource.data.get('approvedAt', null))
+          || (isSuperAdmin() && request.auth.uid != userId)
+          || (isAdmin() && !isSuperAdmin()
+            && request.auth.uid != userId
+            && roleOf(resource.data) == 'tester'
+            && roleOf(request.resource.data) == 'tester'
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'updatedAt']))
+        );
       allow delete: if
         (isSuperAdmin() && request.auth.uid != userId)
         || (isAdmin() && !isSuperAdmin()

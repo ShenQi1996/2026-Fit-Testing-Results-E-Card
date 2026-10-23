@@ -10,6 +10,7 @@ module.exports = {
     ],
   },
   moduleNameMapper: {
+    "\\.css$": "<rootDir>/test/mocks/styleMock.js",
     "^firebase/app$": "<rootDir>/test/mocks/firebaseApp.js",
     "^firebase/auth$": "<rootDir>/test/mocks/firebaseAuth.js",
     "^firebase/firestore$": "<rootDir>/test/mocks/firebaseFirestore.js",
