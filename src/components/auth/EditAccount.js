@@ -11,11 +11,9 @@ import {
   deleteUserSchoolProfile,
   reorderUserSchoolProfiles,
   setDefaultSchoolProfile,
-  getPendingUsers,
-  updateUserApprovalStatus,
 } from '../../services/firebaseDb';
 import { useSavedProfiles } from '../../hooks/useSavedProfiles';
-import { canModifyManagedUser, isAdminOrAbove, isSuperAdmin } from '../../utils/roles';
+import { isAdminOrAbove, isSuperAdmin } from '../../utils/roles';
 import SavedProfilesPanel from './SavedProfilesPanel';
 import './EditAccount.css';
 
@@ -55,10 +53,6 @@ const EditAccount = ({ onBack }) => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [pendingUsers, setPendingUsers] = useState([]);
-  const [pendingUsersLoading, setPendingUsersLoading] = useState(false);
-  const [pendingUsersError, setPendingUsersError] = useState('');
-  const [pendingUsersSuccess, setPendingUsersSuccess] = useState('');
 
   const solutionProfiles = useSavedProfiles({
     userId: user?.uid,
@@ -95,25 +89,6 @@ const EditAccount = ({ onBack }) => {
     }
   }, [user]);
 
-  const loadPendingUsers = async () => {
-    if (!user?.uid || !staffAdmin) return;
-    setPendingUsersLoading(true);
-    setPendingUsersError('');
-    try {
-      const users = await getPendingUsers(user.uid);
-      setPendingUsers(users);
-    } catch (err) {
-      setPendingUsersError(err.message || 'Failed to load pending users.');
-    } finally {
-      setPendingUsersLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadPendingUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, user?.role]);
-
   const handleChange = (e) => {
     setFormData({
       ...formData,
@@ -121,24 +96,6 @@ const EditAccount = ({ onBack }) => {
     });
     setError('');
     setSuccess('');
-  };
-
-  const handleApprovalAction = async (targetUserId, nextStatus) => {
-    if (!user?.uid || !staffAdmin) return;
-    setPendingUsersError('');
-    setPendingUsersSuccess('');
-
-    try {
-      await updateUserApprovalStatus(user.uid, targetUserId, nextStatus);
-      setPendingUsersSuccess(
-        nextStatus === 'approved'
-          ? 'User approved successfully.'
-          : 'User rejected successfully.'
-      );
-      await loadPendingUsers();
-    } catch (err) {
-      setPendingUsersError(err.message || 'Failed to update approval status.');
-    }
   };
 
   const handleSubmit = async (e) => {
@@ -186,10 +143,6 @@ const EditAccount = ({ onBack }) => {
       setIsLoading(false);
     }
   };
-
-  const visiblePendingUsers = pendingUsers.filter((pendingUser) => (
-    canModifyManagedUser(user?.role, pendingUser.role || 'tester')
-  ));
 
   return (
     <div className="edit-account-container">
@@ -385,70 +338,6 @@ const EditAccount = ({ onBack }) => {
               schoolProfiles.handleDelete(id, 'School profile deleted.')
             }
           />
-
-          {staffAdmin && (
-            <div className="form-section">
-              <h3 className="section-title">Pending User Approvals</h3>
-              <p className="section-description">
-                Approve or reject new user account requests before they can access the app.
-              </p>
-
-              {pendingUsersError && <div className="auth-error">{pendingUsersError}</div>}
-              {pendingUsersSuccess && <div className="auth-success">{pendingUsersSuccess}</div>}
-
-              <button
-                type="button"
-                className="solution-add-button"
-                onClick={loadPendingUsers}
-                disabled={pendingUsersLoading || isLoading}
-                style={{ marginBottom: '10px' }}
-              >
-                {pendingUsersLoading ? 'Refreshing...' : 'Refresh Pending Users'}
-              </button>
-
-              <div className="solution-profile-list">
-                {pendingUsersLoading ? (
-                  <div className="solution-empty">Loading pending approvals...</div>
-                ) : visiblePendingUsers.length === 0 ? (
-                  <div className="solution-empty">No pending users.</div>
-                ) : (
-                  visiblePendingUsers.map((pendingUser) => (
-                    <div key={pendingUser.id} className="solution-profile-item">
-                      <div className="solution-profile-details">
-                        <strong>{pendingUser.name || 'No Name'}</strong>
-                        <span>{pendingUser.email || 'No Email'}</span>
-                        <span>Role: {pendingUser.role || 'tester'}</span>
-                        <span>
-                          Requested:{' '}
-                          {pendingUser.requestedAt
-                            ? new Date(pendingUser.requestedAt).toLocaleString()
-                            : 'N/A'}
-                        </span>
-                      </div>
-                      <div className="solution-profile-actions">
-                        <button
-                          type="button"
-                          onClick={() => handleApprovalAction(pendingUser.id, 'approved')}
-                          disabled={pendingUsersLoading || isLoading}
-                          title="Approve user"
-                        >
-                          ✅
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleApprovalAction(pendingUser.id, 'rejected')}
-                          disabled={pendingUsersLoading || isLoading}
-                          title="Reject user"
-                        >
-                          ❌
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
 
           <button
             type="submit"
