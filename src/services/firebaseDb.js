@@ -1226,6 +1226,23 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
       updatedAt: now,
     };
 
+    if (role === USER_ROLE_TESTER) {
+      const requestedSchool = typeof userData.school === 'string' ? userData.school.trim() : '';
+      if (isSuperAdmin(actorRole)) {
+        if (requestedSchool) profile.school = requestedSchool;
+      } else {
+        const { schools } = await getUserAccessProfile(adminUserId);
+        if (schools.length === 0) {
+          throw permissionError('You have no schools assigned, so you cannot add a tester.');
+        }
+        const school = requestedSchool || (schools.length === 1 ? schools[0] : '');
+        if (!schools.includes(school)) {
+          throw permissionError('Choose one of your schools before adding a tester.');
+        }
+        profile.school = school;
+      }
+    }
+
     if (status === USER_STATUS_APPROVED || status === USER_STATUS_REJECTED) {
       profile.approvedAt = now;
       profile.approvedBy = adminUserId;

@@ -58,7 +58,9 @@ service cloud.firestore {
     }
 
     function isScopedAdmin() {
-      return isAdmin() && !isSuperAdmin();
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? (isAdmin() && !isSuperAdmin())
+        : false;
     }
 
     // Missing role is treated as tester when an admin edits someone else's doc.
@@ -127,12 +129,37 @@ service cloud.firestore {
         || (isSuperAdmin() && request.auth.uid != userId && schoolTagsShapeOk());
     }
 
+    // A scoped admin creating a tester must set school to one of their own schools.
+    // Property access stays inside the chosen ternary branch.
+    function createdTesterSchoolOk() {
+      return request.resource.data.keys().hasAny(['school'])
+          && !request.resource.data.keys().hasAny(['schools'])
+        ? (
+          request.resource.data.school is string
+            ? (
+              request.resource.data.school.size() > 0
+              && request.resource.data.school in actorSchools()
+            )
+            : false
+        )
+        : false;
+    }
+
     function schoolTagsOkOnCreate(userId) {
-      return !request.resource.data.keys().hasAny(['school', 'schools'])
+      return (
+          !request.resource.data.keys().hasAny(['school', 'schools'])
+          && !isScopedAdmin()
+        )
         || (
           isSuperAdmin()
           && request.auth.uid != userId
           && schoolTagsShapeOk()
+        )
+        || (
+          isScopedAdmin()
+          && request.auth.uid != userId
+          && request.resource.data.role == 'tester'
+          && createdTesterSchoolOk()
         );
     }
 
@@ -194,8 +221,9 @@ service cloud.firestore {
       // Owners may create only their own pending tester profile.
       // Admins may create a tester profile for someone else.
       // A super admin may create a tester or admin profile for someone else.
-      // Only a super admin may set school or schools, or startDate or endDate,
-      // and not on their own doc.
+      // A scoped admin creating a tester must set school to one of their schools.
+      // A super admin may omit school or set school or schools, and not on their own doc.
+      // Only a super admin may set startDate or endDate, and not on their own doc.
       allow create: if schoolTagsOkOnCreate(userId) &&
         accessDatesOkOnCreate(userId) &&
         request.resource.data.get('role', null) != 'superadmin'

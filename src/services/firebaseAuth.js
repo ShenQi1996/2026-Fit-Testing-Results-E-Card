@@ -421,13 +421,17 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
       await updateProfile(createdUser, { displayName: name });
     }
 
-    const profile = await createManagedUserProfile(adminUserId, createdUser.uid, {
+    const profileInput = {
       email: createdUser.email || email,
       name: name || createdUser.displayName || '',
       role: requestedRole,
       status: normalizeUserStatus(userData.status),
       provider: 'password',
-    });
+    };
+    if (typeof userData.school === 'string' && userData.school.trim()) {
+      profileInput.school = userData.school.trim();
+    }
+    const profile = await createManagedUserProfile(adminUserId, createdUser.uid, profileInput);
 
     await signOut(secondaryAuth);
     return profile;

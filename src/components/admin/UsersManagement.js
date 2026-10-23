@@ -11,9 +11,11 @@ import {
   updateUserApprovalStatus,
 } from '../../services/firebaseDb';
 import { createManagedAuthUser } from '../../services/firebaseAuth';
+import { SCHOOLS_OPTIONS } from '../../constants/fitTestOptions';
 import {
   USER_ROLE_ADMIN,
   USER_ROLE_SUPERADMIN,
+  USER_ROLE_TESTER,
   accessDateInputValue,
   accessWindowOrderError,
   canModifyManagedUser,
@@ -22,7 +24,7 @@ import {
   rolesAssignableBy,
   rolesCreatableBy,
 } from '../../utils/roles';
-import { filterUsersForActor, parseSchoolListInput } from '../../utils/schoolScope';
+import { filterUsersForActor, normalizeSchoolList, parseSchoolListInput } from '../../utils/schoolScope';
 import './UsersManagement.css';
 
 const EMPTY_CREATE_FORM = {
@@ -31,7 +33,10 @@ const EMPTY_CREATE_FORM = {
   name: '',
   role: 'tester',
   status: 'pending',
+  school: '',
 };
+
+const NO_SCHOOLS_CREATE_MESSAGE = 'You have no schools assigned, so you cannot add a tester. Ask a super admin to assign a school.';
 
 const formatDate = (iso) => {
   if (!iso) return '—';
@@ -345,6 +350,15 @@ const UsersManagement = () => {
     }
   };
 
+  const actorSchools = normalizeSchoolList(user?.schools);
+  const createRole = creatableRoles.includes(createForm.role) ? createForm.role : 'tester';
+  const creatingTester = createRole === USER_ROLE_TESTER;
+  const createSchoolMissing = !superAdmin
+    && creatingTester
+    && actorSchools.length > 1
+    && !actorSchools.includes(createForm.school);
+  const createBlocked = !superAdmin && creatingTester && actorSchools.length === 0;
+
   const handleCreate = async (event) => {
     event.preventDefault();
     if (!user?.uid) return;
@@ -353,10 +367,26 @@ const UsersManagement = () => {
     setError('');
     setSuccess('');
     try {
-      const created = await createManagedAuthUser(user.uid, {
-        ...createForm,
-        role: assignableRoles.includes(createForm.role) ? createForm.role : 'tester',
-      });
+      const role = assignableRoles.includes(createForm.role) ? createForm.role : 'tester';
+      if (!superAdmin && role === USER_ROLE_TESTER && actorSchools.length === 0) {
+        throw new Error(NO_SCHOOLS_CREATE_MESSAGE);
+      }
+      if (!superAdmin && role === USER_ROLE_TESTER && actorSchools.length > 1
+        && !actorSchools.includes(createForm.school)) {
+        throw new Error('Choose one of your schools before adding a tester.');
+      }
+      const school = superAdmin
+        ? (createForm.school || '').trim()
+        : (actorSchools.length === 1 ? actorSchools[0] : (createForm.school || '').trim());
+      const payload = {
+        email: createForm.email,
+        password: createForm.password,
+        name: createForm.name,
+        role,
+        status: createForm.status,
+      };
+      if (role === USER_ROLE_TESTER && school) payload.school = school;
+      const created = await createManagedAuthUser(user.uid, payload);
       setUsers((prev) => [created, ...prev]);
       setEditDrafts((prev) => ({
         ...prev,
@@ -494,8 +524,60 @@ const UsersManagement = () => {
                   ))}
                 </select>
               </label>
+              {creatingTester && superAdmin && (
+                <label>
+                  School
+                  <select
+                    aria-label="School"
+                    value={createForm.school}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, school: e.target.value }))}
+                    disabled={creating}
+                  >
+                    <option value="">Leave unset</option>
+                    {SCHOOLS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {creatingTester && !superAdmin && actorSchools.length === 1 && (
+                <label>
+                  School
+                  <div className="user-school-readonly" aria-label="School">
+                    {actorSchools[0]}
+                  </div>
+                </label>
+              )}
+              {creatingTester && !superAdmin && actorSchools.length > 1 && (
+                <label>
+                  School
+                  <select
+                    aria-label="School"
+                    required
+                    value={createForm.school}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, school: e.target.value }))}
+                    disabled={creating}
+                  >
+                    <option value="">Select a school</option>
+                    {actorSchools.map((school) => (
+                      <option key={school} value={school}>
+                        {school}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
-            <button type="submit" className="users-primary-button" disabled={creating}>
+            {createBlocked && (
+              <p className="users-error">{NO_SCHOOLS_CREATE_MESSAGE}</p>
+            )}
+            <button
+              type="submit"
+              className="users-primary-button"
+              disabled={creating || createBlocked || createSchoolMissing}
+            >
               {creating ? 'Creating...' : 'Create User'}
             </button>
           </form>

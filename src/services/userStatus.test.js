@@ -127,18 +127,32 @@ describe('user status access', () => {
 
   test('creating a managed profile without status stores pending', async () => {
     getDoc
-      .mockResolvedValueOnce(adminDoc())
+      .mockResolvedValueOnce(userDoc({
+        role: 'admin',
+        status: 'approved',
+        schools: ['Helene College of Nursing'],
+      }))
+      .mockResolvedValueOnce(userDoc({
+        role: 'admin',
+        status: 'approved',
+        schools: ['Helene College of Nursing'],
+      }))
       .mockResolvedValueOnce(userDoc({
         email: 'new@example.com',
         role: 'tester',
         status: 'pending',
+        school: 'Helene College of Nursing',
       }));
 
     await createManagedUserProfile('admin-1', 'new-uid', { email: 'new@example.com' });
 
     expect(setDoc).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ status: 'pending', role: 'tester' })
+      expect.objectContaining({
+        status: 'pending',
+        role: 'tester',
+        school: 'Helene College of Nursing',
+      })
     );
   });
 
