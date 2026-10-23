@@ -24,14 +24,10 @@ import {
   getUserAccessProfile,
   getUserRole,
   createManagedUserProfile,
-  normalizeUserStatus,
 } from './firebaseDb';
 
 const PENDING_APPROVAL_MESSAGE = 'Your account is pending admin approval. Please contact an administrator.';
 const REJECTED_APPROVAL_MESSAGE = 'Your account request was not approved. Please contact an administrator.';
-
-// Concurrent callers (Google redirect plus the auth-state listener) share one run.
-const finalizeInFlight = new Map();
 
 const assertUserApproved = async (user) => {
   const accessProfile = await getUserAccessProfile(user.uid);
@@ -44,64 +40,6 @@ const assertUserApproved = async (user) => {
     throw new Error(REJECTED_APPROVAL_MESSAGE);
   }
   throw new Error(PENDING_APPROVAL_MESSAGE);
-};
-
-const toAppUser = (user, accessProfile) => ({
-  uid: user.uid,
-  email: user.email,
-  name: user.displayName || '',
-  createdAt: user.metadata?.creationTime,
-  role: accessProfile.role,
-  status: accessProfile.status,
-});
-
-const signOutQuietly = async () => {
-  try {
-    await signOut(auth);
-  } catch (signOutError) {
-    console.error('Error signing out after a failed sign-in:', signOutError);
-  }
-};
-
-const runFinalizeSignIn = async (user, provider) => {
-  try {
-    await ensureUserProfile({
-      uid: user.uid,
-      email: user.email,
-      name: user.displayName || '',
-      provider: provider || 'unknown',
-    });
-    const accessProfile = await assertUserApproved(user);
-    return toAppUser(user, accessProfile);
-  } catch (error) {
-    // The UI treats a thrown sign-in as logged out. Drop the Auth session too.
-    await signOutQuietly();
-    throw error;
-  }
-};
-
-/**
- * Shared tail of every sign-in path. Creates a pending profile when missing,
- * backfills email/name for an existing profile, then signs out unless approved.
- * A backfill that rules reject does not block an already-approved user.
- * @param {object} user Firebase user
- * @param {string} provider
- * @returns {Promise<object>}
- */
-export const finalizeSignIn = (user, provider) => {
-  const uid = user?.uid;
-  if (uid && finalizeInFlight.has(uid)) {
-    return finalizeInFlight.get(uid);
-  }
-
-  let run;
-  run = runFinalizeSignIn(user, provider).finally(() => {
-    if (uid && finalizeInFlight.get(uid) === run) {
-      finalizeInFlight.delete(uid);
-    }
-  });
-  if (uid) finalizeInFlight.set(uid, run);
-  return run;
 };
 
 /**
@@ -124,13 +62,15 @@ export const signUp = async (email, password, name) => {
       });
     }
 
-    // New accounts are pending, so this creates the profile, signs out, and throws.
-    await finalizeSignIn({
+    await ensureUserProfile({
       uid: user.uid,
       email: user.email,
-      displayName: user.displayName || name || '',
-      metadata: user.metadata,
-    }, 'password');
+      name: user.displayName || name || '',
+      provider: 'password',
+    });
+
+    await signOut(auth);
+    throw new Error(PENDING_APPROVAL_MESSAGE);
   } catch (error) {
     if (error?.message === PENDING_APPROVAL_MESSAGE) {
       throw error;
@@ -148,7 +88,17 @@ export const signUp = async (email, password, name) => {
 export const signIn = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    return await finalizeSignIn(userCredential.user, 'password');
+    const user = userCredential.user;
+    const accessProfile = await assertUserApproved(user);
+
+    return {
+      uid: user.uid,
+      email: user.email,
+      name: user.displayName || '',
+      createdAt: user.metadata.creationTime,
+      role: accessProfile.role,
+      status: accessProfile.status,
+    };
   } catch (error) {
     if (
       error?.message === PENDING_APPROVAL_MESSAGE ||
@@ -182,10 +132,22 @@ export const signInWithGoogle = async () => {
       // Try popup method first (works better in most cases)
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
-      return await finalizeSignIn(
-        user,
-        user.providerData?.[0]?.providerId || 'google.com'
-      );
+      await ensureUserProfile({
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || '',
+        provider: user.providerData?.[0]?.providerId || 'google.com',
+      });
+      const accessProfile = await assertUserApproved(user);
+
+      return {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || '',
+        createdAt: user.metadata.creationTime,
+        role: accessProfile.role,
+        status: accessProfile.status,
+      };
     } catch (popupError) {
       // Use redirect fallback only when popup is blocked by browser.
       if (popupError.code === 'auth/popup-blocked') {
@@ -283,19 +245,39 @@ export const onAuthStateChange = (callback) => {
   return onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
       try {
-        const appUser = await finalizeSignIn(
-          firebaseUser,
-          firebaseUser.providerData?.[0]?.providerId || 'unknown'
-        );
-        callback(appUser);
-      } catch (error) {
-        if (
-          error?.message !== PENDING_APPROVAL_MESSAGE &&
-          error?.message !== REJECTED_APPROVAL_MESSAGE
-        ) {
-          console.error('Error restoring signed-in user:', error);
+        await ensureUserProfile({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || '',
+          provider: firebaseUser.providerData?.[0]?.providerId || 'unknown',
+        });
+        const accessProfile = await getUserAccessProfile(firebaseUser.uid);
+
+        if (accessProfile.status !== 'approved') {
+          await signOut(auth);
+          callback(null);
+          return;
         }
-        callback(null);
+
+        callback({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || '',
+          createdAt: firebaseUser.metadata.creationTime,
+          role: accessProfile.role,
+          status: accessProfile.status,
+        });
+      } catch (error) {
+        console.error('Error fetching user role:', error);
+        // Default to tester role on error
+        callback({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || '',
+          createdAt: firebaseUser.metadata.creationTime,
+          role: 'tester',
+          status: 'approved',
+        });
       }
     } else {
       callback(null);
@@ -309,22 +291,35 @@ export const onAuthStateChange = (callback) => {
  */
 export const getCurrentUser = async () => {
   const user = auth.currentUser;
-  if (!user) return null;
-
-  try {
-    return await finalizeSignIn(
-      user,
-      user.providerData?.[0]?.providerId || 'unknown'
-    );
-  } catch (error) {
-    if (
-      error?.message !== PENDING_APPROVAL_MESSAGE &&
-      error?.message !== REJECTED_APPROVAL_MESSAGE
-    ) {
-      console.error('Error fetching current user:', error);
+  if (user) {
+    try {
+      const accessProfile = await getUserAccessProfile(user.uid);
+      if (accessProfile.status !== 'approved') {
+        await signOut(auth);
+        return null;
+      }
+      return {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || '',
+        createdAt: user.metadata.creationTime,
+        role: accessProfile.role,
+        status: accessProfile.status,
+      };
+    } catch (error) {
+      console.error('Error fetching user role:', error);
+      // Default to tester role on error
+      return {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || '',
+        createdAt: user.metadata.creationTime,
+        role: 'tester',
+        status: 'approved',
+      };
     }
-    return null;
   }
+  return null;
 };
 
 /**
@@ -342,20 +337,17 @@ export const handleGoogleRedirect = async () => {
   try {
     const result = await getRedirectResult(auth);
     if (result && result.user) {
-      return await finalizeSignIn(
-        result.user,
-        result.user.providerData?.[0]?.providerId || 'google.com'
-      );
+      return {
+        uid: result.user.uid,
+        email: result.user.email,
+        name: result.user.displayName || '',
+        createdAt: result.user.metadata.creationTime,
+      };
     }
     return null;
   } catch (error) {
-    if (
-      error?.message === PENDING_APPROVAL_MESSAGE ||
-      error?.message === REJECTED_APPROVAL_MESSAGE
-    ) {
-      throw error;
-    }
-    // No redirect result is normal when the user did not sign in that way.
+    // If there's an error, it means no redirect happened or it failed
+    // This is normal if user didn't use redirect method
     return null;
   }
 };
@@ -400,7 +392,7 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
       email: createdUser.email || email,
       name: name || createdUser.displayName || '',
       role: userData.role || 'tester',
-      status: normalizeUserStatus(userData.status),
+      status: userData.status || 'approved',
       provider: 'password',
     });
 

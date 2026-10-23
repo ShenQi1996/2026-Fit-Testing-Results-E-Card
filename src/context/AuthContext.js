@@ -103,7 +103,8 @@ export const AuthProvider = ({ children }) => {
   // Allows users to update their name, email, and/or password using Firebase
   const updateUser = async (updateData) => {
     try {
-      if (!user) {
+      const currentFirebaseUser = getCurrentUser();
+      if (!currentFirebaseUser || !user) {
         throw new Error('No user logged in');
       }
 
