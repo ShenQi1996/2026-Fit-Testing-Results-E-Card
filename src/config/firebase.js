@@ -1,24 +1,22 @@
-/* global process, require */
+/* global process */
+// Firebase web app. Production builds leave APP_ENV unset and keep the production project.
+// Staging builds (APP_ENV=staging) read FIREBASE_* inlined by webpack EnvironmentPlugin.
+// Each process.env.NAME access must be a direct member expression so EnvironmentPlugin
+// can replace it. firebaseAuth.js creates its secondary app from this same object.
+
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import { readFirebaseConfig } from './readFirebaseConfig';
+import { resolveFirebaseConfig } from './readFirebaseConfig';
 
-const firebaseEnv = {
-  APP_ENV: process.env.APP_ENV,
+export const firebaseConfig = resolveFirebaseConfig(process.env.APP_ENV, {
   FIREBASE_API_KEY: process.env.FIREBASE_API_KEY,
   FIREBASE_AUTH_DOMAIN: process.env.FIREBASE_AUTH_DOMAIN,
   FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
   FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET,
   FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
   FIREBASE_APP_ID: process.env.FIREBASE_APP_ID,
-};
-
-// Branch on the inlined APP_ENV so a staging build does not include the
-// production config module.
-export const firebaseConfig = process.env.APP_ENV === 'staging'
-  ? readFirebaseConfig(firebaseEnv)
-  : require('./prodFirebaseConfig').PROD_FIREBASE_CONFIG;
+});
 
 const app = initializeApp(firebaseConfig);
 

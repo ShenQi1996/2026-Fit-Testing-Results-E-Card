@@ -112,7 +112,7 @@ vercel.json                      # SPA rewrites to index.html
 
 Vercel build: `npm run build`, output `dist/`. See [`vercel.json`](./vercel.json) for SPA rewrites.
 
-With `APP_ENV` unset, the build uses the built-in production Firebase config. Vercel Preview for Git branch `staging` sets `APP_ENV=staging` plus `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, and `FIREBASE_APP_ID`. That build fails if any of those are missing. See [STAGING.md](./STAGING.md).
+When `APP_ENV` is unset, the build keeps the production Firebase project `fit-test-result-e-card-2026`. A staging build sets `APP_ENV=staging` and the six `FIREBASE_*` variables, and fails if any are missing or if the project id is production. See [STAGING.md](./STAGING.md) and [`.env.example`](./.env.example).
 
 Add the production hostname to Firebase **Authorized domains** before testing Google sign-in. Per-deployment `*.vercel.app` URLs are not authorized.
 

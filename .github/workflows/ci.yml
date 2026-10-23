@@ -29,3 +29,77 @@ jobs:
       - run: npm run lint --if-present
       - run: npm run build
       - run: npm test
+  build-staging-env:
+    name: Build with APP_ENV=staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_ENV: staging
+      FIREBASE_API_KEY: ci-not-a-real-key
+      FIREBASE_AUTH_DOMAIN: ci.firebaseapp.com
+      FIREBASE_PROJECT_ID: ci-staging-not-production
+      FIREBASE_STORAGE_BUCKET: ci.appspot.com
+      FIREBASE_MESSAGING_SENDER_ID: "000000000000"
+      FIREBASE_APP_ID: "1:000000000000:web:ci"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Confirm the staging bundle inlined the dummy project
+        run: |
+          node -e '
+            const fs = require("fs");
+            const bundle = fs.readdirSync("dist")
+              .filter((name) => name.endsWith(".js"))
+              .map((name) => fs.readFileSync("dist/" + name, "utf8"))
+              .join("\n");
+            if (!bundle.includes("ci-staging-not-production")) {
+              console.error("staging build did not inline FIREBASE_PROJECT_ID");
+              process.exit(1);
+            }
+            console.log("staging build inlined the dummy Firebase project");
+          '
+  build-no-env:
+    name: Build with no Firebase env
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_ENV: ""
+      FIREBASE_API_KEY: ""
+      FIREBASE_AUTH_DOMAIN: ""
+      FIREBASE_PROJECT_ID: ""
+      FIREBASE_STORAGE_BUCKET: ""
+      FIREBASE_MESSAGING_SENDER_ID: ""
+      FIREBASE_APP_ID: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Confirm the no-env bundle still uses production Firebase
+        run: |
+          node -e '
+            const fs = require("fs");
+            const bundle = fs.readdirSync("dist")
+              .filter((name) => name.endsWith(".js"))
+              .map((name) => fs.readFileSync("dist/" + name, "utf8"))
+              .join("\n");
+            const prodProject = "fit-test-result-e-card-2026";
+            const prodKey = "AIzaSyDb-yI2sKaNHNUWLVAL6begbfYajW0dXIQ";
+            if (!bundle.includes(prodProject) || !bundle.includes(prodKey)) {
+              console.error("no-env build is missing the production Firebase config");
+              process.exit(1);
+            }
+            if (bundle.includes("fit-test-result-e-card-staging")) {
+              console.error("no-env build contains the staging Firebase project id");
+              process.exit(1);
+            }
+            console.log("no-env build uses the production Firebase config");
+          '

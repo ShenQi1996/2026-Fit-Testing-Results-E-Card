@@ -1,6 +1,5 @@
 module.exports = {
   testEnvironment: "node",
-  setupFiles: ["<rootDir>/test/setupEnv.js"],
   testMatch: ["<rootDir>/src/**/*.test.js"],
   transform: {
     "\\.js$": [

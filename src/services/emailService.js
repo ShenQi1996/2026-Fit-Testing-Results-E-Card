@@ -1,14 +1,33 @@
+/* global process */
 // Email service for sending e-cards via EmailJS
 
 import emailjs from '@emailjs/browser';
 import { generateFitTestCard } from '../utils/fitTestCardTemplate';
 
-// EmailJS Configuration - Replace with your credentials
-// Get these from: https://dashboard.emailjs.com/admin/account
+// Production EmailJS account. Left compiled in so APP_ENV-unset production sends
+// exactly as before. Staging must not use it to reach real customers: see
+// assertStagingRecipient. There is no separate staging EmailJS project yet.
 const EMAILJS_CONFIG = {
   SERVICE_ID: 'service_u84chaq',
   TEMPLATE_ID: 'template_n6pvpvf',
   PUBLIC_KEY: 'S3Owi-2s2Q_FCXW1k',
+};
+
+const STAGING_EMAIL_MESSAGE = 'Staging does not email real customers. Recipient must be an @example.com address.';
+
+/**
+ * Staging builds refuse every recipient outside @example.com.
+ * Any other APP_ENV, including unset production, does not apply this check.
+ * @param {string} recipientEmail
+ * @param {string} [appEnv]
+ */
+export const assertStagingRecipient = (recipientEmail, appEnv) => {
+  const resolvedEnv = appEnv === undefined ? process.env.APP_ENV : appEnv;
+  if (resolvedEnv !== 'staging') return;
+  const email = String(recipientEmail || '').trim().toLowerCase();
+  if (!email.endsWith('@example.com')) {
+    throw new Error(STAGING_EMAIL_MESSAGE);
+  }
 };
 
 // Check if EmailJS is configured
@@ -33,6 +52,8 @@ export const sendFitTestCard = async (formData) => {
   if (!formData.recipientEmail || !formData.recipientEmail.trim()) {
     throw new Error('Recipient email address is required');
   }
+
+  assertStagingRecipient(formData.recipientEmail);
 
   // Generate HTML e-card content
   const htmlContent = generateFitTestCard(formData);

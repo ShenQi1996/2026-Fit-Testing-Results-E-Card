@@ -17,7 +17,12 @@ const FIREBASE_ENV_KEYS = [
     'FIREBASE_APP_ID',
 ];
 
-const readEnvFile = (filePath, into) => {
+const PROD_PROJECT_ID = 'fit-test-result-e-card-2026';
+
+// Local staging only. Does not override variables already in the environment,
+// so a production Vercel build with no env file is unchanged.
+const loadEnvLocal = () => {
+    const filePath = path.resolve(__dirname, '.env.local');
     if (!fs.existsSync(filePath)) return;
     fs.readFileSync(filePath, 'utf8').split(/\r?\n/).forEach((line) => {
         const trimmed = line.trim();
@@ -25,6 +30,7 @@ const readEnvFile = (filePath, into) => {
         const eq = trimmed.indexOf('=');
         if (eq <= 0) return;
         const key = trimmed.slice(0, eq).trim();
+        if (process.env[key] !== undefined) return;
         let value = trimmed.slice(eq + 1).trim();
         if (
             (value.startsWith('"') && value.endsWith('"'))
@@ -32,46 +38,43 @@ const readEnvFile = (filePath, into) => {
         ) {
             value = value.slice(1, -1);
         }
-        into[key] = value;
+        process.env[key] = value;
     });
 };
 
-const fileEnv = {};
-readEnvFile(path.resolve(__dirname, '.env'), fileEnv);
-readEnvFile(path.resolve(__dirname, '.env.local'), fileEnv);
-Object.entries(fileEnv).forEach(([key, value]) => {
-    if (process.env[key] === undefined) {
-        process.env[key] = value;
+loadEnvLocal();
+
+// Trim before EnvironmentPlugin inlines the values. A trailing newline must not
+// miss the staging check and fall back to the production project.
+if (process.env.APP_ENV !== undefined) {
+    process.env.APP_ENV = String(process.env.APP_ENV).trim();
+}
+FIREBASE_ENV_KEYS.forEach((key) => {
+    if (process.env[key] !== undefined) {
+        process.env[key] = String(process.env[key]).trim();
     }
 });
 
 const appEnv = String(process.env.APP_ENV || '').trim();
-const missingFirebaseEnv = FIREBASE_ENV_KEYS.filter((key) => !String(process.env[key] || '').trim());
-
-// APP_ENV unset: production keeps the built-in config. Do not require FIREBASE_*.
-// APP_ENV=staging: EnvironmentPlugin fails the build when any FIREBASE_* value is missing.
-let firebaseEnvPlugin;
-if (!appEnv) {
-    const productionDefine = {
-        'process.env.APP_ENV': JSON.stringify(''),
-    };
-    FIREBASE_ENV_KEYS.forEach((key) => {
-        productionDefine[`process.env.${key}`] = JSON.stringify('');
-    });
-    firebaseEnvPlugin = new webpack.DefinePlugin(productionDefine);
-} else if (appEnv === 'staging') {
-    if (missingFirebaseEnv.length > 0) {
+if (appEnv === 'staging') {
+    const missing = FIREBASE_ENV_KEYS.filter((key) => !String(process.env[key] || '').trim());
+    if (missing.length > 0) {
         throw new Error(
-            `APP_ENV=staging is missing ${missingFirebaseEnv.join(', ')}. `
-            + 'The production Firebase config is not used for this build.'
+            `APP_ENV=staging requires ${missing.join(', ')}. `
+            + 'Refusing to fall back to the production Firebase project.'
         );
     }
-    firebaseEnvPlugin = new webpack.EnvironmentPlugin(['APP_ENV', ...FIREBASE_ENV_KEYS]);
-} else {
-    throw new Error(
-        `APP_ENV=${appEnv} is not supported. Leave APP_ENV unset for production, or set APP_ENV=staging.`
-    );
+    if (String(process.env.FIREBASE_PROJECT_ID).trim() === PROD_PROJECT_ID) {
+        throw new Error(
+            `APP_ENV=staging cannot use production project ${PROD_PROJECT_ID}.`
+        );
+    }
 }
+
+const environmentDefaults = { APP_ENV: '' };
+FIREBASE_ENV_KEYS.forEach((key) => {
+    environmentDefaults[key] = '';
+});
 
 const stylesHandler = MiniCssExtractPlugin.loader;
 
@@ -96,7 +99,7 @@ const config = {
         ],
     },
     plugins: [
-        firebaseEnvPlugin,
+        new webpack.EnvironmentPlugin(environmentDefaults),
         new HtmlWebpackPlugin({
             template: './public/index.html',
             filename: './index.html',
@@ -120,7 +123,7 @@ const config = {
                 test: /\.(js|jsx)$/i,
                 loader: 'babel-loader',
                 options: {
-                    presets: ["@babel/preset-env", "@babel/preset-react"],
+                    presets: ['@babel/preset-env', '@babel/preset-react'],
                 }
             },
             {
