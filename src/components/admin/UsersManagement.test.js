@@ -8,6 +8,7 @@ import {
   updateManagedUser,
   updateUserApprovalStatus,
 } from '../../services/firebaseDb';
+import { createManagedAuthUser } from '../../services/firebaseAuth';
 import UsersManagement from './UsersManagement';
 
 jest.mock('../../context/AuthContext', () => ({
@@ -158,6 +159,26 @@ const renderPage = async (user, pendingUsers = USERS.filter((item) => item.statu
 const openPendingTab = async (renderer) => {
   await act(async () => {
     buttonWithText(renderer, 'Pending approval').props.onClick();
+  });
+};
+
+const openCreateForm = async (renderer) => {
+  await act(async () => {
+    buttonWithText(renderer, 'Add User').props.onClick();
+  });
+  return renderer.root.findByProps({ className: 'users-create-form' });
+};
+
+const createUserButton = (form) => form.findAllByType('button').find((button) => (
+  button.children.includes('Create User')
+));
+
+const submitCreateForm = async (form) => {
+  await act(async () => {
+    form.props.onSubmit({ preventDefault() {} });
+  });
+  await act(async () => {
+    await Promise.resolve();
   });
 };
 
@@ -398,4 +419,107 @@ test('approve and reject on the pending tab call updateUserApprovalStatus', asyn
   expect(superAdmin.root.findByProps({ className: 'users-success' }).children).toEqual([
     'User rejected successfully.',
   ]);
+});
+
+test('a scoped admin with one school tags a new tester automatically', async () => {
+  createManagedAuthUser.mockResolvedValue({
+    id: 'new-1',
+    email: 'new@example.com',
+    role: 'tester',
+    status: 'pending',
+    school: HELENE,
+  });
+  const renderer = await renderPage(scopedAdmin);
+  const form = await openCreateForm(renderer);
+
+  expect(form.findAll(
+    (node) => node.type === 'select' && node.props['aria-label'] === 'School',
+  )).toHaveLength(0);
+  expect(form.findByProps({ 'aria-label': 'School' }).children).toEqual([HELENE]);
+  expect(createUserButton(form).props.disabled).toBe(false);
+
+  await submitCreateForm(form);
+
+  expect(createManagedAuthUser).toHaveBeenCalledWith('admin-helene', expect.objectContaining({
+    role: 'tester',
+    school: HELENE,
+  }));
+});
+
+test('a scoped admin with several schools must pick one before saving', async () => {
+  createManagedAuthUser.mockResolvedValue({
+    id: 'new-2',
+    email: 'new@example.com',
+    role: 'tester',
+    status: 'pending',
+    school: SECOND,
+  });
+  const renderer = await renderPage({
+    uid: 'admin-multi',
+    role: 'admin',
+    email: 'multi@example.com',
+    schools: [HELENE, SECOND],
+  });
+  const form = await openCreateForm(renderer);
+  const schoolSelect = form.findByProps({ 'aria-label': 'School' });
+
+  expect(schoolSelect.type).toBe('select');
+  expect(optionValues(schoolSelect)).toEqual(['', HELENE, SECOND]);
+  expect(createUserButton(form).props.disabled).toBe(true);
+
+  await act(async () => {
+    schoolSelect.props.onChange({ target: { value: SECOND } });
+  });
+  const nextForm = renderer.root.findByProps({ className: 'users-create-form' });
+  expect(createUserButton(nextForm).props.disabled).toBe(false);
+  await submitCreateForm(nextForm);
+
+  expect(createManagedAuthUser).toHaveBeenCalledWith('admin-multi', expect.objectContaining({
+    role: 'tester',
+    school: SECOND,
+  }));
+});
+
+test('a scoped admin with no schools cannot create a tester', async () => {
+  const renderer = await renderPage({
+    uid: 'admin-none',
+    role: 'admin',
+    email: 'none@example.com',
+    schools: [],
+  });
+  const form = await openCreateForm(renderer);
+
+  expect(form.findAllByType('p').map((node) => node.children.join('')).join(' ')).toContain(
+    'You have no schools assigned, so you cannot add a tester.'
+  );
+  expect(createUserButton(form).props.disabled).toBe(true);
+  await submitCreateForm(form);
+  expect(createManagedAuthUser).not.toHaveBeenCalled();
+});
+
+test('a super admin can leave a new tester school unset', async () => {
+  createManagedAuthUser.mockResolvedValue({
+    id: 'new-3',
+    email: 'new@example.com',
+    role: 'tester',
+    status: 'pending',
+  });
+  const renderer = await renderPage({
+    uid: 'super-1',
+    role: 'superadmin',
+    email: 'sam@example.com',
+  });
+  const form = await openCreateForm(renderer);
+  const schoolSelect = form.findByProps({ 'aria-label': 'School' });
+
+  expect(schoolSelect.type).toBe('select');
+  expect(optionValues(schoolSelect)).toEqual(['', HELENE]);
+  expect(createUserButton(form).props.disabled).toBe(false);
+
+  await submitCreateForm(form);
+
+  const payload = createManagedAuthUser.mock.calls[0][1];
+  expect(createManagedAuthUser).toHaveBeenCalledWith('super-1', expect.any(Object));
+  expect(payload.role).toBe('tester');
+  expect(payload).not.toHaveProperty('school');
 });
