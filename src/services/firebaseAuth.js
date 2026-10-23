@@ -420,7 +420,7 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
  * @param {string} errorCode - Firebase error code
  * @returns {string} User-friendly error message
  */
-const getAuthErrorMessage = (errorCode) => {
+export const getAuthErrorMessage = (errorCode) => {
   const errorMessages = {
     'auth/email-already-in-use': 'This email is already registered. Please use a different email or try logging in.',
     'auth/invalid-email': 'Please enter a valid email address.',
@@ -436,7 +436,6 @@ const getAuthErrorMessage = (errorCode) => {
     'auth/cancelled-popup-request': 'Only one popup request is allowed at a time.',
     'auth/popup-blocked': 'Popup was blocked by your browser. The page will redirect to Google sign-in instead.',
     'auth/unauthorized-domain': 'This domain is not authorized for OAuth operations. Please add your domain to Firebase authorized domains.',
-    'auth/operation-not-allowed': 'Google sign-in is not enabled. Please enable it in Firebase Console.',
   };
 
   return errorMessages[errorCode] || 'An error occurred. Please try again.';
