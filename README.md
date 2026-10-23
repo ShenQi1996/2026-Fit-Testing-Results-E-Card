@@ -106,6 +106,7 @@ vercel.json                      # SPA rewrites to index.html
 - [FIREBASE_SETUP.md](./FIREBASE_SETUP.md) — project, Auth, Firestore, indexes
 - [EMAILJS_SETUP.md](./EMAILJS_SETUP.md) — e-card email template
 - [PRODUCTION_SETUP.md](./PRODUCTION_SETUP.md) — Vercel domain and Google sign-in
+- [STAGING.md](./STAGING.md) — staging branch, Preview URL, and QA before main
 
 ## Deploy
 
