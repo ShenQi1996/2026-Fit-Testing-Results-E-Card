@@ -12,9 +12,6 @@
  * delete or create Auth users.
  */
 
-const fs = require('fs');
-const path = require('path');
-
 const LEGACY_USER_IDS = [
   'SX26kFfwDRM7OR4xVFECwg5QulG2',
   'Se0pO39E5RVY8xmy0mAScr1TdkY2',
@@ -41,15 +38,10 @@ const collectStatusBackfillIds = (docs, legacyIds = LEGACY_USER_IDS) => {
 };
 
 const readFirebaseConfig = () => {
-  const source = fs.readFileSync(
-    path.join(__dirname, '../src/config/firebase.js'),
-    'utf8'
-  );
-  const match = source.match(/export const firebaseConfig = (\{[\s\S]*?\n\});/);
-  if (!match) {
-    throw new Error('Could not read firebaseConfig from src/config/firebase.js');
-  }
-  return Function(`"use strict"; return (${match[1]});`)();
+  // firebase.js resolves this through webpack. The script runs in Node and
+  // always targets the production project, which is where the legacy docs are.
+  const { PROD_FIREBASE_CONFIG } = require('../src/config/prodFirebaseConfig');
+  return PROD_FIREBASE_CONFIG;
 };
 
 const backfillMissingUserStatus = async ({
