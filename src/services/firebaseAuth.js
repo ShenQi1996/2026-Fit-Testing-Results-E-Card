@@ -25,6 +25,12 @@ import {
   getUserRole,
   createManagedUserProfile,
 } from './firebaseDb';
+import {
+  isStaffAdminRole,
+  isSuperAdminRole,
+  USER_ROLE_TESTER,
+  USER_ROLES,
+} from '../utils/roles';
 
 const PENDING_APPROVAL_MESSAGE = 'Your account is pending admin approval. Please contact an administrator.';
 const REJECTED_APPROVAL_MESSAGE = 'Your account request was not approved. Please contact an administrator.';
@@ -362,8 +368,17 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
   let secondaryApp = null;
   try {
     const adminRole = await getUserRole(adminUserId);
-    if (adminRole !== 'admin') {
+    if (!isStaffAdminRole(adminRole)) {
       const error = new Error('Only admin users can create users.');
+      error.code = 'PERMISSION_DENIED';
+      throw error;
+    }
+    const requestedRole = userData.role || USER_ROLE_TESTER;
+    if (!USER_ROLES.includes(requestedRole)) {
+      throw new Error('Invalid role. Must be tester, admin, or superadmin.');
+    }
+    if (requestedRole !== USER_ROLE_TESTER && !isSuperAdminRole(adminRole)) {
+      const error = new Error('Only a super admin can create admin accounts.');
       error.code = 'PERMISSION_DENIED';
       throw error;
     }
@@ -391,7 +406,7 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
     const profile = await createManagedUserProfile(adminUserId, createdUser.uid, {
       email: createdUser.email || email,
       name: name || createdUser.displayName || '',
-      role: userData.role || 'tester',
+      role: requestedRole,
       status: userData.status || 'approved',
       provider: 'password',
     });
