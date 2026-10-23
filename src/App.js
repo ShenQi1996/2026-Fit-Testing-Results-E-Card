@@ -14,7 +14,6 @@ import HomePage from './components/common/HomePage';
 import LoadingAnimation from './components/common/LoadingAnimation';
 import { purgeExpiredFitTests } from './services/firebaseDb';
 import { resolveAppRoute } from './utils/appRoute';
-import { isAdminOrAbove } from './utils/roles';
 import './styles/App.css';
 
 const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }) => (
@@ -38,7 +37,7 @@ const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }
           </div>
         ) : currentPage === 'results' ? (
           <FitTestResults />
-        ) : currentPage === 'users' && isAdminOrAbove(user?.role) ? (
+        ) : currentPage === 'users' && user?.role === 'admin' ? (
           <div className="container">
             <UsersManagement />
           </div>
@@ -69,7 +68,7 @@ const AppContent = () => {
   }, [isAuthenticated, isPublicPage, setForceLight]);
 
   const handleNavigate = (page) => {
-    if (page === 'users' && !isAdminOrAbove(user?.role)) {
+    if (page === 'users' && user?.role !== 'admin') {
       setCurrentPage('form');
       setSidebarOpen(false);
       return;
@@ -79,7 +78,7 @@ const AppContent = () => {
   };
 
   useEffect(() => {
-    if (currentPage === 'users' && !isAdminOrAbove(user?.role)) {
+    if (currentPage === 'users' && user?.role !== 'admin') {
       setCurrentPage('form');
     }
   }, [currentPage, user?.role]);
