@@ -9,6 +9,12 @@ import {
   updateUserApprovalStatus,
 } from '../../services/firebaseDb';
 import { createManagedAuthUser } from '../../services/firebaseAuth';
+import {
+  addMasterSchool,
+  listMasterSchools,
+  removeMasterSchool,
+  renameMasterSchool,
+} from '../../services/masterSchools';
 import UsersManagement from './UsersManagement';
 import { accessDateInputValue } from '../../utils/roles';
 
@@ -29,6 +35,13 @@ jest.mock('../../services/firebaseDb', () => ({
 
 jest.mock('../../services/firebaseAuth', () => ({
   createManagedAuthUser: jest.fn(),
+}));
+
+jest.mock('../../services/masterSchools', () => ({
+  listMasterSchools: jest.fn(() => Promise.resolve(['Helene College of Nursing'])),
+  addMasterSchool: jest.fn(),
+  renameMasterSchool: jest.fn(),
+  removeMasterSchool: jest.fn(),
 }));
 
 const HELENE = 'Helene College of Nursing';
@@ -150,6 +163,9 @@ const renderPage = async (user, pendingUsers = USERS.filter((item) => item.statu
   let renderer;
   await act(async () => {
     renderer = TestRenderer.create(<UsersManagement />);
+  });
+  await act(async () => {
+    await Promise.resolve();
   });
   await act(async () => {
     await Promise.resolve();
@@ -609,4 +625,105 @@ test('a super admin can leave a new tester school unset', async () => {
   expect(createManagedAuthUser).toHaveBeenCalledWith('super-1', expect.any(Object));
   expect(payload.role).toBe('tester');
   expect(payload).not.toHaveProperty('school');
+});
+
+test('the schools section is only shown to a super admin', async () => {
+  addMasterSchool.mockResolvedValue([HELENE, 'North Campus']);
+  renameMasterSchool.mockResolvedValue(['North Campus']);
+  removeMasterSchool.mockResolvedValue([]);
+  global.window = { confirm: jest.fn(() => true) };
+
+  const adminRenderer = await renderPage(scopedAdmin);
+  expect(adminRenderer.root.findAllByProps({ 'aria-label': 'Master schools' })).toHaveLength(0);
+  expect(adminRenderer.root.findAllByType('button').some((button) => button.children.includes('Add school')))
+    .toBe(false);
+
+  const renderer = await renderPage(superAdminUser);
+  const section = renderer.root.findByProps({ 'aria-label': 'Master schools' });
+  expect(section.findAllByType('button').map((button) => button.children.join('')))
+    .toEqual(expect.arrayContaining([`Edit`, `Remove ${HELENE}`, 'Add school']));
+
+  await act(async () => {
+    section.findAllByType('button')
+      .find((button) => button.children.includes(`Remove ${HELENE}`))
+      .props.onClick();
+  });
+  expect(removeMasterSchool).toHaveBeenCalledWith('super-1', HELENE);
+
+  const nameInput = renderer.root.findByProps({ 'aria-label': 'New school name' });
+  await act(async () => {
+    nameInput.props.onChange({ target: { value: 'North Campus' } });
+  });
+  await act(async () => {
+    renderer.root.findAllByType('button').find((button) => button.children.includes('Add school')).props.onClick();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(addMasterSchool).toHaveBeenCalledWith('super-1', 'North Campus');
+
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': 'Master schools' })
+      .findAllByType('button')
+      .find((button) => button.children.includes('Edit'))
+      .props.onClick();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': 'Edit school name' }).props.onChange({
+      target: { value: 'North Campus' },
+    });
+  });
+  await act(async () => {
+    renderer.root.findAllByType('button').find((button) => button.children.includes('Save school')).props.onClick();
+  });
+  expect(renameMasterSchool).toHaveBeenCalledWith('super-1', HELENE, 'North Campus');
+});
+
+test('a super admin multi-selects schools when creating an admin', async () => {
+  listMasterSchools.mockResolvedValue([HELENE, SECOND]);
+  createManagedAuthUser.mockResolvedValue({
+    id: 'new-admin',
+    email: 'new-admin@example.com',
+    role: 'admin',
+    status: 'approved',
+    schools: [HELENE, SECOND],
+  });
+  const renderer = await renderPage(superAdminUser);
+  const form = await openCreateForm(renderer);
+  await act(async () => {
+    form.findByProps({ 'aria-label': 'Role' }).props.onChange({ target: { value: 'admin' } });
+  });
+  const nextForm = renderer.root.findByProps({ className: 'users-create-form' });
+  const schools = nextForm.findByProps({ 'aria-label': 'Schools' });
+  expect(schools.props.multiple).toBe(true);
+  expect(optionValues(schools)).toEqual([HELENE, SECOND]);
+  expect(nextForm.findAll(
+    (node) => node.type === 'select' && node.props['aria-label'] === 'School',
+  )).toHaveLength(0);
+  expect(createUserButton(nextForm).props.disabled).toBe(true);
+
+  await act(async () => {
+    schools.props.onChange({
+      target: { selectedOptions: [{ value: HELENE }, { value: SECOND }] },
+    });
+  });
+  const readyForm = renderer.root.findByProps({ className: 'users-create-form' });
+  expect(createUserButton(readyForm).props.disabled).toBe(false);
+  await submitCreateForm(readyForm);
+
+  const payload = createManagedAuthUser.mock.calls[0][1];
+  expect(payload.schools).toEqual([HELENE, SECOND]);
+  expect(payload).not.toHaveProperty('school');
+  expect(payload.role).toBe('admin');
+});
+
+test('a super admin edits another admin with the school multi-select', async () => {
+  listMasterSchools.mockResolvedValue([HELENE]);
+  const renderer = await renderPage(superAdminUser);
+  const adminCard = cardFor(renderer, 'admin-2');
+  const schools = adminCard.findByProps({ 'aria-label': 'Schools' });
+  expect(schools.type).toBe('select');
+  expect(schools.props.multiple).toBe(true);
+  expect(optionValues(schools)).toEqual([HELENE, SECOND]);
+  expect(cardFor(renderer, 'super-1').findByProps({ 'aria-label': 'Schools' }).type).not.toBe('select');
 });

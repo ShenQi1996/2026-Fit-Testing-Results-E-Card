@@ -122,11 +122,60 @@ service cloud.firestore {
           : true);
     }
 
+    // One get of the name list. exists() per name would pass Firestore's 10-get cap
+    // once an admin has more than a handful of schools, and list queries still chunk at 30.
+    function masterSchoolNames() {
+      return get(/databases/$(database)/documents/schoolDirectory/names).data.names;
+    }
+
+    function schoolStringListed(name) {
+      return name is string && name.size() > 0 && name in masterSchoolNames();
+    }
+
+    function schoolsArrayListed(list) {
+      return list is list
+        && list.size() > 0
+        && list.hasOnly(masterSchoolNames());
+    }
+
+    // Called only when the create includes school or schools. A missing key is not a name.
+    function createSchoolMembershipOk() {
+      return (request.resource.data.keys().hasAny(['school'])
+          ? schoolStringListed(request.resource.data.school)
+          : true)
+        && (request.resource.data.keys().hasAny(['schools'])
+          ? schoolsArrayListed(request.resource.data.schools)
+          : true);
+    }
+
+    // Unchanged names skip the master list, including names removed after they were stored.
+    function updateSchoolMembershipOk() {
+      return (!schoolChanged() && !schoolsChanged())
+        ? true
+        : (
+          (schoolChanged()
+            ? (request.resource.data.keys().hasAny(['school'])
+                ? schoolStringListed(request.resource.data.school)
+                : true)
+            : true)
+          && (schoolsChanged()
+            ? (request.resource.data.keys().hasAny(['schools'])
+                ? schoolsArrayListed(request.resource.data.schools)
+                : true)
+            : true)
+        );
+    }
+
     // Only a super admin can set or change school tags, and not on their own doc.
     // userId is passed in: helpers defined outside the match cannot see the wildcard.
     function schoolTagsOkOnUpdate(userId) {
       return (!schoolChanged() && !schoolsChanged())
-        || (isSuperAdmin() && request.auth.uid != userId && schoolTagsShapeOk());
+        ? true
+        : (
+          isSuperAdmin() && request.auth.uid != userId
+            ? (schoolTagsShapeOk() && updateSchoolMembershipOk())
+            : false
+        );
     }
 
     // A scoped admin creating a tester must set school to one of their own schools.
@@ -154,13 +203,43 @@ service cloud.firestore {
           isSuperAdmin()
           && request.auth.uid != userId
           && schoolTagsShapeOk()
+          && createSchoolMembershipOk()
         )
         || (
           isScopedAdmin()
           && request.auth.uid != userId
           && request.resource.data.role == 'tester'
           && createdTesterSchoolOk()
+          && createSchoolMembershipOk()
         );
+    }
+
+    function schoolsListOf(data) {
+      return data.keys().hasAny(['schoolsList'])
+        ? (data.schoolsList is string ? data.schoolsList : '')
+        : '';
+    }
+
+    function fitTestSchoolListed() {
+      return request.resource.data.keys().hasAny(['schoolsList'])
+        ? (
+          request.resource.data.schoolsList is string
+            ? (request.resource.data.schoolsList.size() == 0
+                ? true
+                : request.resource.data.schoolsList in masterSchoolNames())
+            : false
+        )
+        : true;
+    }
+
+    function fitTestSchoolOkOnCreate() {
+      return fitTestSchoolListed();
+    }
+
+    function fitTestSchoolOkOnUpdate() {
+      return schoolsListOf(request.resource.data) == schoolsListOf(resource.data)
+        ? true
+        : fitTestSchoolListed();
     }
 
     function startDateChanged() {
@@ -288,19 +367,48 @@ service cloud.firestore {
       }
     }
 
+    // Master school names. The id is the name. schoolDirectory/names mirrors those
+    // ids so user writes can check membership with one get.
+    match /schools/{schoolName} {
+      allow read: if isSignedIn() && isApproved();
+      allow create: if isSuperAdmin()
+        && request.resource.data.name is string
+        && request.resource.data.name == schoolName
+        && request.resource.data.name.size() > 0;
+      allow update: if isSuperAdmin()
+        && request.resource.data.name is string
+        && request.resource.data.name == schoolName
+        && request.resource.data.name == resource.data.name;
+      allow delete: if isSuperAdmin();
+    }
+
+    match /schoolDirectory/{docId} {
+      allow read: if isSignedIn() && isApproved();
+      allow create, update: if isSuperAdmin()
+        && docId == 'names'
+        && request.resource.data.names is list;
+      allow delete: if false;
+    }
+
     match /fitTests/{fitTestId} {
       allow read: if
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin());
-      allow update, delete: if
+      allow update: if
+        isSignedIn() &&
+        isApproved() &&
+        (request.auth.uid == resource.data.userId || isAdmin())
+        && fitTestSchoolOkOnUpdate();
+      allow delete: if
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin());
       allow create: if
         isSignedIn() &&
         isApproved() &&
-        request.auth.uid == request.resource.data.userId;
+        request.auth.uid == request.resource.data.userId
+        && fitTestSchoolOkOnCreate();
     }
 
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.

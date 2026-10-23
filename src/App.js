@@ -40,7 +40,10 @@ const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }
         )}
         {currentPage === 'editAccount' ? (
           <div className="container">
-            <EditAccount onBack={() => onNavigate('form')} />
+            <EditAccount
+              onBack={() => onNavigate('form')}
+              onManageSchools={() => onNavigate('users')}
+            />
           </div>
         ) : currentPage === 'results' ? (
           <FitTestResults />

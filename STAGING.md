@@ -49,8 +49,7 @@ Names are `Test Person 01` and similar. Every email is `@example.com`. Dates of 
 | Collection | What |
 | --- | --- |
 | `users` | `test-person-01@example.com` (`superadmin`, approved, `provider` `google.com`), `test-person-02@example.com` (`admin`, approved), `test-person-03@example.com` (`tester`, approved), `test-person-04@example.com` (`tester`, pending) |
-| `users/seed-user-tester/schoolProfiles` | `Example Training School` and `Example Second School`, with integer `orderIndex` |
-| `users/seed-user-tester/solutionProfiles` | Bitrex and Saccharin profiles |
+| `users/seed-user-tester/solutionProfiles` | Bitrex and Saccharin profiles. The seed does not write `schoolProfiles`. |
 | `fitTests` | Legacy card (no `expirationDate`, no `testLocation`), full card, full card missing `testLocation` (`Makrite sekura`), newest card, and a newest **Fail** |
 | `fitTestLookups` | One doc per card. The legacy lookup omits `testCreatedAtMs` and `verificationToken`. Newer lookups match the card, including the integer `testCreatedAtMs` |
 | `fitTestVerifications` | 14 fields, no date of birth or email. Document id is the token. Legacy expiration is the issue date plus one year |

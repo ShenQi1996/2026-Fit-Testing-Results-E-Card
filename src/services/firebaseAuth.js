@@ -59,6 +59,7 @@ const toAppUser = (user, accessProfile) => ({
   createdAt: user.metadata?.creationTime,
   role: accessProfile.role,
   status: accessProfile.status,
+  school: accessProfile.school || '',
   schools: accessProfile.schools || [],
   startDate: accessProfile.startDate || null,
   endDate: accessProfile.endDate || null,
@@ -430,6 +431,9 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
     };
     if (typeof userData.school === 'string' && userData.school.trim()) {
       profileInput.school = userData.school.trim();
+    }
+    if (Array.isArray(userData.schools) && userData.schools.length) {
+      profileInput.schools = userData.schools;
     }
     const profile = await createManagedUserProfile(adminUserId, createdUser.uid, profileInput);
 

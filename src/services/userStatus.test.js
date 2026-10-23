@@ -40,6 +40,7 @@ describe('user status access', () => {
     await expect(getUserAccessProfile('uid-1')).resolves.toEqual({
       role: 'admin',
       status: 'pending',
+      school: '',
       schools: [],
       startDate: null,
       endDate: null,
@@ -60,6 +61,7 @@ describe('user status access', () => {
     await expect(getUserAccessProfile('uid-1')).resolves.toEqual({
       role: 'tester',
       status: 'pending',
+      school: '',
       schools: [],
       startDate: null,
       endDate: null,

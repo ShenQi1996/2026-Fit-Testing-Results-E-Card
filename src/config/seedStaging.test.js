@@ -68,13 +68,7 @@ test('users, profiles, and fit tests use fixed fake ids and example.com addresse
   const googleProviders = plan.users.filter((entry) => entry.data.provider === 'google.com');
   expect(googleProviders).toHaveLength(1);
 
-  const school = byPath['users/seed-user-tester/schoolProfiles/seed-school-01'];
-  expect(school).toMatchObject({
-    schoolName: 'Example Training School',
-    isDefault: true,
-    orderIndex: 0,
-  });
-  expect(Number.isInteger(school.orderIndex)).toBe(true);
+  expect(byPath['users/seed-user-tester/schoolProfiles/seed-school-01']).toBeUndefined();
   expect(byPath['users/seed-user-tester/solutionProfiles/seed-solution-02']).toMatchObject({
     solutionType: 'Saccharin',
     isDefault: false,

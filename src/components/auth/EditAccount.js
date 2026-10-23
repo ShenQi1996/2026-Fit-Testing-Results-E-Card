@@ -6,14 +6,12 @@ import {
   deleteUserSolutionProfile,
   reorderUserSolutionProfiles,
   setDefaultSolutionProfile,
-  getUserSchoolProfiles,
-  saveUserSchoolProfile,
-  deleteUserSchoolProfile,
-  reorderUserSchoolProfiles,
-  setDefaultSchoolProfile,
 } from '../../services/firebaseDb';
+import { listMasterSchools } from '../../services/masterSchools';
 import { useSavedProfiles } from '../../hooks/useSavedProfiles';
-import { isAdminOrAbove, isSuperAdmin } from '../../utils/roles';
+import { isAdminOrAbove, isSuperAdmin, USER_ROLE_ADMIN } from '../../utils/roles';
+import { normalizeSchoolList } from '../../utils/schoolScope';
+import { accountSchoolLabel } from '../../utils/ecardSchools';
 import SavedProfilesPanel from './SavedProfilesPanel';
 import './EditAccount.css';
 
@@ -30,16 +28,7 @@ const toSolutionPayload = (data) => ({
   solutionExpirationDate: data.solutionExpirationDate.trim(),
 });
 
-const toSchoolPayload = (data) => ({
-  schoolName: data.schoolName.trim(),
-});
-
-const EMPTY_SCHOOL_FORM = {
-  schoolName: '',
-  setAsDefault: false,
-};
-
-const EditAccount = ({ onBack }) => {
+const EditAccount = ({ onBack, onManageSchools }) => {
   const { user, updateUser } = useAuth();
   const staffAdmin = isAdminOrAbove(user);
   const superAdmin = isSuperAdmin(user?.role);
@@ -53,6 +42,7 @@ const EditAccount = ({ onBack }) => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [masterSchools, setMasterSchools] = useState([]);
 
   const solutionProfiles = useSavedProfiles({
     userId: user?.uid,
@@ -66,17 +56,6 @@ const EditAccount = ({ onBack }) => {
     dateFields: ['solutionOpenDate', 'solutionExpirationDate'],
   });
 
-  const schoolProfiles = useSavedProfiles({
-    userId: user?.uid,
-    fetchAll: getUserSchoolProfiles,
-    save: saveUserSchoolProfile,
-    remove: deleteUserSchoolProfile,
-    reorder: reorderUserSchoolProfiles,
-    setDefault: setDefaultSchoolProfile,
-    emptyForm: EMPTY_SCHOOL_FORM,
-    toPayload: toSchoolPayload,
-  });
-
   useEffect(() => {
     if (user) {
       setFormData({
@@ -88,6 +67,29 @@ const EditAccount = ({ onBack }) => {
       });
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!superAdmin) {
+      setMasterSchools([]);
+      return undefined;
+    }
+    let cancelled = false;
+    listMasterSchools()
+      .then((names) => {
+        if (!cancelled) setMasterSchools(names);
+      })
+      .catch(() => {
+        if (!cancelled) setMasterSchools([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [superAdmin, user?.uid]);
+
+  const assignedSchools = user?.role === USER_ROLE_ADMIN
+    ? normalizeSchoolList(user?.schools)
+    : [];
+  const testerSchool = typeof user?.school === 'string' ? user.school.trim() : '';
 
   const handleChange = (e) => {
     setFormData({
@@ -213,6 +215,26 @@ const EditAccount = ({ onBack }) => {
                     : 'You have tester privileges. Contact an admin to change your role.'}
               </small>
             </div>
+
+            <div className="form-group">
+              <label htmlFor="account-school">School</label>
+              <div
+                id="account-school"
+                aria-label="Account school"
+                style={{
+                  padding: '10px 12px',
+                  backgroundColor: 'var(--bg-secondary, #f5f5f5)',
+                  border: '1px solid var(--border-color, #ddd)',
+                  borderRadius: '4px',
+                  cursor: 'not-allowed',
+                  fontWeight: 500,
+                  color: 'var(--text-secondary, #666)',
+                  fontSize: '14px'
+                }}
+              >
+                {accountSchoolLabel(user)}
+              </div>
+            </div>
           </div>
 
           <div className="form-section">
@@ -306,38 +328,55 @@ const EditAccount = ({ onBack }) => {
             }
           />
 
-          <SavedProfilesPanel
-            title="Saved School / Client Profiles"
-            description="Add, reorder, set default, or delete schools/clients used on the fit test form."
-            error={schoolProfiles.error}
-            success={schoolProfiles.success}
-            fields={[
-              { name: 'schoolName', id: 'schoolName', label: 'School Name', placeholder: 'Enter school name', defaultId: 'schoolSetAsDefault', defaultLabel: 'Set as new default school' },
-            ]}
-            formData={schoolProfiles.formData}
-            onChange={schoolProfiles.handleChange}
-            onAdd={(e) => schoolProfiles.handleAdd(e, (data) => (
-              data.schoolName.trim() ? '' : 'Please enter school name.'
-            ), 'Saved school profile added.')}
-            addLabel="+ Add School Profile"
-            savingLabel="Saving..."
-            saving={schoolProfiles.saving}
-            disabled={isLoading}
-            profiles={schoolProfiles.profiles}
-            loading={schoolProfiles.loading}
-            loadingLabel="Loading saved schools..."
-            emptyLabel="No saved school profiles yet."
-            renderDetails={(profile) => <strong>{profile.schoolName}</strong>}
-            onMove={(index, direction) =>
-              schoolProfiles.handleMove(index, direction, 'School profile order updated.')
-            }
-            onSetDefault={(id) =>
-              schoolProfiles.handleSetDefault(id, 'Default school profile updated.')
-            }
-            onDelete={(id) =>
-              schoolProfiles.handleDelete(id, 'School profile deleted.')
-            }
-          />
+          <section className="account-schools" aria-label="Account schools">
+            <h3 className="section-title">Schools</h3>
+            {superAdmin ? (
+              <>
+                <p className="section-description">
+                  Master school list. The fit test form offers these names to super admins.
+                  Add, edit, or remove them in Users Management.
+                </p>
+                {masterSchools.length === 0 ? (
+                  <div className="account-school-readonly" aria-label="Master schools">—</div>
+                ) : (
+                  <ul aria-label="Master schools">
+                    {masterSchools.map((name) => (
+                      <li key={name}>{name}</li>
+                    ))}
+                  </ul>
+                )}
+                <button
+                  type="button"
+                  className="auth-button secondary"
+                  onClick={onManageSchools}
+                >
+                  Manage schools
+                </button>
+              </>
+            ) : user?.role === USER_ROLE_ADMIN ? (
+              <>
+                <p className="section-description">Schools assigned to this admin account.</p>
+                {assignedSchools.length === 0 ? (
+                  <div className="account-school-readonly" aria-label="Schools">—</div>
+                ) : (
+                  <ul aria-label="Schools">
+                    {assignedSchools.map((name) => (
+                      <li key={name}>{name}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="section-description">
+                  Your school is pre-selected on the fit test form.
+                </p>
+                <div className="account-school-readonly" aria-label="School" aria-readonly="true">
+                  {testerSchool || '—'}
+                </div>
+              </>
+            )}
+          </section>
 
           <button
             type="submit"

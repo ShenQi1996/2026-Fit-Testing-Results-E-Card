@@ -200,11 +200,26 @@ test('a super admin can create an admin profile', async () => {
     email: 'new-admin@example.com',
     role: 'admin',
     status: 'approved',
+    schools: ['Helene College of Nursing', 'Example Second School'],
   });
   expect(setDoc).toHaveBeenCalledWith(
     expect.anything(),
-    expect.objectContaining({ role: 'admin', email: 'new-admin@example.com' })
+    expect.objectContaining({
+      role: 'admin',
+      email: 'new-admin@example.com',
+      schools: ['Helene College of Nursing', 'Example Second School'],
+    })
   );
+});
+
+test('a super admin must choose at least one school when creating an admin', async () => {
+  await expect(createManagedUserProfile('super-1', 'new-admin', {
+    email: 'new-admin@example.com',
+    role: 'admin',
+    status: 'approved',
+    schools: [],
+  })).rejects.toThrow(/at least one school/i);
+  expect(setDoc).not.toHaveBeenCalled();
 });
 
 test('a regular admin cannot create an admin profile', async () => {
