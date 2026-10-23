@@ -22,16 +22,10 @@ import { auth, firebaseConfig } from '../config/firebase';
 import {
   ensureUserProfile,
   getUserAccessProfile,
+  getUserRole,
   createManagedUserProfile,
   normalizeUserStatus,
 } from './firebaseDb';
-import {
-  isAdminOrAbove,
-  isSuperAdmin,
-  USER_ROLE_SUPERADMIN,
-  USER_ROLE_TESTER,
-  USER_ROLES,
-} from '../utils/roles';
 
 const PENDING_APPROVAL_MESSAGE = 'Your account is pending admin approval. Please contact an administrator.';
 const REJECTED_APPROVAL_MESSAGE = 'Your account request was not approved. Please contact an administrator.';
@@ -375,24 +369,9 @@ export const handleGoogleRedirect = async () => {
 export const createManagedAuthUser = async (adminUserId, userData = {}) => {
   let secondaryApp = null;
   try {
-    const adminAccess = await getUserAccessProfile(adminUserId);
-    if (adminAccess.status !== 'approved' || !isAdminOrAbove(adminAccess.role)) {
+    const adminRole = await getUserRole(adminUserId);
+    if (adminRole !== 'admin') {
       const error = new Error('Only admin users can create users.');
-      error.code = 'PERMISSION_DENIED';
-      throw error;
-    }
-    const adminRole = adminAccess.role;
-    const requestedRole = userData.role || USER_ROLE_TESTER;
-    if (!USER_ROLES.includes(requestedRole)) {
-      throw new Error('Invalid role. Must be tester, admin, or superadmin.');
-    }
-    if (requestedRole === USER_ROLE_SUPERADMIN) {
-      const error = new Error('A super admin cannot be created from the client.');
-      error.code = 'PERMISSION_DENIED';
-      throw error;
-    }
-    if (requestedRole !== USER_ROLE_TESTER && !isSuperAdmin(adminRole)) {
-      const error = new Error('Only a super admin can create admin accounts.');
       error.code = 'PERMISSION_DENIED';
       throw error;
     }
@@ -420,7 +399,7 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
     const profile = await createManagedUserProfile(adminUserId, createdUser.uid, {
       email: createdUser.email || email,
       name: name || createdUser.displayName || '',
-      role: requestedRole,
+      role: userData.role || 'tester',
       status: normalizeUserStatus(userData.status),
       provider: 'password',
     });

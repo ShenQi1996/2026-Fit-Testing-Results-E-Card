@@ -69,13 +69,9 @@ describe('user status access', () => {
   });
 
   test('setUserRole on a new uid writes status pending', async () => {
-    getDoc.mockImplementation(async (ref) => {
-      const id = ref?.args?.[2];
-      if (id === 'super-1') return userDoc({ role: 'superadmin', status: 'approved' });
-      return userDoc(undefined, false);
-    });
+    getDoc.mockResolvedValue(userDoc(undefined, false));
 
-    await setUserRole('super-1', 'new-uid', 'tester');
+    await setUserRole('new-uid', 'tester');
 
     expect(setDoc).toHaveBeenCalledWith(
       expect.objectContaining({ args: [expect.anything(), 'users', 'new-uid'] }),
@@ -89,13 +85,9 @@ describe('user status access', () => {
   });
 
   test('setUserRole merges an existing doc and fills a missing status', async () => {
-    getDoc.mockImplementation(async (ref) => {
-      const id = ref?.args?.[2];
-      if (id === 'super-1') return userDoc({ role: 'superadmin', status: 'approved' });
-      return userDoc({ role: 'tester', email: 'a@example.com' });
-    });
+    getDoc.mockResolvedValue(userDoc({ role: 'tester', email: 'a@example.com' }));
 
-    await setUserRole('super-1', 'uid-1', 'admin');
+    await setUserRole('uid-1', 'admin');
 
     expect(setDoc).toHaveBeenCalledWith(
       expect.objectContaining({ args: [expect.anything(), 'users', 'uid-1'] }),
@@ -105,13 +97,9 @@ describe('user status access', () => {
   });
 
   test('setUserRole does not overwrite an explicit status', async () => {
-    getDoc.mockImplementation(async (ref) => {
-      const id = ref?.args?.[2];
-      if (id === 'super-1') return userDoc({ role: 'superadmin', status: 'approved' });
-      return userDoc({ role: 'tester', status: 'approved' });
-    });
+    getDoc.mockResolvedValue(userDoc({ role: 'tester', status: 'approved' }));
 
-    await setUserRole('super-1', 'uid-1', 'admin');
+    await setUserRole('uid-1', 'admin');
 
     const payload = setDoc.mock.calls[0][1];
     expect(payload).toEqual(expect.objectContaining({ role: 'admin' }));
