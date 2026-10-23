@@ -95,7 +95,7 @@ test('a regular admin cannot update an admin or super admin doc', async () => {
 
 test('a regular admin cannot create an admin profile', async () => {
   await seed([
-    ['users/admin-1', approved('admin', 'admin@example.com')],
+    ['users/admin-1', scopedAdmin()],
   ]);
   const db = testEnv.authenticatedContext('admin-1').firestore();
 
@@ -108,6 +108,7 @@ test('a regular admin cannot create an admin profile', async () => {
     role: 'tester',
     status: 'pending',
     email: 'new-tester@example.com',
+    school: HELENE,
   }));
 });
 
@@ -512,12 +513,6 @@ test('only a super admin can set or change school tags', async () => {
   await assertSucceeds(updateDoc(doc(superDb, 'users/admin-1'), { schools: [HELENE, SECOND] }));
   await assertSucceeds(updateDoc(doc(superDb, 'users/super-2'), { schools: [SECOND] }));
 
-  await assertFails(setDoc(doc(adminDb, 'users/new-tester'), {
-    role: 'tester',
-    status: 'pending',
-    email: 'new@example.com',
-    school: HELENE,
-  }));
   await assertFails(setDoc(doc(freshDb, 'users/fresh-1'), {
     role: 'tester',
     status: 'pending',
@@ -564,4 +559,44 @@ test('scoped admin lists are limited to testers in their schools', async () => {
     where('school', 'in', [HELENE, SECOND]),
   )));
   await assertSucceeds(getDocs(collection(superDb, 'users')));
+});
+
+test('a scoped admin must tag a new tester with one of their schools', async () => {
+  await seed([
+    ['users/admin-one', scopedAdmin([HELENE], 'one@example.com')],
+    ['users/admin-none', approved('admin', 'none@example.com', { schools: [] })],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+  ]);
+  const oneDb = testEnv.authenticatedContext('admin-one').firestore();
+  const noneDb = testEnv.authenticatedContext('admin-none').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertSucceeds(setDoc(doc(oneDb, 'users/tester-tagged'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'tagged@example.com',
+    school: HELENE,
+  }));
+  await assertFails(setDoc(doc(oneDb, 'users/tester-missing'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'missing@example.com',
+  }));
+  await assertFails(setDoc(doc(oneDb, 'users/tester-out'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'out@example.com',
+    school: SECOND,
+  }));
+  await assertFails(setDoc(doc(noneDb, 'users/tester-none'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'none@example.com',
+    school: HELENE,
+  }));
+  await assertSucceeds(setDoc(doc(superDb, 'users/tester-super'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'super-tester@example.com',
+  }));
 });
