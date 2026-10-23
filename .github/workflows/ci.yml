@@ -4,9 +4,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -14,5 +21,10 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - run: |
+          git rev-parse --short HEAD
+          node -p "require('./package.json').version"
       - run: npm run lint --if-present
       - run: npm run build
+      # Runs once tests are added. No test script yet, so this is a no-op.
+      - run: npm test --if-present
