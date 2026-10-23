@@ -1,4 +1,6 @@
 import React from 'react';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -135,6 +137,18 @@ const heleneAdmin = {
 };
 
 const optionValues = (select) => select.findAllByType('option').map((option) => option.props.value);
+
+const schoolGroup = (root) => root.findByProps({ 'aria-label': 'Schools' });
+
+const checkboxNames = (group) => group.findAllByType('label').map((label) => (
+  label.findByType('span').children.join('')
+));
+
+const checkboxFor = (group, name) => group.findAllByType('label').find((label) => (
+  label.findByType('span').children.join('') === name
+)).findByType('input');
+
+const statusPill = (card) => card.findByProps({ 'aria-label': 'Account status' });
 
 const selectsByLabel = (renderer, label) => renderer.root.findAll(
   (node) => node.type === 'select' && node.props['aria-label'] === label,
@@ -740,7 +754,7 @@ test('super admin cards show All and a save does not change stored schools', asy
   expect(payload).not.toHaveProperty('school');
 });
 
-test('a super admin multi-selects schools when creating an admin', async () => {
+test('a super admin checks schools when creating an admin', async () => {
   listMasterSchools.mockResolvedValue([HELENE, SECOND]);
   createManagedAuthUser.mockResolvedValue({
     id: 'new-admin',
@@ -755,20 +769,27 @@ test('a super admin multi-selects schools when creating an admin', async () => {
     form.findByProps({ 'aria-label': 'Role' }).props.onChange({ target: { value: 'admin' } });
   });
   const nextForm = renderer.root.findByProps({ className: 'users-create-form' });
-  const schools = nextForm.findByProps({ 'aria-label': 'Schools' });
-  expect(schools.props.multiple).toBe(true);
-  expect(optionValues(schools)).toEqual([HELENE, SECOND]);
+  const schools = schoolGroup(nextForm);
+  expect(schools.type).toBe('fieldset');
+  expect(checkboxNames(schools)).toEqual([HELENE, SECOND]);
+  expect(checkboxFor(schools, HELENE).props.checked).toBe(false);
+  expect(checkboxFor(schools, SECOND).props.checked).toBe(false);
   expect(nextForm.findAll(
     (node) => node.type === 'select' && node.props['aria-label'] === 'School',
   )).toHaveLength(0);
   expect(createUserButton(nextForm).props.disabled).toBe(true);
 
   await act(async () => {
-    schools.props.onChange({
-      target: { selectedOptions: [{ value: HELENE }, { value: SECOND }] },
-    });
+    checkboxFor(schoolGroup(renderer.root.findByProps({ className: 'users-create-form' })), HELENE)
+      .props.onChange({ target: { checked: true } });
+  });
+  await act(async () => {
+    checkboxFor(schoolGroup(renderer.root.findByProps({ className: 'users-create-form' })), SECOND)
+      .props.onChange({ target: { checked: true } });
   });
   const readyForm = renderer.root.findByProps({ className: 'users-create-form' });
+  expect(checkboxFor(schoolGroup(readyForm), HELENE).props.checked).toBe(true);
+  expect(checkboxFor(schoolGroup(readyForm), SECOND).props.checked).toBe(true);
   expect(createUserButton(readyForm).props.disabled).toBe(false);
   await submitCreateForm(readyForm);
 
@@ -778,13 +799,127 @@ test('a super admin multi-selects schools when creating an admin', async () => {
   expect(payload.role).toBe('admin');
 });
 
-test('a super admin edits another admin with the school multi-select', async () => {
+test('a super admin edits another admin with school checkboxes', async () => {
   listMasterSchools.mockResolvedValue([HELENE]);
+  updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
+    id,
+    role: 'admin',
+    status: 'approved',
+    name: 'Ada',
+    email: 'ada@example.com',
+    ...draft,
+  }));
   const renderer = await renderPage(superAdminUser);
   const adminCard = cardFor(renderer, 'admin-2');
-  const schools = adminCard.findByProps({ 'aria-label': 'Schools' });
-  expect(schools.type).toBe('select');
-  expect(schools.props.multiple).toBe(true);
-  expect(optionValues(schools)).toEqual([HELENE, SECOND]);
-  expect(cardFor(renderer, 'super-1').findByProps({ 'aria-label': 'Schools' }).type).not.toBe('select');
+  const schools = schoolGroup(adminCard);
+  expect(schools.type).toBe('fieldset');
+  expect(schools.findAllByType('select')).toHaveLength(0);
+  expect(checkboxNames(schools)).toEqual([HELENE, SECOND]);
+  expect(checkboxFor(schools, HELENE).props.checked).toBe(true);
+  expect(checkboxFor(schools, SECOND).props.checked).toBe(true);
+  expect(schoolGroup(cardFor(renderer, 'super-1')).type).not.toBe('fieldset');
+
+  await act(async () => {
+    checkboxFor(schoolGroup(cardFor(renderer, 'admin-2')), SECOND)
+      .props.onChange({ target: { checked: false } });
+  });
+  const save = cardFor(renderer, 'admin-2').findAllByType('button')
+    .find((button) => button.children.includes('Save'));
+  await act(async () => {
+    save.props.onClick();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(updateManagedUser.mock.calls[0][2].schools).toEqual([HELENE]);
+});
+
+test('the status pill shows Expired, Approved, or Pending without writing', async () => {
+  const users = [
+    {
+      id: 'expired-admin',
+      name: 'Expired Admin',
+      email: 'expired@example.com',
+      role: 'admin',
+      status: 'approved',
+      schools: [HELENE],
+      endDate: '2020-01-15T23:59:59',
+    },
+    {
+      id: 'open-admin',
+      name: 'Open Admin',
+      email: 'open@example.com',
+      role: 'admin',
+      status: 'approved',
+      schools: [HELENE],
+      startDate: '2020-01-01T00:00:00',
+      endDate: '2099-12-31T23:59:59',
+    },
+    {
+      id: 'undated-admin',
+      name: 'Undated Admin',
+      email: 'undated@example.com',
+      role: 'admin',
+      status: 'approved',
+      schools: [HELENE],
+    },
+    {
+      id: 'pending-admin',
+      name: 'Pending Admin',
+      email: 'pending-admin@example.com',
+      role: 'admin',
+      status: 'pending',
+      schools: [HELENE],
+      endDate: '2020-01-15T23:59:59',
+    },
+  ];
+  const renderer = await renderPage(superAdminUser, [], users);
+
+  const expired = statusPill(cardFor(renderer, 'expired-admin'));
+  expect(expired.children).toEqual(['Expired']);
+  expect(expired.props.className).toContain('status-expired');
+
+  const inWindow = statusPill(cardFor(renderer, 'open-admin'));
+  expect(inWindow.children).toEqual(['Approved']);
+  expect(inWindow.props.className).toContain('status-approved');
+  expect(inWindow.props.className).not.toContain('status-expired');
+
+  const noDates = statusPill(cardFor(renderer, 'undated-admin'));
+  expect(noDates.children).toEqual(['Approved']);
+  expect(noDates.props.className).toContain('status-approved');
+
+  const pending = statusPill(cardFor(renderer, 'pending-admin'));
+  expect(pending.children).toEqual(['Pending']);
+  expect(pending.props.className).toContain('status-pending');
+  expect(pending.props.className).not.toContain('status-expired');
+
+  expect(updateManagedUser).not.toHaveBeenCalled();
+});
+
+test('the Admin role badge uses opaque colors with readable contrast', () => {
+  const css = readFileSync(join(__dirname, 'UsersManagement.css'), 'utf8');
+  const block = css.match(/\.user-badge\.role-admin\s*\{([^}]+)\}/);
+  expect(block).not.toBeNull();
+  const background = block[1].match(/background:\s*(#[0-9a-fA-F]{6})/);
+  const color = block[1].match(/color:\s*(#[0-9a-fA-F]{6})/);
+  expect(background).not.toBeNull();
+  expect(color).not.toBeNull();
+  expect(block[1]).not.toMatch(/var\(--navy\)/);
+  expect(block[1]).not.toMatch(/rgba\(11,\s*45,\s*74/);
+
+  const channel = (hex) => {
+    const value = parseInt(hex.slice(1), 16);
+    return [16, 8, 0].map((shift) => {
+      const unit = ((value >> shift) & 255) / 255;
+      return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    });
+  };
+  const luminance = (hex) => {
+    const [red, green, blue] = channel(hex);
+    return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+  };
+  const [lighter, darker] = [luminance(background[1]), luminance(color[1])]
+    .sort((left, right) => right - left);
+  expect((lighter + 0.05) / (darker + 0.05)).toBeGreaterThanOrEqual(4.5);
 });

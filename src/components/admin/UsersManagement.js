@@ -23,6 +23,7 @@ import {
   USER_ROLE_TESTER,
   accessDateInputValue,
   accessWindowOrderError,
+  accountStatusLabel,
   canModifyManagedUser,
   isAdminOrAbove,
   isSuperAdmin,
@@ -42,14 +43,37 @@ const EMPTY_CREATE_FORM = {
   schools: [],
 };
 
-const readSelectedValues = (event) => {
-  const selected = event.target?.selectedOptions;
-  if (selected) {
-    return Array.from(selected).map((option) => option.value);
-  }
-  const value = event.target?.value;
-  return Array.isArray(value) ? value : [value].filter(Boolean);
+const toggleSchoolName = (selected, school, checked) => {
+  const current = normalizeSchoolList(selected);
+  if (checked) return normalizeSchoolList([...current, school]);
+  return current.filter((name) => name !== school);
 };
+
+const SchoolCheckboxGroup = ({
+  schools,
+  selected,
+  onChange,
+  disabled,
+}) => (
+  <fieldset className="school-checkboxes" aria-label="Schools" disabled={disabled}>
+    <legend>Schools</legend>
+    <div className="school-checkbox-list">
+      {schools.map((school) => {
+        const checked = selected.includes(school);
+        return (
+          <label key={school} className={`school-checkbox${checked ? ' checked' : ''}`}>
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(event) => onChange(toggleSchoolName(selected, school, event.target.checked))}
+            />
+            <span>{school}</span>
+          </label>
+        );
+      })}
+    </div>
+  </fieldset>
+);
 
 const withAssignedNames = (masterNames, assignedNames) => {
   const extras = normalizeSchoolList(assignedNames).filter((name) => !masterNames.includes(name));
@@ -731,25 +755,12 @@ const UsersManagement = () => {
                 </label>
               )}
               {creatingAdmin && (
-                <label>
-                  Schools
-                  <select
-                    aria-label="Schools"
-                    multiple
-                    value={createForm.schools}
-                    onChange={(e) => setCreateForm((prev) => ({
-                      ...prev,
-                      schools: readSelectedValues(e),
-                    }))}
-                    disabled={creating}
-                  >
-                    {masterSchools.map((school) => (
-                      <option key={school} value={school}>
-                        {school}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <SchoolCheckboxGroup
+                  schools={masterSchools}
+                  selected={normalizeSchoolList(createForm.schools)}
+                  disabled={creating}
+                  onChange={(schools) => setCreateForm((prev) => ({ ...prev, schools }))}
+                />
               )}
             </div>
             {createBlocked && (
@@ -860,6 +871,7 @@ const UsersManagement = () => {
                 schoolTagIsList ? assignedSchools : [draft.school || ''],
               );
               const canEditSchoolTags = superAdmin && !isSelf && !roleIsSuperAdmin;
+              const statusPill = accountStatusLabel(item);
               return (
                 <article key={item.id} className="user-card">
                   <div className="user-card-top">
@@ -875,7 +887,12 @@ const UsersManagement = () => {
                     </div>
                     <div className="user-badges">
                       <span className={`user-badge role-${item.role}`}>{item.role}</span>
-                      <span className={`user-badge status-${item.status}`}>{item.status}</span>
+                      <span
+                        className={`user-badge status-pill ${statusPill.statusClass}`}
+                        aria-label="Account status"
+                      >
+                        {statusPill.label}
+                      </span>
                       {isSelf && <span className="user-badge you">You</span>}
                       {locked && <span className="user-badge role-admin">Super admin only</span>}
                     </div>
@@ -933,22 +950,17 @@ const UsersManagement = () => {
                         ))}
                       </select>
                     </label>
-                    <label>
-                      {schoolTagLabel}
-                      {canEditSchoolTags ? (
-                        schoolTagIsList ? (
-                          <select
-                            multiple
-                            aria-label="Schools"
-                            value={assignedSchools}
-                            onChange={(e) => handleDraftChange(item.id, 'schools', readSelectedValues(e))}
-                            disabled={savingId === item.id}
-                          >
-                            {schoolChoices.map((school) => (
-                              <option key={school} value={school}>{school}</option>
-                            ))}
-                          </select>
-                        ) : (
+                    {canEditSchoolTags && schoolTagIsList ? (
+                      <SchoolCheckboxGroup
+                        schools={schoolChoices}
+                        selected={assignedSchools}
+                        disabled={savingId === item.id}
+                        onChange={(schools) => handleDraftChange(item.id, 'schools', schools)}
+                      />
+                    ) : (
+                      <label>
+                        {schoolTagLabel}
+                        {canEditSchoolTags ? (
                           <select
                             aria-label="School"
                             value={draft.school || ''}
@@ -960,13 +972,13 @@ const UsersManagement = () => {
                               <option key={school} value={school}>{school}</option>
                             ))}
                           </select>
-                        )
-                      ) : (
-                        <div className="user-school-readonly" aria-label={schoolTagLabel}>
-                          {schoolTagValue.trim() || '—'}
-                        </div>
-                      )}
-                    </label>
+                        ) : (
+                          <div className="user-school-readonly" aria-label={schoolTagLabel}>
+                            {schoolTagValue.trim() || '—'}
+                          </div>
+                        )}
+                      </label>
+                    )}
                     {superAdmin && !isSelf && currentRole === USER_ROLE_ADMIN && (
                       <>
                         <label>

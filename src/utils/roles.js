@@ -89,6 +89,33 @@ export const accessWindowOrderError = (startDate, endDate) => {
   return '';
 };
 
+/** True when the access end calendar day is earlier than today's calendar day. */
+export const accessEndDayBeforeToday = (endDate, now = new Date()) => {
+  const endDay = accessDateInputValue(endDate);
+  if (!endDay) return false;
+  return endDay < accessDateInputValue(now);
+};
+
+const STATUS_PILL_LABELS = {
+  approved: 'Approved',
+  pending: 'Pending',
+  rejected: 'Rejected',
+};
+
+/**
+ * Label for the Manage Users status pill. Display only: an approved account
+ * whose end day is before today reads Expired, and nothing is written back.
+ */
+export const accountStatusLabel = (user, now = new Date()) => {
+  const status = String(user?.status || 'pending').toLowerCase();
+  if (status === 'approved' && accessEndDayBeforeToday(user?.endDate, now)) {
+    return { label: 'Expired', statusClass: 'status-expired' };
+  }
+  const label = STATUS_PILL_LABELS[status]
+    || (status.charAt(0).toUpperCase() + status.slice(1));
+  return { label, statusClass: `status-${status}` };
+};
+
 /**
  * Roles a manager may set on an existing user from the client.
  * Never superadmin. A plain admin only keeps tester. A super admin may

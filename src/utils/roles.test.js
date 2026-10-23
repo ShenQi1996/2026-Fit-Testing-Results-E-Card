@@ -1,6 +1,7 @@
 import {
   accessDateInputValue,
   accessWindowOrderError,
+  accountStatusLabel,
   canModifyManagedUser,
   isAdminOrAbove,
   isSuperAdmin,
@@ -53,6 +54,27 @@ describe('role helpers', () => {
       .toBe('Access end date cannot be before the start date.');
     expect(accessWindowOrderError('2026-10-10', '2026-10-10')).toBe('');
     expect(accessWindowOrderError('', '2026-10-10')).toBe('');
+  });
+
+  test('the status pill reads Expired only for an approved account whose end day is before today', () => {
+    const now = new Date(2026, 9, 23, 15, 0, 0);
+    expect(accountStatusLabel({
+      status: 'approved',
+      endDate: '2026-10-13T23:59:59',
+    }, now)).toEqual({ label: 'Expired', statusClass: 'status-expired' });
+    expect(accountStatusLabel({
+      status: 'approved',
+      startDate: '2026-10-01T00:00:00',
+      endDate: '2026-10-23T23:59:59',
+    }, now)).toEqual({ label: 'Approved', statusClass: 'status-approved' });
+    expect(accountStatusLabel({ status: 'approved' }, now)).toEqual({
+      label: 'Approved',
+      statusClass: 'status-approved',
+    });
+    expect(accountStatusLabel({
+      status: 'pending',
+      endDate: '2020-01-01T00:00:00',
+    }, now)).toEqual({ label: 'Pending', statusClass: 'status-pending' });
   });
 
   test('a regular admin cannot modify admin or superadmin profiles', () => {
