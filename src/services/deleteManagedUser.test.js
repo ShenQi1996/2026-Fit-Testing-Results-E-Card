@@ -7,9 +7,20 @@ describe('deleteManagedUser', () => {
     getDoc.mockReset();
     deleteDoc.mockReset();
     firebaseAuth.deleteUser.mockClear();
-    getDoc.mockResolvedValue({
-      exists: () => true,
-      data: () => ({ role: 'admin', status: 'approved' }),
+    getDoc.mockImplementation(async (ref) => {
+      const id = ref?.args?.[2];
+      if (id === 'user-2') {
+        return {
+          exists: () => true,
+          data: () => ({ role: 'tester', status: 'approved', email: 'tester@example.com' }),
+          id,
+        };
+      }
+      return {
+        exists: () => true,
+        data: () => ({ role: 'admin', status: 'approved' }),
+        id,
+      };
     });
     jest.spyOn(console, 'error').mockImplementation(() => {});
   });

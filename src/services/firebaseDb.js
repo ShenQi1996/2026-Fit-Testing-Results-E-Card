@@ -34,6 +34,14 @@ import {
   isValidVerificationToken,
   normalizeVerificationToken,
 } from '../utils/verificationToken';
+import {
+  USER_ROLES,
+  USER_ROLE_SUPERADMIN,
+  USER_ROLE_TESTER,
+  canModifyManagedUser,
+  isAdminOrAbove,
+  isSuperAdmin,
+} from '../utils/roles';
 
 const FIRESTORE_BATCH_LIMIT = 400;
 
@@ -223,24 +231,51 @@ const syncLookupsForFitTests = async (tests = []) => {
 export const USER_STATUS_PENDING = 'pending';
 export const USER_STATUS_APPROVED = 'approved';
 export const USER_STATUS_REJECTED = 'rejected';
-export const USER_ROLES = ['tester', 'admin'];
+export { USER_ROLES };
 export const USER_STATUSES = [
   USER_STATUS_PENDING,
   USER_STATUS_APPROVED,
   USER_STATUS_REJECTED,
 ];
 
+const permissionError = (message) => {
+  const error = new Error(message);
+  error.code = 'PERMISSION_DENIED';
+  return error;
+};
+
 /** Missing or unknown status is pending. Approved and rejected pass through. */
 export const normalizeUserStatus = (status) => (
   USER_STATUSES.includes(status) ? status : USER_STATUS_PENDING
 );
 
-const assertAdmin = async (adminUserId) => {
-  const adminRole = await getUserRole(adminUserId);
-  if (adminRole !== 'admin') {
-    const error = new Error('Only admin users can manage users.');
-    error.code = 'PERMISSION_DENIED';
-    throw error;
+const assertAdmin = async (userId) => {
+  const access = await getUserAccessProfile(userId);
+  if (access.status !== USER_STATUS_APPROVED || !isAdminOrAbove(access.role)) {
+    throw permissionError('Only admin users can manage users.');
+  }
+  return access.role;
+};
+
+const assertSuperAdmin = async (userId) => {
+  const access = await getUserAccessProfile(userId);
+  if (access.status !== USER_STATUS_APPROVED || !isSuperAdmin(access.role)) {
+    throw permissionError('Only a super admin can grant or change admin access.');
+  }
+  return access.role;
+};
+
+const assertCanAssignRole = async (actorUserId, actorRole, targetUserId, currentRole, nextRole) => {
+  const current = currentRole || USER_ROLE_TESTER;
+  const next = nextRole || current;
+  if (!USER_ROLES.includes(next)) {
+    throw new Error('Invalid role. Must be tester, admin, or superadmin.');
+  }
+  if (actorUserId === targetUserId && isSuperAdmin(actorRole) && next !== USER_ROLE_SUPERADMIN) {
+    throw permissionError('You cannot remove your own super admin role.');
+  }
+  if (current !== USER_ROLE_TESTER || next !== USER_ROLE_TESTER) {
+    await assertSuperAdmin(actorUserId);
   }
 };
 
@@ -394,7 +429,7 @@ export const purgeExpiredFitTests = async (userId) => {
   try {
     const role = await getUserRole(userId);
     const testsQuery =
-      role === 'admin'
+      isAdminOrAbove(role)
         ? collection(db, FIT_TESTS_COLLECTION)
         : query(collection(db, FIT_TESTS_COLLECTION), where('userId', '==', userId));
 
@@ -674,7 +709,7 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     }
     
     const userRole = await getUserRole(userId);
-    if (userRole !== 'admin') {
+    if (!isAdminOrAbove(userRole)) {
       const error = new Error('Only admin users can edit test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -741,7 +776,7 @@ export const deleteFitTest = async (fitTestId, userId) => {
     }
     
     const userRole = await getUserRole(userId);
-    if (userRole !== 'admin') {
+    if (!isAdminOrAbove(userRole)) {
       const error = new Error('Only admin users can delete test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -773,7 +808,7 @@ export const deleteFitTest = async (fitTestId, userId) => {
 /**
  * Get user role from Firestore
  * @param {string} userId - User ID
- * @returns {Promise<string>} User role ('admin' or 'tester')
+ * @returns {Promise<string>} User role ('tester', 'admin', or 'superadmin')
  */
 export const getUserRole = async (userId) => {
   try {
@@ -876,7 +911,7 @@ export const getUserAccessProfile = async (userId) => {
  */
 export const getPendingUsers = async (adminUserId) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
 
     const pendingQuery = query(
       collection(db, USERS_COLLECTION),
@@ -886,7 +921,9 @@ export const getPendingUsers = async (adminUserId) => {
 
     const users = [];
     querySnapshot.forEach((docSnap) => {
-      users.push(serializeUserDoc(docSnap));
+      const pendingUser = serializeUserDoc(docSnap);
+      if (!canModifyManagedUser(actorRole, pendingUser.role)) return;
+      users.push(pendingUser);
     });
 
     users.sort((a, b) => {
@@ -940,7 +977,7 @@ export const getAllUsers = async (adminUserId) => {
  */
 export const updateManagedUser = async (adminUserId, targetUserId, updates = {}) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
 
     if (!targetUserId) {
       throw new Error('Target user ID is required.');
@@ -955,18 +992,18 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
     const current = targetSnap.data() || {};
     const nextName = typeof updates.name === 'string' ? updates.name.trim() : current.name || '';
     const nextEmail = typeof updates.email === 'string' ? updates.email.trim() : current.email || '';
-    const nextRole = updates.role || current.role || 'tester';
-    const nextStatus = normalizeUserStatus(updates.status || current.status);
-
-    if (!USER_ROLES.includes(nextRole)) {
-      throw new Error('Invalid role. Must be admin or tester.');
+    const nextRole = updates.role || current.role || USER_ROLE_TESTER;
+    const nextStatus = normalizeUserStatus(
+      updates.status !== undefined ? updates.status : current.status
+    );
+    const profileChanged = nextName !== (current.name || '') || nextEmail !== (current.email || '');
+    if (profileChanged && !isSuperAdmin(actorRole)) {
+      throw permissionError('Only a super admin can edit name or email. Admins can update tester role and status.');
     }
+
+    await assertCanAssignRole(adminUserId, actorRole, targetUserId, current.role, nextRole);
     if (!USER_STATUSES.includes(nextStatus)) {
       throw new Error('Invalid status.');
-    }
-
-    if (targetUserId === adminUserId && nextRole !== 'admin') {
-      throw new Error('You cannot remove your own admin role.');
     }
     if (targetUserId === adminUserId && nextStatus !== USER_STATUS_APPROVED) {
       throw new Error('You cannot change your own approval status.');
@@ -1006,7 +1043,7 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
  */
 export const deleteManagedUser = async (adminUserId, targetUserId) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
 
     if (!targetUserId) {
       throw new Error('Target user ID is required.');
@@ -1020,6 +1057,13 @@ export const deleteManagedUser = async (adminUserId, targetUserId) => {
     if (!targetSnap.exists()) {
       throw new Error('User profile not found.');
     }
+    await assertCanAssignRole(
+      adminUserId,
+      actorRole,
+      targetUserId,
+      targetSnap.data()?.role,
+      USER_ROLE_TESTER
+    );
 
     await deleteDoc(targetRef);
   } catch (error) {
@@ -1037,7 +1081,7 @@ export const deleteManagedUser = async (adminUserId, targetUserId) => {
  */
 export const createManagedUserProfile = async (adminUserId, targetUserId, userData = {}) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
 
     if (!targetUserId) {
       throw new Error('Target user ID is required.');
@@ -1045,15 +1089,16 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
 
     const email = (userData.email || '').trim();
     const name = (userData.name || '').trim();
-    const role = userData.role || 'tester';
+    const role = userData.role || USER_ROLE_TESTER;
+    if (role === USER_ROLE_SUPERADMIN) {
+      throw permissionError('A super admin cannot be created from the client.');
+    }
+    await assertCanAssignRole(adminUserId, actorRole, targetUserId, USER_ROLE_TESTER, role);
     const status = normalizeUserStatus(userData.status);
     const provider = userData.provider || 'password';
 
     if (!email) {
       throw new Error('Email is required.');
-    }
-    if (!USER_ROLES.includes(role)) {
-      throw new Error('Invalid role. Must be admin or tester.');
     }
     if (!USER_STATUSES.includes(status)) {
       throw new Error('Invalid status.');
@@ -1105,20 +1150,27 @@ export const updateUserApprovalStatus = async (adminUserId, targetUserId, nextSt
 };
 
 /**
- * Set user role in Firestore
- * @param {string} userId - User ID
- * @param {string} role - Role to set ('admin' or 'tester')
+ * Set a user's role. The actor must be an admin or super admin.
+ * Only a super admin may assign admin or superadmin.
+ * @param {string} actorUserId
+ * @param {string} targetUserId
+ * @param {string} role
  * @returns {Promise<void>}
  */
-export const setUserRole = async (userId, role) => {
+export const setUserRole = async (actorUserId, targetUserId, role) => {
   try {
-    if (role !== 'admin' && role !== 'tester') {
-      throw new Error('Invalid role. Must be "admin" or "tester".');
+    const actorRole = await assertAdmin(actorUserId);
+    if (!targetUserId) {
+      throw new Error('Target user ID is required.');
     }
-    
-    const userDocRef = doc(db, USERS_COLLECTION, userId);
+    const userDocRef = doc(db, USERS_COLLECTION, targetUserId);
     const userDocSnap = await getDoc(userDocRef);
-    
+    const currentRole = userDocSnap.exists() ? userDocSnap.data()?.role : USER_ROLE_TESTER;
+    if (!userDocSnap.exists() && role === USER_ROLE_SUPERADMIN) {
+      throw permissionError('A super admin cannot be created from the client.');
+    }
+    await assertCanAssignRole(actorUserId, actorRole, targetUserId, currentRole, role);
+
     if (userDocSnap.exists()) {
       const data = userDocSnap.data() || {};
       const payload = {
@@ -1139,7 +1191,8 @@ export const setUserRole = async (userId, role) => {
     }
   } catch (error) {
     console.error('Error setting user role:', error);
-    throw new Error('Failed to set user role. Please try again.');
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    throw new Error(error.message || 'Failed to set user role. Please try again.');
   }
 };
 

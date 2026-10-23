@@ -1,15 +1,31 @@
 /**
- * Set status 'approved' on legacy users/{uid} docs that have no status.
+ * Set status 'approved' on legacy users/{uid} docs that are real profiles
+ * and have no status yet.
  *
- * Run this while signed in as an admin, after the rules that use
- * resource.data.get(...) are deployed, and before relying on the app
- * that treats a missing status as pending:
+ * Run this while signed in as an approved super admin, after the rules that
+ * require status == 'approved' are deployed, and before relying on the app
+ * that treats a missing or unknown status as pending:
  *
- *   ADMIN_EMAIL='qisam1989@gmail.com' ADMIN_PASSWORD='...' node scripts/backfillUserStatus.js
+ *   ADMIN_EMAIL='you@example.com' ADMIN_PASSWORD='...' npm run backfill:user-status
  *
  * The password is read from the environment, not from the command line.
- * Firebase Console is the other way to set the same field. This does not
- * delete or create Auth users.
+ * A plain admin cannot update admin or super admin profiles, so this script
+ * refuses to run unless the signed-in user is an approved super admin.
+ *
+ * The signed-in super admin's own document is skipped. Rules do not let
+ * anyone change their own status from the client. Set that document in the
+ * Firebase console when it is missing (the super admin profile was already
+ * confirmed on Oct 23, 2026).
+ *
+ * A document is updated only when it has a role of tester, admin, or
+ * superadmin and at least one profile field other than role and the
+ * setUserRole timestamps (email, name, or provider). Role-only documents
+ * written by setUserRole, which have not been reviewed, are left alone so
+ * they stay pending. Documents with no role are left alone. A status that
+ * is already set is left alone. Known legacy ids that the users query does
+ * not return are not guessed at, because their role cannot be checked.
+ *
+ * This does not delete or create Auth users.
  */
 
 const fs = require('fs');
@@ -22,22 +38,55 @@ const LEGACY_USER_IDS = [
 ];
 
 const STATUS_BACKFILL = { status: 'approved' };
+const PROFILE_ROLES = new Set(['tester', 'admin', 'superadmin']);
+const ROLE_ONLY_KEYS = new Set(['role', 'createdAt', 'updatedAt']);
 
-const collectStatusBackfillIds = (docs, legacyIds = LEGACY_USER_IDS) => {
-  const toUpdate = new Set();
-  const seen = new Map();
+const docData = (userDoc) => (
+  typeof userDoc.data === 'function' ? (userDoc.data() || {}) : (userDoc.data || {})
+);
+
+const presentKeys = (data) => Object.keys(data).filter((key) => (
+  data[key] !== undefined && data[key] !== null && data[key] !== ''
+));
+
+/**
+ * Role-only setUserRole writes store role plus optional timestamps and have
+ * not been reviewed. They must not be approved by this script.
+ */
+const isUnreviewedRoleOnlyDoc = (data) => {
+  const keys = presentKeys(data);
+  return keys.length > 0 && keys.every((key) => ROLE_ONLY_KEYS.has(key));
+};
+
+/**
+ * Missing status on a real profile (a recognized role plus email, name, or
+ * provider). Unknown or empty status counts as missing.
+ */
+const shouldBackfillStatus = (data) => {
+  if (!data || data.status) return false;
+  if (!PROFILE_ROLES.has(data.role)) return false;
+  if (isUnreviewedRoleOnlyDoc(data)) return false;
+  return true;
+};
+
+const assertApprovedSuperAdmin = (data) => {
+  if (data?.role !== 'superadmin' || data?.status !== 'approved') {
+    throw new Error(
+      'Sign in as an approved super admin. A plain admin cannot update admin or super admin profiles.'
+    );
+  }
+};
+
+const collectStatusBackfillIds = (docs, { skipIds = [] } = {}) => {
+  const skip = new Set(skipIds);
+  const toUpdate = [];
 
   docs.forEach((userDoc) => {
-    const data = typeof userDoc.data === 'function' ? userDoc.data() : (userDoc.data || {});
-    seen.set(userDoc.id, data || {});
-    if (!data?.status) toUpdate.add(userDoc.id);
+    if (skip.has(userDoc.id)) return;
+    if (shouldBackfillStatus(docData(userDoc))) toUpdate.push(userDoc.id);
   });
 
-  legacyIds.forEach((id) => {
-    if (!seen.has(id) || !seen.get(id)?.status) toUpdate.add(id);
-  });
-
-  return [...toUpdate];
+  return toUpdate;
 };
 
 const readFirebaseConfig = () => {
@@ -55,7 +104,6 @@ const readFirebaseConfig = () => {
 const backfillMissingUserStatus = async ({
   email,
   password,
-  legacyIds = LEGACY_USER_IDS,
 } = {}) => {
   if (!email || !password) {
     throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD are required.');
@@ -68,16 +116,28 @@ const backfillMissingUserStatus = async ({
     collection,
     getDocs,
     doc,
+    getDoc,
     updateDoc,
   } = require('firebase/firestore');
 
   const app = initializeApp(readFirebaseConfig(), `backfill-${Date.now()}`);
   const auth = getAuth(app);
-  await signInWithEmailAndPassword(auth, email, password);
+  const credential = await signInWithEmailAndPassword(auth, email, password);
+  const selfId = credential.user.uid;
 
   const db = getFirestore(app);
+  const selfSnap = await getDoc(doc(db, 'users', selfId));
+  assertApprovedSuperAdmin(selfSnap.exists() ? selfSnap.data() : {});
+
   const snap = await getDocs(collection(db, 'users'));
-  const ids = collectStatusBackfillIds(snap.docs, legacyIds);
+  const qualifying = collectStatusBackfillIds(snap.docs);
+  const ids = qualifying.filter((id) => id !== selfId);
+  if (qualifying.includes(selfId)) {
+    console.log(
+      `Skipped users/${selfId}. Rules do not allow changing your own status. Set it in the Firebase console if it is missing.`
+    );
+  }
+
   const updated = [];
   const failed = [];
 
@@ -91,7 +151,7 @@ const backfillMissingUserStatus = async ({
     }
   }
 
-  return { updated, failed };
+  return { updated, failed, skippedSelf: qualifying.includes(selfId) };
 };
 
 const main = async () => {
@@ -117,6 +177,8 @@ if (require.main === module) {
 module.exports = {
   LEGACY_USER_IDS,
   STATUS_BACKFILL,
+  shouldBackfillStatus,
+  assertApprovedSuperAdmin,
   collectStatusBackfillIds,
   backfillMissingUserStatus,
   readFirebaseConfig,
