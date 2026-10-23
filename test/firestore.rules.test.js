@@ -5,8 +5,10 @@ import {
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import {
+  Timestamp,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -530,6 +532,125 @@ test('only a super admin can set or change school tags', async () => {
     status: 'approved',
     email: 'third@example.com',
     schools: [HELENE],
+  }));
+});
+
+const daysFromNow = (days) => Timestamp.fromDate(new Date(Date.now() + days * 24 * 60 * 60 * 1000));
+
+const datedAdmin = (extra) => approved('admin', 'window@example.com', { schools: [HELENE], ...extra });
+
+test('an admin whose access end date has passed cannot manage other users', async () => {
+  await seed([
+    ['users/expired-admin', datedAdmin({ endDate: daysFromNow(-1) })],
+    ['users/tester-1', testerAt(HELENE)],
+  ]);
+  const db = testEnv.authenticatedContext('expired-admin').firestore();
+
+  await assertSucceeds(getDoc(doc(db, 'users/expired-admin')));
+  await assertFails(getDoc(doc(db, 'users/tester-1')));
+  await assertFails(updateDoc(doc(db, 'users/tester-1'), { status: 'approved' }));
+  await assertFails(getDocs(query(
+    collection(db, 'users'),
+    where('role', '==', 'tester'),
+    where('school', 'in', [HELENE]),
+  )));
+});
+
+test('an admin whose access start date is in the future cannot manage other users', async () => {
+  await seed([
+    ['users/future-admin', datedAdmin({ startDate: daysFromNow(2), endDate: daysFromNow(10) })],
+    ['users/tester-1', testerAt(HELENE)],
+  ]);
+  const db = testEnv.authenticatedContext('future-admin').firestore();
+
+  await assertSucceeds(getDoc(doc(db, 'users/future-admin')));
+  await assertFails(getDoc(doc(db, 'users/tester-1')));
+  await assertFails(updateDoc(doc(db, 'users/tester-1'), { status: 'approved' }));
+  await assertFails(getDocs(query(
+    collection(db, 'users'),
+    where('role', '==', 'tester'),
+    where('school', 'in', [HELENE]),
+  )));
+});
+
+test('an admin inside the access window and an admin with no dates can manage in-scope testers', async () => {
+  await seed([
+    ['users/active-admin', datedAdmin({
+      email: 'active@example.com',
+      startDate: daysFromNow(-2),
+      endDate: daysFromNow(2),
+    })],
+    ['users/open-admin', scopedAdmin([HELENE], 'open@example.com')],
+    ['users/tester-1', testerAt(HELENE)],
+    ['users/tester-2', testerAt(HELENE, { email: 'two@example.com' })],
+  ]);
+  const activeDb = testEnv.authenticatedContext('active-admin').firestore();
+  const openDb = testEnv.authenticatedContext('open-admin').firestore();
+
+  await assertSucceeds(updateDoc(doc(activeDb, 'users/tester-1'), { status: 'approved' }));
+  await assertSucceeds(getDocs(query(
+    collection(activeDb, 'users'),
+    where('role', '==', 'tester'),
+    where('school', 'in', [HELENE]),
+  )));
+  await assertSucceeds(updateDoc(doc(openDb, 'users/tester-2'), { status: 'approved' }));
+});
+
+test('a super admin is not limited by access dates', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com', {
+      startDate: daysFromNow(3),
+      endDate: daysFromNow(-3),
+    })],
+    ['users/tester-1', testerAt(HELENE)],
+    ['users/admin-1', scopedAdmin()],
+  ]);
+  const db = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertSucceeds(getDocs(collection(db, 'users')));
+  await assertSucceeds(updateDoc(doc(db, 'users/tester-1'), { status: 'approved' }));
+  await assertSucceeds(updateDoc(doc(db, 'users/admin-1'), { status: 'rejected' }));
+});
+
+test('only a super admin can set or clear admin access dates', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/admin-1', scopedAdmin()],
+    ['users/admin-2', scopedAdmin([HELENE], 'other@example.com')],
+    ['users/tester-1', testerAt(HELENE)],
+  ]);
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertFails(updateDoc(doc(adminDb, 'users/admin-1'), { endDate: daysFromNow(10) }));
+  await assertFails(updateDoc(doc(adminDb, 'users/admin-2'), {
+    status: 'approved',
+    endDate: daysFromNow(10),
+  }));
+  await assertFails(updateDoc(doc(adminDb, 'users/tester-1'), { startDate: daysFromNow(-1) }));
+  await assertFails(setDoc(doc(adminDb, 'users/new-tester'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'new@example.com',
+    school: HELENE,
+    startDate: daysFromNow(-1),
+  }));
+  await assertFails(updateDoc(doc(superDb, 'users/super-1'), { endDate: daysFromNow(10) }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/admin-2'), {
+    startDate: daysFromNow(-1),
+    endDate: daysFromNow(10),
+  }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/admin-2'), {
+    startDate: deleteField(),
+    endDate: deleteField(),
+  }));
+  await assertSucceeds(setDoc(doc(superDb, 'users/new-admin'), {
+    role: 'admin',
+    status: 'approved',
+    email: 'new-admin@example.com',
+    schools: [HELENE],
+    startDate: daysFromNow(-1),
+    endDate: daysFromNow(30),
   }));
 });
 

@@ -42,7 +42,7 @@ export const isAdminWithinSchools = (actorSchools, user) => {
 export const filterUsersForActor = (actor, users) => {
   if (!Array.isArray(users)) return [];
   if (isSuperAdmin(actor?.role)) return users;
-  if (!isAdminOrAbove(actor?.role)) return [];
+  if (!isAdminOrAbove(actor)) return [];
   return users.filter((user) => (
     user?.id === actor?.uid
     || isTesterInSchools(actor?.schools, user)

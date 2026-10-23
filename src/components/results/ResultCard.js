@@ -373,7 +373,7 @@ const ResultCard = ({
           </>
         ) : (
           <>
-            {isAdminOrAbove(user?.role) && (
+            {isAdminOrAbove(user) && (
               <>
                 <button
                   onClick={() => onEditClick(test)}
@@ -421,7 +421,7 @@ const ResultCard = ({
             >
               {resending === test.id ? 'Sending...' : '📧 Resend'}
             </button>
-            {!isAdminOrAbove(user?.role) && (
+            {!isAdminOrAbove(user) && (
               <div style={{ fontSize: '12px', color: '#666', marginTop: '8px', fontStyle: 'italic' }}>
                 Only admin users can edit or delete test results.
               </div>

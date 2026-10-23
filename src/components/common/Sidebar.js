@@ -6,7 +6,7 @@ import './Sidebar.css';
 
 const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
   const { user } = useAuth();
-  const isAdmin = isAdminOrAbove(user?.role);
+  const isAdmin = isAdminOrAbove(user);
   const [testCount, setTestCount] = useState(null);
 
   const loadTestCount = useCallback(async () => {

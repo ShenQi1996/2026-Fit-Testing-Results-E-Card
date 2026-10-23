@@ -1,4 +1,6 @@
 import {
+  accessDateInputValue,
+  accessWindowOrderError,
   canModifyManagedUser,
   isAdminOrAbove,
   isSuperAdmin,
@@ -29,6 +31,28 @@ describe('role helpers', () => {
     expect(rolesCreatableBy('admin')).toEqual(['tester']);
     expect(rolesCreatableBy('tester')).toEqual(['tester']);
     expect(rolesCreatableBy('superadmin')).not.toContain('superadmin');
+  });
+
+  test('an admin outside the access window is not an admin, and a super admin is', () => {
+    const now = new Date('2026-10-23T15:00:00');
+    expect(isAdminOrAbove({ role: 'admin' }, now)).toBe(true);
+    expect(isAdminOrAbove({
+      role: 'admin',
+      startDate: '2026-10-01T00:00:00',
+      endDate: '2026-10-31T23:59:59',
+    }, now)).toBe(true);
+    expect(isAdminOrAbove({ role: 'admin', endDate: '2026-10-01T00:00:00' }, now)).toBe(false);
+    expect(isAdminOrAbove({ role: 'admin', startDate: '2026-11-01T00:00:00' }, now)).toBe(false);
+    expect(isAdminOrAbove({
+      role: 'superadmin',
+      startDate: '2026-11-01T00:00:00',
+      endDate: '2026-10-01T00:00:00',
+    }, now)).toBe(true);
+    expect(accessDateInputValue('2026-06-01T12:00:00')).toMatch(/^2026-06-0[12]$/);
+    expect(accessWindowOrderError('2026-10-10', '2026-10-01'))
+      .toBe('Access end date cannot be before the start date.');
+    expect(accessWindowOrderError('2026-10-10', '2026-10-10')).toBe('');
+    expect(accessWindowOrderError('', '2026-10-10')).toBe('');
   });
 
   test('a regular admin cannot modify admin or superadmin profiles', () => {

@@ -19,14 +19,36 @@ service cloud.firestore {
       return isSignedIn() && currentUserDoc().data.get('status', null) == 'approved';
     }
 
+    // A missing start or end leaves that side open. A start in the future or an
+    // end in the past closes the window. Super admins are not checked.
+    function startAllows(data) {
+      return data.keys().hasAny(['startDate'])
+        ? (data.startDate is timestamp ? request.time >= data.startDate : false)
+        : true;
+    }
+
+    function endAllows(data) {
+      return data.keys().hasAny(['endDate'])
+        ? (data.endDate is timestamp ? request.time <= data.endDate : false)
+        : true;
+    }
+
+    function adminWindowOpen(data) {
+      return startAllows(data) && endAllows(data);
+    }
+
     // Approved admin or super admin. A super admin passes every admin check.
-    // Do not grant superadmin from the client. Confirm the super admin document
-    // already has role == 'superadmin' and status == 'approved' before publishing
-    // these rules (confirmed Oct 23, 2026), then publish this file.
+    // An admin outside startDate/endDate fails this check. Do not grant
+    // superadmin from the client. Confirm the super admin document already has
+    // role == 'superadmin' and status == 'approved' before publishing these
+    // rules (confirmed Oct 23, 2026), then publish this file.
     function isAdmin() {
       return isSignedIn() && isApproved() && (
-        currentUserDoc().data.get('role', null) == 'admin' ||
         currentUserDoc().data.get('role', null) == 'superadmin'
+        || (
+          currentUserDoc().data.get('role', null) == 'admin'
+          && adminWindowOpen(currentUserDoc().data)
+        )
       );
     }
 
@@ -141,6 +163,44 @@ service cloud.firestore {
         );
     }
 
+    function startDateChanged() {
+      return request.resource.data.keys().hasAny(['startDate']) != resource.data.keys().hasAny(['startDate'])
+        ? true
+        : (request.resource.data.keys().hasAny(['startDate'])
+          ? request.resource.data.startDate != resource.data.startDate
+          : false);
+    }
+
+    function endDateChanged() {
+      return request.resource.data.keys().hasAny(['endDate']) != resource.data.keys().hasAny(['endDate'])
+        ? true
+        : (request.resource.data.keys().hasAny(['endDate'])
+          ? request.resource.data.endDate != resource.data.endDate
+          : false);
+    }
+
+    function accessDatesShapeOk() {
+      return (request.resource.data.keys().hasAny(['startDate'])
+          ? request.resource.data.startDate is timestamp
+          : true)
+        && (request.resource.data.keys().hasAny(['endDate'])
+          ? request.resource.data.endDate is timestamp
+          : true);
+    }
+
+    // Only a super admin can set or clear access dates, and not on their own doc.
+    function accessDatesOkOnUpdate(userId) {
+      return (startDateChanged() || endDateChanged())
+        ? (isSuperAdmin() && request.auth.uid != userId && accessDatesShapeOk())
+        : true;
+    }
+
+    function accessDatesOkOnCreate(userId) {
+      return request.resource.data.keys().hasAny(['startDate', 'endDate'])
+        ? (isSuperAdmin() && request.auth.uid != userId && accessDatesShapeOk())
+        : true;
+    }
+
     // Staff fields a scoped admin may touch. School tags are not in this list.
     function scopedAdminFieldUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys()
@@ -163,7 +223,9 @@ service cloud.firestore {
       // A super admin may create a tester or admin profile for someone else.
       // A scoped admin creating a tester must set school to one of their schools.
       // A super admin may omit school or set school or schools, and not on their own doc.
+      // Only a super admin may set startDate or endDate, and not on their own doc.
       allow create: if schoolTagsOkOnCreate(userId) &&
+        accessDatesOkOnCreate(userId) &&
         request.resource.data.get('role', null) != 'superadmin'
         && (
           (isOwner(userId)
@@ -177,8 +239,9 @@ service cloud.firestore {
             && request.auth.uid != userId
             && request.resource.data.role == 'tester')
         );
-      // Owners cannot change role, status, approvedBy, approvedAt, school, or
-      // schools, so nobody can self-escalate or retag themselves. .get(..., null)
+      // Owners cannot change role, status, approvedBy, approvedAt, school,
+      // schools, startDate, or endDate, so nobody can self-escalate, retag
+      // themselves, or extend their own access. .get(..., null)
       // keeps a missing field from failing the whole rule. A super admin cannot
       // demote or delete themselves. No client update may set role to superadmin
       // unless that role is unchanged. Role changes to or from admin are
@@ -186,6 +249,7 @@ service cloud.firestore {
       // in their schools (role stays tester) and on an admin whose schools are
       // inside their list (role stays admin), plus approval bookkeeping.
       allow update: if schoolTagsOkOnUpdate(userId) &&
+        accessDatesOkOnUpdate(userId) &&
         (request.resource.data.get('role', null) != 'superadmin'
           || request.resource.data.get('role', null) == resource.data.get('role', null))
         && (
