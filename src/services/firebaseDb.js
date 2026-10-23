@@ -42,6 +42,7 @@ import {
   isAdminOrAbove,
   isSuperAdmin,
 } from '../utils/roles';
+import { normalizeSchoolList } from '../utils/schoolScope';
 
 const FIRESTORE_BATCH_LIMIT = 400;
 
@@ -295,6 +296,8 @@ const serializeUserDoc = (docSnap) => {
     updatedAt: toIso(data.updatedAt),
     approvedAt: toIso(data.approvedAt),
     approvedBy: data.approvedBy || null,
+    school: typeof data.school === 'string' ? data.school : '',
+    schools: normalizeSchoolList(data.schools),
   };
 };
 
@@ -883,24 +886,25 @@ export const ensureUserProfile = async (userInfo) => {
 export const getUserAccessProfile = async (userId) => {
   try {
     if (!userId) {
-      return { role: 'tester', status: USER_STATUS_PENDING };
+      return { role: 'tester', status: USER_STATUS_PENDING, schools: [] };
     }
 
     const userDocRef = doc(db, USERS_COLLECTION, userId);
     const userDocSnap = await getDoc(userDocRef);
 
     if (!userDocSnap.exists()) {
-      return { role: 'tester', status: USER_STATUS_PENDING };
+      return { role: 'tester', status: USER_STATUS_PENDING, schools: [] };
     }
 
     const data = userDocSnap.data() || {};
     return {
       role: data.role || 'tester',
       status: normalizeUserStatus(data.status),
+      schools: normalizeSchoolList(data.schools),
     };
   } catch (error) {
     console.error('Error getting user access profile:', error);
-    return { role: 'tester', status: USER_STATUS_PENDING };
+    return { role: 'tester', status: USER_STATUS_PENDING, schools: [] };
   }
 };
 
@@ -1021,6 +1025,22 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
       if (nextStatus === USER_STATUS_APPROVED || nextStatus === USER_STATUS_REJECTED) {
         payload.approvedAt = Timestamp.now();
         payload.approvedBy = adminUserId;
+      }
+    }
+
+    // School tags are super-admin only, and not on the caller's own document.
+    if (isSuperAdmin(actorRole) && adminUserId !== targetUserId) {
+      if (typeof updates.school === 'string') {
+        const nextSchool = updates.school.trim();
+        const currentSchool = typeof current.school === 'string' ? current.school : '';
+        if (nextSchool !== currentSchool) payload.school = nextSchool;
+      }
+      if (Array.isArray(updates.schools)) {
+        const nextSchools = normalizeSchoolList(updates.schools);
+        const currentSchools = normalizeSchoolList(current.schools);
+        const sameSchools = nextSchools.length === currentSchools.length
+          && nextSchools.every((school, index) => school === currentSchools[index]);
+        if (!sameSchools) payload.schools = nextSchools;
       }
     }
 

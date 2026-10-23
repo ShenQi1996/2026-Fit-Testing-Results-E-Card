@@ -16,6 +16,7 @@ import {
 } from '../../services/firebaseDb';
 import { useSavedProfiles } from '../../hooks/useSavedProfiles';
 import { canModifyManagedUser, isAdminOrAbove, isSuperAdmin } from '../../utils/roles';
+import { filterUsersForActor } from '../../utils/schoolScope';
 import SavedProfilesPanel from './SavedProfilesPanel';
 import './EditAccount.css';
 
@@ -187,7 +188,7 @@ const EditAccount = ({ onBack }) => {
     }
   };
 
-  const visiblePendingUsers = pendingUsers.filter((pendingUser) => (
+  const visiblePendingUsers = filterUsersForActor(user, pendingUsers).filter((pendingUser) => (
     canModifyManagedUser(user?.role, pendingUser.role || 'tester')
   ));
 

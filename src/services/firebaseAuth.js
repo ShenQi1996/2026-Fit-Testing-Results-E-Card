@@ -59,6 +59,7 @@ const toAppUser = (user, accessProfile) => ({
   createdAt: user.metadata?.creationTime,
   role: accessProfile.role,
   status: accessProfile.status,
+  schools: accessProfile.schools || [],
 });
 
 const signOutQuietly = async () => {

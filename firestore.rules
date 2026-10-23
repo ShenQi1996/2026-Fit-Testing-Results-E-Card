@@ -35,18 +35,104 @@ service cloud.firestore {
         currentUserDoc().data.get('role', null) == 'superadmin';
     }
 
+    function isScopedAdmin() {
+      return isAdmin() && !isSuperAdmin();
+    }
+
     // Missing role is treated as tester when an admin edits someone else's doc.
     function roleOf(data) {
       return data.get('role', 'tester');
     }
 
+    // A missing key throws on property access. Ternaries evaluate one branch,
+    // so the field is read only after keys() confirms it is present.
+    function schoolOf(data) {
+      return data.keys().hasAny(['school'])
+        ? (data.school is string ? data.school : '')
+        : '';
+    }
+
+    function schoolsOf(data) {
+      return data.keys().hasAny(['schools'])
+        ? (data.schools is list ? data.schools : [])
+        : [];
+    }
+
+    function actorSchools() {
+      return schoolsOf(currentUserDoc().data);
+    }
+
+    // Tester docs store one school. It must be one of the actor's schools.
+    function testerInScope(data) {
+      return roleOf(data) == 'tester'
+        && schoolOf(data) != ''
+        && schoolOf(data) in actorSchools();
+    }
+
+    // Admin docs store schools. Every one of them must sit inside the actor's list.
+    function adminInScope(data) {
+      return roleOf(data) == 'admin'
+        && schoolsOf(data).size() > 0
+        && schoolsOf(data).hasOnly(actorSchools());
+    }
+
+    function userInScope(data) {
+      return testerInScope(data) || adminInScope(data);
+    }
+
+    function schoolChanged() {
+      return schoolOf(request.resource.data) != schoolOf(resource.data);
+    }
+
+    function schoolsChanged() {
+      return !schoolsOf(request.resource.data).hasAll(schoolsOf(resource.data))
+        || !schoolsOf(resource.data).hasAll(schoolsOf(request.resource.data));
+    }
+
+    function schoolTagsShapeOk() {
+      return (request.resource.data.keys().hasAny(['school'])
+          ? request.resource.data.school is string
+          : true)
+        && (request.resource.data.keys().hasAny(['schools'])
+          ? request.resource.data.schools is list
+          : true);
+    }
+
+    // Only a super admin can set or change school tags, and not on their own doc.
+    // userId is passed in: helpers defined outside the match cannot see the wildcard.
+    function schoolTagsOkOnUpdate(userId) {
+      return (!schoolChanged() && !schoolsChanged())
+        || (isSuperAdmin() && request.auth.uid != userId && schoolTagsShapeOk());
+    }
+
+    function schoolTagsOkOnCreate(userId) {
+      return !request.resource.data.keys().hasAny(['school', 'schools'])
+        || (
+          isSuperAdmin()
+          && request.auth.uid != userId
+          && schoolTagsShapeOk()
+        );
+    }
+
+    // Staff fields a scoped admin may touch. School tags are not in this list.
+    function scopedAdminFieldUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'updatedAt']);
+    }
+
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
+      // Single-document reads are school-scoped for a plain admin.
+      // List stays open to any approved admin: a collection query cannot be
+      // proved against the actor's schools document. The users page filters.
+      allow get: if isOwner(userId) || isSuperAdmin()
+        || (isScopedAdmin() && userInScope(resource.data));
+      allow list: if isAdmin();
       // No client create may set role to superadmin.
       // Owners may create only their own pending tester profile.
       // Admins may create a tester profile for someone else.
       // A super admin may create a tester or admin profile for someone else.
-      allow create: if
+      // Only a super admin may set school or schools, and not on their own doc.
+      allow create: if schoolTagsOkOnCreate(userId) &&
         request.resource.data.get('role', null) != 'superadmin'
         && (
           (isOwner(userId)
@@ -56,18 +142,19 @@ service cloud.firestore {
             && request.auth.uid != userId
             && (request.resource.data.role == 'tester'
               || request.resource.data.role == 'admin'))
-          || (isAdmin() && !isSuperAdmin()
+          || (isScopedAdmin()
             && request.auth.uid != userId
             && request.resource.data.role == 'tester')
         );
-      // Owners cannot change role, status, approvedBy, or approvedAt, so nobody
-      // can self-escalate. .get(..., null) keeps a missing field from failing
-      // the whole rule. A super admin cannot demote or delete themselves.
-      // No client update may set role to superadmin unless that role is unchanged.
-      // Role changes to or from admin are super-admin only.
-      // A regular admin may update only role and status on a tester doc
-      // (plus approval bookkeeping). The role must stay tester.
-      allow update: if
+      // Owners cannot change role, status, approvedBy, approvedAt, school, or
+      // schools, so nobody can self-escalate or retag themselves. .get(..., null)
+      // keeps a missing field from failing the whole rule. A super admin cannot
+      // demote or delete themselves. No client update may set role to superadmin
+      // unless that role is unchanged. Role changes to or from admin are
+      // super-admin only. A scoped admin may update role and status on a tester
+      // in their schools (role stays tester) and on an admin whose schools are
+      // inside their list (role stays admin), plus approval bookkeeping.
+      allow update: if schoolTagsOkOnUpdate(userId) &&
         (request.resource.data.get('role', null) != 'superadmin'
           || request.resource.data.get('role', null) == resource.data.get('role', null))
         && (
@@ -77,18 +164,25 @@ service cloud.firestore {
             && request.resource.data.get('approvedBy', null) == resource.data.get('approvedBy', null)
             && request.resource.data.get('approvedAt', null) == resource.data.get('approvedAt', null))
           || (isSuperAdmin() && request.auth.uid != userId)
-          || (isAdmin() && !isSuperAdmin()
+          || (isScopedAdmin()
             && request.auth.uid != userId
-            && roleOf(resource.data) == 'tester'
+            && testerInScope(resource.data)
+            && testerInScope(request.resource.data)
             && roleOf(request.resource.data) == 'tester'
-            && request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'updatedAt']))
+            && scopedAdminFieldUpdate())
+          || (isScopedAdmin()
+            && request.auth.uid != userId
+            && adminInScope(resource.data)
+            && adminInScope(request.resource.data)
+            && roleOf(request.resource.data) == 'admin'
+            && scopedAdminFieldUpdate())
         );
       allow delete: if
         (isSuperAdmin() && request.auth.uid != userId)
-        || (isAdmin() && !isSuperAdmin()
+        || (isScopedAdmin()
           && request.auth.uid != userId
-          && roleOf(resource.data) == 'tester');
+          && roleOf(resource.data) == 'tester'
+          && testerInScope(resource.data));
 
       match /solutionProfiles/{profileId} {
         allow read, write: if isOwner(userId) && isApproved();

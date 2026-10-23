@@ -40,6 +40,7 @@ describe('user status access', () => {
     await expect(getUserAccessProfile('uid-1')).resolves.toEqual({
       role: 'admin',
       status: 'pending',
+      schools: [],
     });
 
     await expect(finalizeSignIn({
@@ -57,6 +58,7 @@ describe('user status access', () => {
     await expect(getUserAccessProfile('uid-1')).resolves.toEqual({
       role: 'tester',
       status: 'pending',
+      schools: [],
     });
 
     await expect(finalizeSignIn({

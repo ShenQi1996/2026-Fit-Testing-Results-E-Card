@@ -75,6 +75,29 @@ test('a super admin can rename a tester', async () => {
   expect(updateDoc.mock.calls[0][1]).toEqual(expect.objectContaining({ name: 'Renamed' }));
 });
 
+test('a super admin can set school tags, and a regular admin cannot', async () => {
+  await updateManagedUser('admin-1', 'tester-1', {
+    status: 'approved',
+    school: 'Helene College of Nursing',
+    schools: ['Helene College of Nursing'],
+  });
+  expect(updateDoc.mock.calls[0][1]).not.toHaveProperty('school');
+  expect(updateDoc.mock.calls[0][1]).not.toHaveProperty('schools');
+
+  updateDoc.mockClear();
+  await updateManagedUser('super-1', 'tester-1', { school: 'Helene College of Nursing' });
+  expect(updateDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+    school: 'Helene College of Nursing',
+  }));
+
+  updateDoc.mockClear();
+  await updateManagedUser('super-1', 'super-1', {
+    name: 'Sam',
+    schools: ['Helene College of Nursing'],
+  });
+  expect(updateDoc.mock.calls[0][1]).not.toHaveProperty('schools');
+});
+
 test('a regular admin can approve a tester', async () => {
   await updateManagedUser('admin-1', 'tester-1', { status: 'approved' });
   expect(updateDoc).toHaveBeenCalledTimes(1);

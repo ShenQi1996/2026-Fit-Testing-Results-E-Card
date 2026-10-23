@@ -17,6 +17,7 @@ import {
   rolesAssignableBy,
   rolesCreatableBy,
 } from '../../utils/roles';
+import { filterUsersForActor, parseSchoolListInput } from '../../utils/schoolScope';
 import './UsersManagement.css';
 
 const EMPTY_CREATE_FORM = {
@@ -78,6 +79,8 @@ const UsersManagement = () => {
           email: item.email || '',
           role: item.role || 'tester',
           status: item.status || 'pending',
+          school: item.school || '',
+          schoolsText: Array.isArray(item.schools) ? item.schools.join(', ') : '',
         };
       });
       setEditDrafts(drafts);
@@ -93,9 +96,14 @@ const UsersManagement = () => {
     loadUsers();
   }, [loadUsers]);
 
+  const visibleUsers = useMemo(
+    () => filterUsersForActor(user, users),
+    [user, users],
+  );
+
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return users.filter((item) => {
+    return visibleUsers.filter((item) => {
       if (statusFilter !== 'all' && item.status !== statusFilter) return false;
       if (roleFilter !== 'all' && item.role !== roleFilter) return false;
       if (!term) return true;
@@ -105,7 +113,7 @@ const UsersManagement = () => {
         item.id?.toLowerCase().includes(term)
       );
     });
-  }, [users, search, statusFilter, roleFilter]);
+  }, [visibleUsers, search, statusFilter, roleFilter]);
 
   const handleDraftChange = (userId, field, value) => {
     setEditDrafts((prev) => ({
@@ -124,7 +132,22 @@ const UsersManagement = () => {
     setSuccess('');
     try {
       const draft = editDrafts[targetUserId] || {};
-      const updated = await updateManagedUser(user.uid, targetUserId, draft);
+      const target = users.find((item) => item.id === targetUserId);
+      const tagRole = draft.role || target?.role || 'tester';
+      const updates = {
+        name: draft.name,
+        email: draft.email,
+        role: draft.role,
+        status: draft.status,
+      };
+      if (superAdmin && targetUserId !== user.uid) {
+        if (tagRole === 'admin' || tagRole === USER_ROLE_SUPERADMIN) {
+          updates.schools = parseSchoolListInput(draft.schoolsText);
+        } else {
+          updates.school = draft.school || '';
+        }
+      }
+      const updated = await updateManagedUser(user.uid, targetUserId, updates);
       setUsers((prev) => prev.map((item) => (item.id === targetUserId ? updated : item)));
       setEditDrafts((prev) => ({
         ...prev,
@@ -133,6 +156,8 @@ const UsersManagement = () => {
           email: updated.email || '',
           role: updated.role || 'tester',
           status: updated.status || 'pending',
+          school: updated.school || '',
+          schoolsText: Array.isArray(updated.schools) ? updated.schools.join(', ') : '',
         },
       }));
       setSuccess(`Saved updates for ${updated.email || updated.name || 'user'}.`);
@@ -190,6 +215,8 @@ const UsersManagement = () => {
           email: created.email || '',
           role: created.role || 'tester',
           status: created.status || 'pending',
+          school: created.school || '',
+          schoolsText: Array.isArray(created.schools) ? created.schools.join(', ') : '',
         },
       }));
       setCreateForm(EMPTY_CREATE_FORM);
@@ -369,6 +396,10 @@ const UsersManagement = () => {
                 : locked
                   ? [currentRole]
                   : assignableRoles.filter((role) => role !== USER_ROLE_SUPERADMIN);
+              const schoolTagIsList = currentRole === 'admin' || roleIsSuperAdmin;
+              const schoolTagLabel = schoolTagIsList ? 'Schools' : 'School';
+              const schoolTagValue = schoolTagIsList ? (draft.schoolsText || '') : (draft.school || '');
+              const canEditSchoolTags = superAdmin && !isSelf;
               return (
                 <article key={item.id} className="user-card">
                   <div className="user-card-top">
@@ -441,6 +472,26 @@ const UsersManagement = () => {
                           </option>
                         ))}
                       </select>
+                    </label>
+                    <label>
+                      {schoolTagLabel}
+                      {canEditSchoolTags ? (
+                        <input
+                          type="text"
+                          aria-label={schoolTagLabel}
+                          value={schoolTagValue}
+                          onChange={(e) => handleDraftChange(
+                            item.id,
+                            schoolTagIsList ? 'schoolsText' : 'school',
+                            e.target.value,
+                          )}
+                          disabled={savingId === item.id}
+                        />
+                      ) : (
+                        <div className="user-school-readonly" aria-label={schoolTagLabel}>
+                          {schoolTagValue.trim() || '—'}
+                        </div>
+                      )}
                     </label>
                   </div>
 

@@ -78,6 +78,7 @@ describe('signIn user profile', () => {
       email: 'tester@example.com',
       role: 'admin',
       status: 'approved',
+      schools: [],
     });
 
     expect(setDoc).not.toHaveBeenCalled();
