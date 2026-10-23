@@ -24,6 +24,7 @@ import {
   getUserAccessProfile,
   getUserRole,
   createManagedUserProfile,
+  normalizeUserStatus,
 } from './firebaseDb';
 
 const PENDING_APPROVAL_MESSAGE = 'Your account is pending admin approval. Please contact an administrator.';
@@ -399,7 +400,7 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
       email: createdUser.email || email,
       name: name || createdUser.displayName || '',
       role: userData.role || 'tester',
-      status: userData.status || 'approved',
+      status: normalizeUserStatus(userData.status),
       provider: 'password',
     });
 

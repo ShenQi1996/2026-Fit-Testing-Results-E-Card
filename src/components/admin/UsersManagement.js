@@ -16,7 +16,7 @@ const EMPTY_CREATE_FORM = {
   password: '',
   name: '',
   role: 'tester',
-  status: 'approved',
+  status: 'pending',
 };
 
 const formatDate = (iso) => {
@@ -66,7 +66,7 @@ const UsersManagement = () => {
           name: item.name || '',
           email: item.email || '',
           role: item.role || 'tester',
-          status: item.status || 'approved',
+          status: item.status || 'pending',
         };
       });
       setEditDrafts(drafts);
@@ -121,7 +121,7 @@ const UsersManagement = () => {
           name: updated.name || '',
           email: updated.email || '',
           role: updated.role || 'tester',
-          status: updated.status || 'approved',
+          status: updated.status || 'pending',
         },
       }));
       setSuccess(`Saved updates for ${updated.email || updated.name || 'user'}.`);
@@ -175,7 +175,7 @@ const UsersManagement = () => {
           name: created.name || '',
           email: created.email || '',
           role: created.role || 'tester',
-          status: created.status || 'approved',
+          status: created.status || 'pending',
         },
       }));
       setCreateForm(EMPTY_CREATE_FORM);
@@ -397,7 +397,7 @@ const UsersManagement = () => {
                     <label>
                       Status
                       <select
-                        value={draft.status || 'approved'}
+                        value={draft.status || 'pending'}
                         onChange={(e) => handleDraftChange(item.id, 'status', e.target.value)}
                         disabled={savingId === item.id || isSelf}
                       >

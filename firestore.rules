@@ -17,7 +17,8 @@ service cloud.firestore {
       return isSignedIn() && currentUserDoc().data.get('role', null) == 'admin';
     }
 
-    // Missing status is not approved. Backfill legacy users with status 'approved'.
+    // Access requires an explicit status of 'approved'.
+    // Missing and unknown values are not approved.
     function isApproved() {
       return isSignedIn() && currentUserDoc().data.get('status', null) == 'approved';
     }

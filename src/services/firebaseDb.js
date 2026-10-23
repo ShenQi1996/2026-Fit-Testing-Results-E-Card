@@ -230,6 +230,11 @@ export const USER_STATUSES = [
   USER_STATUS_REJECTED,
 ];
 
+/** Missing or unknown status is pending. Approved and rejected pass through. */
+export const normalizeUserStatus = (status) => (
+  USER_STATUSES.includes(status) ? status : USER_STATUS_PENDING
+);
+
 const assertAdmin = async (adminUserId) => {
   const adminRole = await getUserRole(adminUserId);
   if (adminRole !== 'admin') {
@@ -248,8 +253,7 @@ const serializeUserDoc = (docSnap) => {
     email: data.email || '',
     name: data.name || '',
     role: data.role || 'tester',
-    // Missing status is pending. Legacy docs must be backfilled with 'approved'.
-    status: data.status || USER_STATUS_PENDING,
+    status: normalizeUserStatus(data.status),
     provider: data.provider || 'unknown',
     requestedAt: toIso(data.requestedAt),
     createdAt: toIso(data.createdAt),
@@ -837,7 +841,7 @@ export const ensureUserProfile = async (userInfo) => {
 
 /**
  * Get user access profile including role + approval status
- * Missing status is pending. Legacy docs need status set to 'approved'.
+ * Missing or unknown status is pending. Only 'approved' can sign in.
  * @param {string} userId - User ID
  * @returns {Promise<{role: string, status: string}>}
  */
@@ -857,7 +861,7 @@ export const getUserAccessProfile = async (userId) => {
     const data = userDocSnap.data() || {};
     return {
       role: data.role || 'tester',
-      status: data.status || USER_STATUS_PENDING,
+      status: normalizeUserStatus(data.status),
     };
   } catch (error) {
     console.error('Error getting user access profile:', error);
@@ -952,7 +956,7 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
     const nextName = typeof updates.name === 'string' ? updates.name.trim() : current.name || '';
     const nextEmail = typeof updates.email === 'string' ? updates.email.trim() : current.email || '';
     const nextRole = updates.role || current.role || 'tester';
-    const nextStatus = updates.status || current.status || USER_STATUS_APPROVED;
+    const nextStatus = normalizeUserStatus(updates.status || current.status);
 
     if (!USER_ROLES.includes(nextRole)) {
       throw new Error('Invalid role. Must be admin or tester.');
@@ -1042,7 +1046,7 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
     const email = (userData.email || '').trim();
     const name = (userData.name || '').trim();
     const role = userData.role || 'tester';
-    const status = userData.status || USER_STATUS_APPROVED;
+    const status = normalizeUserStatus(userData.status);
     const provider = userData.provider || 'password';
 
     if (!email) {
@@ -1116,13 +1120,19 @@ export const setUserRole = async (userId, role) => {
     const userDocSnap = await getDoc(userDocRef);
     
     if (userDocSnap.exists()) {
-      await updateDoc(userDocRef, {
+      const data = userDocSnap.data() || {};
+      const payload = {
         role,
         updatedAt: Timestamp.now(),
-      });
+      };
+      if (!USER_STATUSES.includes(data.status)) {
+        payload.status = USER_STATUS_PENDING;
+      }
+      await setDoc(userDocRef, payload, { merge: true });
     } else {
       await setDoc(userDocRef, {
         role,
+        status: USER_STATUS_PENDING,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });
