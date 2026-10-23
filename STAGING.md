@@ -2,7 +2,7 @@
 
 `main` is production. `staging` is the long-lived branch Sam QAs before that release.
 
-Staging must use its own Firebase project. QA writes must not land in production. The client has no baked-in project config: a build fails when the Firebase env vars are missing.
+Staging must use its own Firebase project. QA on the `staging` branch must not write production data. `APP_ENV=staging` selects that project. When `APP_ENV` is unset, the app keeps the built-in production config so production Vercel keeps working.
 
 ## Flow
 
@@ -59,10 +59,11 @@ New Auth users get password `Staging-only-1` unless you set `STAGING_SEED_PASSWO
 
 ## Remaining manual steps
 
-- [ ] **Vercel Preview env vars, scoped to Git branch `staging`.** Vercel → this project → Settings → Environment Variables → Preview, and limit the branch to `staging`. Production values are not copied to Preview. A Preview build of `staging` fails if any of these are missing.
+- [x] **Vercel Preview env vars, scoped to Git branch `staging`.** These are set: `APP_ENV=staging`, `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID`. Webpack inlines them with `EnvironmentPlugin`. If any `FIREBASE_*` value is missing while `APP_ENV=staging`, the build fails and does not use production.
 
   | Env var | Value |
   | --- | --- |
+  | `APP_ENV` | `staging` |
   | `FIREBASE_API_KEY` | Staging web app API key, set only in Vercel |
   | `FIREBASE_AUTH_DOMAIN` | `fit-test-result-e-card-staging.firebaseapp.com` |
   | `FIREBASE_PROJECT_ID` | `fit-test-result-e-card-staging` |
@@ -70,7 +71,7 @@ New Auth users get password `Staging-only-1` unless you set `STAGING_SEED_PASSWO
   | `FIREBASE_MESSAGING_SENDER_ID` | `966738964858` |
   | `FIREBASE_APP_ID` | `1:966738964858:web:9a5324a2db3326169666c3` |
 
-  Before a production deploy of this change, set the same six names on Vercel **Production** to project `fit-test-result-e-card-2026`. This pull request targets `staging` only. Locally, copy [`.env.example`](./.env.example) to `.env.local`. `.env.local` is gitignored.
+  **Production env vars are optional.** Production Vercel has none of these today. Leave `APP_ENV` unset there. The built-in `fit-test-result-e-card-2026` config is the fallback, so production keeps working. Adding the six `FIREBASE_*` names to Vercel Production later is optional and does not change that build until `APP_ENV` is set. Locally, copy [`.env.example`](./.env.example) to `.env.local` and set `APP_ENV=staging` only when you intend to use the staging project. `.env.local` is gitignored.
 
 - [ ] **Authorize the staging Vercel host** on the staging Firebase project. Authentication → Settings → Authorized domains. Add the hostname only (no `https://`):
 
@@ -90,4 +91,4 @@ New Auth users get password `Staging-only-1` unless you set `STAGING_SEED_PASSWO
 
 - [ ] **Optional.** Assign a custom domain to Git branch `staging` in Vercel, then add that hostname to the staging project's authorized domains. GitHub branch protection for `staging` is also still unset. Preview URLs can sit behind Vercel Deployment Protection.
 
-GitHub Actions compiles with placeholder Firebase values (`ci-not-production`). Those placeholders are not a real project and are not used by Vercel.
+GitHub Actions does not set `APP_ENV`, so its build uses the same production fallback as Vercel Production.

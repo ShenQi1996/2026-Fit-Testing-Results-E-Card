@@ -45,18 +45,33 @@ Object.entries(fileEnv).forEach(([key, value]) => {
     }
 });
 
+const appEnv = String(process.env.APP_ENV || '').trim();
 const missingFirebaseEnv = FIREBASE_ENV_KEYS.filter((key) => !String(process.env[key] || '').trim());
-if (missingFirebaseEnv.length > 0) {
+
+// APP_ENV unset: production keeps the built-in config. Do not require FIREBASE_*.
+// APP_ENV=staging: EnvironmentPlugin fails the build when any FIREBASE_* value is missing.
+let firebaseEnvPlugin;
+if (!appEnv) {
+    const productionDefine = {
+        'process.env.APP_ENV': JSON.stringify(''),
+    };
+    FIREBASE_ENV_KEYS.forEach((key) => {
+        productionDefine[`process.env.${key}`] = JSON.stringify('');
+    });
+    firebaseEnvPlugin = new webpack.DefinePlugin(productionDefine);
+} else if (appEnv === 'staging') {
+    if (missingFirebaseEnv.length > 0) {
+        throw new Error(
+            `APP_ENV=staging is missing ${missingFirebaseEnv.join(', ')}. `
+            + 'The production Firebase config is not used for this build.'
+        );
+    }
+    firebaseEnvPlugin = new webpack.EnvironmentPlugin(['APP_ENV', ...FIREBASE_ENV_KEYS]);
+} else {
     throw new Error(
-        `Missing Firebase config: ${missingFirebaseEnv.join(', ')}. `
-        + 'Set them in .env.local or in Vercel. There is no built-in project fallback.'
+        `APP_ENV=${appEnv} is not supported. Leave APP_ENV unset for production, or set APP_ENV=staging.`
     );
 }
-
-const firebaseDefine = {};
-FIREBASE_ENV_KEYS.forEach((key) => {
-    firebaseDefine[`process.env.${key}`] = JSON.stringify(process.env[key].trim());
-});
 
 const stylesHandler = MiniCssExtractPlugin.loader;
 
@@ -81,7 +96,7 @@ const config = {
         ],
     },
     plugins: [
-        new webpack.DefinePlugin(firebaseDefine),
+        firebaseEnvPlugin,
         new HtmlWebpackPlugin({
             template: './public/index.html',
             filename: './index.html',

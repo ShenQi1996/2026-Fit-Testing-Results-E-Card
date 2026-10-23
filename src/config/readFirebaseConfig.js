@@ -13,8 +13,7 @@ export const readFirebaseConfig = (env = {}) => {
   if (missing.length > 0) {
     throw new Error(
       `Missing Firebase config: ${missing.join(', ')}. `
-      + 'Set them for this build in .env.local or in Vercel (Production and Preview). '
-      + 'There is no built-in project fallback.'
+      + 'APP_ENV=staging requires every FIREBASE_* variable and does not use the production config.'
     );
   }
 
@@ -27,3 +26,4 @@ export const readFirebaseConfig = (env = {}) => {
     appId: String(env.FIREBASE_APP_ID).trim(),
   };
 };
+
