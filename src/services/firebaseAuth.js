@@ -89,6 +89,12 @@ export const signIn = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
+    await ensureUserProfile({
+      uid: user.uid,
+      email: user.email,
+      name: user.displayName || '',
+      provider: 'password',
+    });
     const accessProfile = await assertUserApproved(user);
 
     return {

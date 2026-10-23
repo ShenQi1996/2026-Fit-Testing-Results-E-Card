@@ -2,8 +2,8 @@ const noop = () => {};
 const asyncNoop = async () => null;
 
 exports.createUserWithEmailAndPassword = asyncNoop;
-exports.signInWithEmailAndPassword = asyncNoop;
-exports.signOut = asyncNoop;
+exports.signInWithEmailAndPassword = jest.fn(asyncNoop);
+exports.signOut = jest.fn(asyncNoop);
 exports.updateProfile = asyncNoop;
 exports.updateEmail = asyncNoop;
 exports.updatePassword = asyncNoop;
