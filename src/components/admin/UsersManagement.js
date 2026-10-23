@@ -16,7 +16,7 @@ const EMPTY_CREATE_FORM = {
   password: '',
   name: '',
   role: 'tester',
-  status: 'approved',
+  status: 'pending',
 };
 
 const formatDate = (iso) => {
@@ -66,7 +66,7 @@ const UsersManagement = () => {
           name: item.name || '',
           email: item.email || '',
           role: item.role || 'tester',
-          status: item.status || 'approved',
+          status: item.status || 'pending',
         };
       });
       setEditDrafts(drafts);
@@ -121,7 +121,7 @@ const UsersManagement = () => {
           name: updated.name || '',
           email: updated.email || '',
           role: updated.role || 'tester',
-          status: updated.status || 'approved',
+          status: updated.status || 'pending',
         },
       }));
       setSuccess(`Saved updates for ${updated.email || updated.name || 'user'}.`);
@@ -136,7 +136,7 @@ const UsersManagement = () => {
     if (!user?.uid) return;
     const label = targetUser.email || targetUser.name || targetUser.id;
     const confirmed = window.confirm(
-      `Delete user profile for ${label}?\n\nThis removes their Firestore profile and app access. Their Firebase Auth login may still exist.`
+      `Delete the Firestore profile for ${label}?\n\nTheir Firebase Auth login is not deleted. Signing in again creates a new pending profile.`
     );
     if (!confirmed) return;
 
@@ -175,7 +175,7 @@ const UsersManagement = () => {
           name: created.name || '',
           email: created.email || '',
           role: created.role || 'tester',
-          status: created.status || 'approved',
+          status: created.status || 'pending',
         },
       }));
       setCreateForm(EMPTY_CREATE_FORM);
@@ -397,7 +397,7 @@ const UsersManagement = () => {
                     <label>
                       Status
                       <select
-                        value={draft.status || 'approved'}
+                        value={draft.status || 'pending'}
                         onChange={(e) => handleDraftChange(item.id, 'status', e.target.value)}
                         disabled={savingId === item.id || isSelf}
                       >

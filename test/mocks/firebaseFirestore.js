@@ -2,12 +2,12 @@ const noop = () => {};
 
 exports.collection = noop;
 exports.addDoc = async () => ({ id: "mock-id" });
-exports.getDocs = async () => ({ docs: [], empty: true });
+exports.getDocs = jest.fn(async () => ({ docs: [], empty: true }));
 exports.doc = jest.fn((...args) => ({ args }));
 exports.getDoc = jest.fn(async () => ({ exists: () => false, data: () => null, id: "mock-id" }));
-exports.setDoc = async () => {};
-exports.updateDoc = async () => {};
-exports.deleteDoc = async () => {};
+exports.setDoc = jest.fn(async () => {});
+exports.updateDoc = jest.fn(async () => {});
+exports.deleteDoc = jest.fn(async () => {});
 exports.query = noop;
 exports.where = noop;
 exports.orderBy = noop;

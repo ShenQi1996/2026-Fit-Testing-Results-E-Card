@@ -14,15 +14,13 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && currentUserDoc().data.role == 'admin';
+      return isSignedIn() && currentUserDoc().data.get('role', null) == 'admin';
     }
 
-    // Missing status is treated as approved for backward compatibility.
+    // Access requires an explicit status of 'approved'.
+    // Missing and unknown values are not approved.
     function isApproved() {
-      return isSignedIn() && (
-        !('status' in currentUserDoc().data) ||
-        currentUserDoc().data.status == 'approved'
-      );
+      return isSignedIn() && currentUserDoc().data.get('status', null) == 'approved';
     }
 
     match /users/{userId} {
@@ -34,10 +32,10 @@ service cloud.firestore {
         || isAdmin();
       allow update: if
         (isOwner(userId)
-          && request.resource.data.role == resource.data.role
-          && request.resource.data.status == resource.data.status
-          && request.resource.data.approvedBy == resource.data.approvedBy
-          && request.resource.data.approvedAt == resource.data.approvedAt)
+          && request.resource.data.get('role', null) == resource.data.get('role', null)
+          && request.resource.data.get('status', null) == resource.data.get('status', null)
+          && request.resource.data.get('approvedBy', null) == resource.data.get('approvedBy', null)
+          && request.resource.data.get('approvedAt', null) == resource.data.get('approvedAt', null))
         || isAdmin();
       allow delete: if isAdmin();
 
