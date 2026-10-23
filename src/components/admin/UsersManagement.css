@@ -155,11 +155,77 @@
   box-sizing: border-box;
 }
 
+.users-view-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.users-view-tab {
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.users-view-tab.active {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+
+.users-view-tab:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.users-tab-count {
+  display: inline-block;
+  margin-left: 8px;
+  min-width: 1.25rem;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.16);
+  color: var(--teal-dark);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.users-view-tab.active .users-tab-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.pending-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pending-approval-email,
+.pending-approval-role,
+.pending-approval-requested {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
 .users-filters {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 18px;
+}
+
+.users-filters[hidden] {
+  display: none;
 }
 
 .users-search {

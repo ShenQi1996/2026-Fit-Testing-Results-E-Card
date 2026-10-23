@@ -5,8 +5,10 @@ import {
   USER_STATUSES,
   getAllUsers,
   getFitTestCountsByUser,
+  getPendingUsers,
   updateManagedUser,
   deleteManagedUser,
+  updateUserApprovalStatus,
 } from '../../services/firebaseDb';
 import { createManagedAuthUser } from '../../services/firebaseAuth';
 import {
@@ -37,6 +39,72 @@ const formatDate = (iso) => {
   }
 };
 
+const PendingApprovals = ({
+  users,
+  loading,
+  error,
+  success,
+  approvingId,
+  onApprove,
+  onReject,
+}) => (
+  <div className="pending-approvals">
+    <p className="users-hint">
+      Approve or reject new user account requests before they can access the app.
+    </p>
+    {error && <div className="users-error">{error}</div>}
+    {success && <div className="users-success">{success}</div>}
+    {loading ? (
+      <div className="users-empty">Loading pending approvals...</div>
+    ) : users.length === 0 ? (
+      <div className="users-empty">No pending users.</div>
+    ) : (
+      <div className="users-list">
+        {users.map((pendingUser) => (
+          <article key={pendingUser.id} className="user-card pending-approval-card">
+            <div className="user-card-top">
+              <div>
+                <h3>{pendingUser.name || 'No Name'}</h3>
+                <p className="pending-approval-email">{pendingUser.email || 'No Email'}</p>
+                <p className="pending-approval-role">Role: {pendingUser.role || 'tester'}</p>
+                <p className="pending-approval-requested">
+                  Requested: {pendingUser.requestedAt ? formatDate(pendingUser.requestedAt) : 'N/A'}
+                </p>
+              </div>
+              <div className="user-badges">
+                <span className={`user-badge role-${pendingUser.role || 'tester'}`}>
+                  {pendingUser.role || 'tester'}
+                </span>
+                <span className="user-badge status-pending">pending</span>
+              </div>
+            </div>
+            <div className="user-card-actions">
+              <button
+                type="button"
+                className="users-primary-button"
+                onClick={() => onApprove(pendingUser.id)}
+                disabled={approvingId !== null}
+                title="Approve user"
+              >
+                {approvingId === pendingUser.id ? 'Approving...' : 'Approve'}
+              </button>
+              <button
+                type="button"
+                className="users-danger-button"
+                onClick={() => onReject(pendingUser.id)}
+                disabled={approvingId !== null}
+                title="Reject user"
+              >
+                {approvingId === pendingUser.id ? 'Rejecting...' : 'Reject'}
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
 const UsersManagement = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
@@ -53,6 +121,12 @@ const UsersManagement = () => {
   const [editDrafts, setEditDrafts] = useState({});
   const [createForm, setCreateForm] = useState(EMPTY_CREATE_FORM);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [rosterView, setRosterView] = useState('all');
+  const [pendingUsers, setPendingUsers] = useState([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [pendingError, setPendingError] = useState('');
+  const [pendingSuccess, setPendingSuccess] = useState('');
+  const [approvingId, setApprovingId] = useState(null);
 
   const isAdmin = isAdminOrAbove(user?.role);
   const superAdmin = isSuperAdmin(user?.role);
@@ -101,6 +175,26 @@ const UsersManagement = () => {
     [user, users],
   );
 
+  const loadPendingUsers = useCallback(async ({ quiet = false } = {}) => {
+    if (!user?.uid || !isAdmin) return;
+
+    if (!quiet) setPendingLoading(true);
+    setPendingError('');
+    try {
+      const nextUsers = await getPendingUsers(user.uid);
+      setPendingUsers(nextUsers);
+    } catch (err) {
+      console.error(err);
+      setPendingError(err.message || 'Failed to load pending users.');
+    } finally {
+      if (!quiet) setPendingLoading(false);
+    }
+  }, [user?.uid, isAdmin]);
+
+  useEffect(() => {
+    loadPendingUsers();
+  }, [loadPendingUsers]);
+
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
     return visibleUsers.filter((item) => {
@@ -114,6 +208,12 @@ const UsersManagement = () => {
       );
     });
   }, [visibleUsers, search, statusFilter, roleFilter]);
+
+  const visiblePendingUsers = useMemo(() => (
+    filterUsersForActor(user, pendingUsers).filter((pendingUser) => (
+      canModifyManagedUser(user?.role, pendingUser.role || 'tester')
+    ))
+  ), [pendingUsers, user]);
 
   const handleDraftChange = (userId, field, value) => {
     setEditDrafts((prev) => ({
@@ -195,6 +295,40 @@ const UsersManagement = () => {
     }
   };
 
+  const handleApprovalAction = async (targetUserId, nextStatus) => {
+    if (!user?.uid || !isAdmin) return;
+
+    setApprovingId(targetUserId);
+    setPendingError('');
+    setPendingSuccess('');
+    try {
+      await updateUserApprovalStatus(user.uid, targetUserId, nextStatus);
+      setUsers((prev) => prev.map((item) => (
+        item.id === targetUserId ? { ...item, status: nextStatus } : item
+      )));
+      setEditDrafts((prev) => {
+        if (!prev[targetUserId]) return prev;
+        return {
+          ...prev,
+          [targetUserId]: {
+            ...prev[targetUserId],
+            status: nextStatus,
+          },
+        };
+      });
+      setPendingSuccess(
+        nextStatus === 'approved'
+          ? 'User approved successfully.'
+          : 'User rejected successfully.'
+      );
+      await loadPendingUsers({ quiet: true });
+    } catch (err) {
+      setPendingError(err.message || 'Failed to update approval status.');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
   const handleCreate = async (event) => {
     event.preventDefault();
     if (!user?.uid) return;
@@ -256,10 +390,13 @@ const UsersManagement = () => {
             <button
               type="button"
               className="users-secondary-button"
-              onClick={loadUsers}
-              disabled={loading || creating}
+              onClick={() => {
+                loadUsers();
+                loadPendingUsers();
+              }}
+              disabled={loading || pendingLoading || creating}
             >
-              {loading ? 'Refreshing...' : 'Refresh'}
+              {loading || pendingLoading ? 'Refreshing...' : 'Refresh'}
             </button>
             <button
               type="button"
@@ -348,7 +485,31 @@ const UsersManagement = () => {
           </form>
         )}
 
-        <div className="users-filters">
+        <div className="users-view-tabs" role="tablist" aria-label="User lists">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={rosterView === 'all'}
+            className={`users-view-tab${rosterView === 'all' ? ' active' : ''}`}
+            onClick={() => setRosterView('all')}
+          >
+            {'All users'}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={rosterView === 'pending'}
+            className={`users-view-tab${rosterView === 'pending' ? ' active' : ''}`}
+            onClick={() => setRosterView('pending')}
+          >
+            {'Pending approval'}
+            {visiblePendingUsers.length > 0 ? (
+              <span className="users-tab-count">{visiblePendingUsers.length}</span>
+            ) : null}
+          </button>
+        </div>
+
+        <div className="users-filters" hidden={rosterView !== 'all'}>
           <input
             type="search"
             className="users-search"
@@ -378,7 +539,17 @@ const UsersManagement = () => {
           </select>
         </div>
 
-        {loading ? (
+        {rosterView === 'pending' ? (
+          <PendingApprovals
+            users={visiblePendingUsers}
+            loading={pendingLoading}
+            error={pendingError}
+            success={pendingSuccess}
+            approvingId={approvingId}
+            onApprove={(targetUserId) => handleApprovalAction(targetUserId, 'approved')}
+            onReject={(targetUserId) => handleApprovalAction(targetUserId, 'rejected')}
+          />
+        ) : loading ? (
           <div className="users-empty">Loading users...</div>
         ) : filteredUsers.length === 0 ? (
           <div className="users-empty">No users match your filters.</div>
