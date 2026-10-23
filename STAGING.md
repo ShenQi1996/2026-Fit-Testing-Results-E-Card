@@ -2,7 +2,7 @@
 
 `main` is production. `staging` is the long-lived branch Sam QAs before a release. This pull request targets `staging`. It does not merge anything into `main`.
 
-Production Vercel does not set `APP_ENV` or any `FIREBASE_*` variable. Those builds keep the Firebase web config already compiled for `fit-test-result-e-card-2026`. A staging build sets `APP_ENV=staging` and must supply every `FIREBASE_*` value. The build fails if one is missing, and it fails if `FIREBASE_PROJECT_ID` is `fit-test-result-e-card-2026`.
+Production Vercel does not set `APP_ENV` or any `FIREBASE_*` variable. Those builds keep the Firebase web config already compiled for `fit-test-result-e-card-2026`. A staging build sets `APP_ENV` to exactly `staging` and must supply every `FIREBASE_*` value. The build fails if one is missing. It also fails when any trimmed `FIREBASE_*` value contains `fit-test-result-e-card-2026` in any case, or when the API key, app id, or messaging sender id matches production. Any other `APP_ENV`, including `Staging`, keeps the production Firebase config and prints a build warning.
 
 ## Flow
 
@@ -36,7 +36,7 @@ The staging branch of this repo exists and points at the same commit as `main` u
 
 `src/services/emailService.js` still contains the production EmailJS service id, template id, and public key. When `APP_ENV` is unset, sending is unchanged.
 
-When `APP_ENV=staging`, send and resend refuse any recipient that is not `@example.com`. Seeded cards use only `@example.com` addresses, so a resend of seed data does not reach a real customer. A real address typed into the staging form is saved on the staging Firebase project and the email is blocked. There is no separate staging EmailJS account. Do not remove this guard to test with a live inbox.
+When `APP_ENV` is exactly `staging`, send and resend accept one trimmed address and pass that same string to EmailJS. The address must be a single `example.com` mailbox: commas, semicolons, quotes, question marks, spaces, and a second `@` are refused. Seeded cards use only `@example.com` addresses, so a resend of seed data does not reach a real customer. A real address typed into the staging form is saved on the staging Firebase project and the email is blocked. There is no separate staging EmailJS account. Do not remove this guard to test with a live inbox.
 
 ## Seed fake data
 

@@ -40,7 +40,54 @@ test('APP_ENV=staging requires every Firebase value and rejects production', () 
   expect(() => resolveFirebaseConfig('staging', {
     ...stagingEnv,
     FIREBASE_PROJECT_ID: PROD_PROJECT_ID,
-  })).toThrow(/cannot use production project fit-test-result-e-card-2026/);
+  })).toThrow(/contains production project fit-test-result-e-card-2026/);
+});
+
+test('staging rejects production Firebase identifiers after trim and case folding', () => {
+  expect(resolveFirebaseConfig('Staging', {})).toEqual(PROD_FIREBASE_CONFIG);
+  expect(resolveFirebaseConfig('Staging', stagingEnv)).toEqual(PROD_FIREBASE_CONFIG);
+
+  expect(resolveFirebaseConfig('staging', {
+    ...stagingEnv,
+    FIREBASE_API_KEY: '  staging-api-key  ',
+  }).apiKey).toBe('staging-api-key');
+
+  expect(() => resolveFirebaseConfig('staging', {
+    ...stagingEnv,
+    FIREBASE_PROJECT_ID: '  FIT-TEST-RESULT-E-CARD-2026  ',
+  })).toThrow(/FIREBASE_PROJECT_ID that contains production project fit-test-result-e-card-2026/);
+
+  expect(() => resolveFirebaseConfig('staging', {
+    ...stagingEnv,
+    FIREBASE_AUTH_DOMAIN: 'prefix-FIT-TEST-RESULT-E-CARD-2026.firebaseapp.com',
+  })).toThrow(/FIREBASE_AUTH_DOMAIN that contains production project/);
+
+  expect(() => resolveFirebaseConfig('staging', {
+    ...stagingEnv,
+    FIREBASE_PROJECT_ID: 'not-the-real-project',
+    FIREBASE_API_KEY: ` ${PROD_FIREBASE_CONFIG.apiKey.toLowerCase()} `,
+  })).toThrow(/production Firebase apiKey/);
+
+  expect(() => resolveFirebaseConfig('staging', {
+    ...stagingEnv,
+    FIREBASE_PROJECT_ID: 'not-the-real-project',
+    FIREBASE_APP_ID: PROD_FIREBASE_CONFIG.appId.toUpperCase(),
+  })).toThrow(/production Firebase appId/);
+
+  expect(() => resolveFirebaseConfig('staging', {
+    ...stagingEnv,
+    FIREBASE_PROJECT_ID: 'not-the-real-project',
+    FIREBASE_MESSAGING_SENDER_ID: ` ${PROD_FIREBASE_CONFIG.messagingSenderId} `,
+  })).toThrow(/production Firebase messagingSenderId/);
+
+  expect(() => resolveFirebaseConfig('staging', {
+    ...stagingEnv,
+    FIREBASE_PROJECT_ID: 'not-the-real-project',
+    FIREBASE_API_KEY: PROD_FIREBASE_CONFIG.apiKey,
+    FIREBASE_AUTH_DOMAIN: PROD_FIREBASE_CONFIG.authDomain,
+    FIREBASE_STORAGE_BUCKET: PROD_FIREBASE_CONFIG.storageBucket,
+    FIREBASE_APP_ID: PROD_FIREBASE_CONFIG.appId,
+  })).toThrow(/contains production project fit-test-result-e-card-2026/);
 });
 
 test('the client reads APP_ENV and FIREBASE_* and still contains the production fallback', () => {

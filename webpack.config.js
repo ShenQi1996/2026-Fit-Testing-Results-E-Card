@@ -5,9 +5,10 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 
+const { assertStagingFirebaseEnv } = require('./src/config/stagingFirebaseGuard');
+
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Keep in sync with FIREBASE_ENV_KEYS in src/config/readFirebaseConfig.js.
 const FIREBASE_ENV_KEYS = [
     'FIREBASE_API_KEY',
     'FIREBASE_AUTH_DOMAIN',
@@ -16,8 +17,6 @@ const FIREBASE_ENV_KEYS = [
     'FIREBASE_MESSAGING_SENDER_ID',
     'FIREBASE_APP_ID',
 ];
-
-const PROD_PROJECT_ID = 'fit-test-result-e-card-2026';
 
 // Local staging only. Does not override variables already in the environment,
 // so a production Vercel build with no env file is unchanged.
@@ -56,19 +55,21 @@ FIREBASE_ENV_KEYS.forEach((key) => {
 });
 
 const appEnv = String(process.env.APP_ENV || '').trim();
+if (appEnv && appEnv !== 'staging') {
+    console.warn(
+        `APP_ENV is ${JSON.stringify(appEnv)}, which is not exactly "staging". `
+        + 'This build uses the production Firebase config.'
+    );
+}
 if (appEnv === 'staging') {
-    const missing = FIREBASE_ENV_KEYS.filter((key) => !String(process.env[key] || '').trim());
-    if (missing.length > 0) {
-        throw new Error(
-            `APP_ENV=staging requires ${missing.join(', ')}. `
-            + 'Refusing to fall back to the production Firebase project.'
-        );
-    }
-    if (String(process.env.FIREBASE_PROJECT_ID).trim() === PROD_PROJECT_ID) {
-        throw new Error(
-            `APP_ENV=staging cannot use production project ${PROD_PROJECT_ID}.`
-        );
-    }
+    assertStagingFirebaseEnv({
+        FIREBASE_API_KEY: process.env.FIREBASE_API_KEY,
+        FIREBASE_AUTH_DOMAIN: process.env.FIREBASE_AUTH_DOMAIN,
+        FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+        FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET,
+        FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
+        FIREBASE_APP_ID: process.env.FIREBASE_APP_ID,
+    });
 }
 
 const environmentDefaults = { APP_ENV: '' };

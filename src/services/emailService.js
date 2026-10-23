@@ -13,21 +13,27 @@ const EMAILJS_CONFIG = {
   PUBLIC_KEY: 'S3Owi-2s2Q_FCXW1k',
 };
 
-const STAGING_EMAIL_MESSAGE = 'Staging does not email real customers. Recipient must be an @example.com address.';
+const STAGING_EMAIL_MESSAGE = 'Staging does not email real customers. Recipient must be one @example.com address.';
+
+// One address only. Commas, semicolons, quotes, question marks, spaces, and a
+// second @ are rejected so a production inbox cannot hide behind example.com.
+const STAGING_RECIPIENT = /^[^@\s,;"?]+@example\.com$/i;
 
 /**
- * Staging builds refuse every recipient outside @example.com.
+ * Staging builds accept exactly one trimmed @example.com address.
  * Any other APP_ENV, including unset production, does not apply this check.
  * @param {string} recipientEmail
  * @param {string} [appEnv]
+ * @returns {string} Trimmed recipient. Staging returns it only when it is allowed.
  */
 export const assertStagingRecipient = (recipientEmail, appEnv) => {
   const resolvedEnv = appEnv === undefined ? process.env.APP_ENV : appEnv;
-  if (resolvedEnv !== 'staging') return;
-  const email = String(recipientEmail || '').trim().toLowerCase();
-  if (!email.endsWith('@example.com')) {
+  const email = String(recipientEmail || '').trim();
+  if (resolvedEnv !== 'staging') return email;
+  if (!STAGING_RECIPIENT.test(email)) {
     throw new Error(STAGING_EMAIL_MESSAGE);
   }
+  return email;
 };
 
 // Check if EmailJS is configured
@@ -48,12 +54,11 @@ export const sendFitTestCard = async (formData) => {
     throw new Error('EmailJS is not configured. Please set up EmailJS credentials in src/services/emailService.js');
   }
 
-  // Validate recipient email
-  if (!formData.recipientEmail || !formData.recipientEmail.trim()) {
+  // Validate recipient email. Staging must see the same string EmailJS receives.
+  const recipientEmail = assertStagingRecipient(formData.recipientEmail);
+  if (!recipientEmail) {
     throw new Error('Recipient email address is required');
   }
-
-  assertStagingRecipient(formData.recipientEmail);
 
   // Generate HTML e-card content
   const htmlContent = generateFitTestCard(formData);
@@ -61,12 +66,12 @@ export const sendFitTestCard = async (formData) => {
   // Prepare email template parameters
   // Note: EmailJS uses these variable names - make sure your template uses the same names
   const templateParams = {
-    to_email: formData.recipientEmail.trim(),
+    to_email: recipientEmail,
     to_name: formData.clientName || 'Recipient',
     message: htmlContent,
     html_message: htmlContent,
     subject: 'Fit Testing Results E-card',
-    reply_to: formData.recipientEmail.trim(),
+    reply_to: recipientEmail,
   };
 
   // Send email using EmailJS
