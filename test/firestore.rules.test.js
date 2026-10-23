@@ -108,14 +108,37 @@ test('a super admin can grant and revoke admin, but cannot create a super admin'
   }));
 });
 
-test('a super admin can change an existing user role to superadmin', async () => {
+test('a super admin cannot update someone else to superadmin', async () => {
   await seed([
     ['users/super-1', approved('superadmin', 'sam@example.com')],
     ['users/admin-2', approved('admin', 'other@example.com')],
+    ['users/tester-1', { role: 'tester', status: 'approved', email: 'tester@example.com' }],
+    ['users/legacy-1', { email: 'legacy@example.com', name: 'Legacy' }],
   ]);
   const db = testEnv.authenticatedContext('super-1').firestore();
 
-  await assertSucceeds(updateDoc(doc(db, 'users/admin-2'), { role: 'superadmin' }));
+  await assertFails(updateDoc(doc(db, 'users/admin-2'), { role: 'superadmin' }));
+  await assertFails(updateDoc(doc(db, 'users/tester-1'), { role: 'superadmin' }));
+  await assertFails(updateDoc(doc(db, 'users/legacy-1'), { role: 'superadmin' }));
+});
+
+test('a regular admin cannot set a role to superadmin', async () => {
+  await seed([
+    ['users/admin-1', approved('admin', 'admin@example.com')],
+    ['users/tester-1', { role: 'tester', status: 'pending', email: 'tester@example.com' }],
+  ]);
+  const db = testEnv.authenticatedContext('admin-1').firestore();
+
+  await assertFails(updateDoc(doc(db, 'users/tester-1'), { role: 'superadmin' }));
+});
+
+test('an owner cannot promote themselves to superadmin', async () => {
+  await seed([
+    ['users/tester-1', { role: 'tester', status: 'approved', email: 'tester@example.com' }],
+  ]);
+  const db = testEnv.authenticatedContext('tester-1').firestore();
+
+  await assertFails(updateDoc(doc(db, 'users/tester-1'), { role: 'superadmin' }));
 });
 
 test('a super admin cannot demote or delete themselves', async () => {
@@ -126,7 +149,10 @@ test('a super admin cannot demote or delete themselves', async () => {
 
   await assertFails(updateDoc(doc(db, 'users/super-1'), { role: 'admin' }));
   await assertFails(deleteDoc(doc(db, 'users/super-1')));
-  await assertSucceeds(updateDoc(doc(db, 'users/super-1'), { name: 'Samuel' }));
+  await assertSucceeds(updateDoc(doc(db, 'users/super-1'), {
+    name: 'Samuel',
+    role: 'superadmin',
+  }));
 });
 
 test('another super admin can demote a super admin', async () => {
@@ -257,6 +283,13 @@ test('a pending super admin cannot grant admin', async () => {
   const db = testEnv.authenticatedContext('super-1').firestore();
 
   await assertFails(updateDoc(doc(db, 'users/tester-1'), { role: 'admin' }));
+});
+
+test('a missing role field does not block an owner name update', async () => {
+  await seed([['users/staff-1', { email: 'staff@example.com' }]]);
+  const db = testEnv.authenticatedContext('staff-1').firestore();
+
+  await assertSucceeds(updateDoc(doc(db, 'users/staff-1'), { name: 'Staff' }));
 });
 
 test('an owner with no status can update their name', async () => {

@@ -10,6 +10,7 @@ import {
 } from '../../services/firebaseDb';
 import { createManagedAuthUser } from '../../services/firebaseAuth';
 import {
+  USER_ROLE_SUPERADMIN,
   canModifyManagedUser,
   isAdminOrAbove,
   isSuperAdmin,
@@ -287,11 +288,12 @@ const UsersManagement = () => {
               <label>
                 Role
                 <select
+                  aria-label="Role"
                   value={creatableRoles.includes(createForm.role) ? createForm.role : 'tester'}
                   onChange={(e) => setCreateForm((prev) => ({ ...prev, role: e.target.value }))}
                   disabled={creating}
                 >
-                  {creatableRoles.map((role) => (
+                  {creatableRoles.filter((role) => role !== USER_ROLE_SUPERADMIN).map((role) => (
                     <option key={role} value={role}>
                       {role}
                     </option>
@@ -335,9 +337,13 @@ const UsersManagement = () => {
               </option>
             ))}
           </select>
-          <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+          <select
+            aria-label="Role filter"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+          >
             <option value="all">All roles</option>
-            {USER_ROLES.map((role) => (
+            {USER_ROLES.filter((role) => role !== USER_ROLE_SUPERADMIN).map((role) => (
               <option key={role} value={role}>
                 {role}
               </option>
@@ -356,9 +362,13 @@ const UsersManagement = () => {
               const isSelf = item.id === user.uid;
               const locked = !canModifyManagedUser(user?.role, item.role);
               const profileLocked = locked || !superAdmin;
-              const roleChoices = locked
-                ? [draft.role || item.role || 'tester']
-                : assignableRoles;
+              const currentRole = draft.role || item.role || 'tester';
+              const roleIsSuperAdmin = currentRole === USER_ROLE_SUPERADMIN;
+              const roleChoices = roleIsSuperAdmin
+                ? []
+                : locked
+                  ? [currentRole]
+                  : assignableRoles.filter((role) => role !== USER_ROLE_SUPERADMIN);
               return (
                 <article key={item.id} className="user-card">
                   <div className="user-card-top">
@@ -401,17 +411,22 @@ const UsersManagement = () => {
                     </label>
                     <label>
                       Role
-                      <select
-                        value={draft.role || 'tester'}
-                        onChange={(e) => handleDraftChange(item.id, 'role', e.target.value)}
-                        disabled={locked || savingId === item.id || isSelf}
-                      >
-                        {roleChoices.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
+                      {roleIsSuperAdmin ? (
+                        <div className="user-role-readonly">{currentRole}</div>
+                      ) : (
+                        <select
+                          aria-label="Role"
+                          value={currentRole}
+                          onChange={(e) => handleDraftChange(item.id, 'role', e.target.value)}
+                          disabled={locked || savingId === item.id || isSelf}
+                        >
+                          {roleChoices.map((role) => (
+                            <option key={role} value={role}>
+                              {role}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </label>
                     <label>
                       Status

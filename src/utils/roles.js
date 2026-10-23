@@ -16,12 +16,12 @@ export const isAdminOrAbove = (role) => (
 );
 
 /**
- * Roles a manager may set on an existing user.
- * A plain admin only keeps tester. A super admin may change role to or from
- * admin or superadmin. Creating a superadmin document is a separate ban.
+ * Roles a manager may set on an existing user from the client.
+ * Never superadmin. A plain admin only keeps tester. A super admin may
+ * set tester or admin.
  */
 export const rolesAssignableBy = (actorRole) => (
-  isSuperAdmin(actorRole) ? USER_ROLES : [USER_ROLE_TESTER]
+  isSuperAdmin(actorRole) ? [USER_ROLE_TESTER, USER_ROLE_ADMIN] : [USER_ROLE_TESTER]
 );
 
 /** Roles that may be written on a new user document. Never superadmin. */
