@@ -32,24 +32,51 @@ Policies linked from the form: [next-leap-fit.vercel.app/legal](https://next-lea
 
 This app documents a qualitative fit-test result. It does **not** establish medical clearance or issue an OSHA certification.
 
-## Run locally
+## Running locally
 
-Use **Node 24** (required). Do not run `npm start dev` — webpack treats `dev` as an extra entry and fails.
+> **Warning:** Without `.env.local` the app defaults to production and works on live data, including real, permanent deletes.
+
+1. Prerequisite: Node 24.
+2. `npm install`.
+3. Copy [`.env.example`](./.env.example) to `.env.local`. `.env.local` is gitignored.
+4. Make sure `.env.local` has the line `APP_ENV=staging` exactly (uppercase `APP_ENV`, lowercase `staging`, nothing after it) and fill in `FIREBASE_API_KEY` with the staging key.
+5. `npm start`. Do not run `npm start dev`. Webpack treats `dev` as an extra entry and fails. Open [http://localhost:3000](http://localhost:3000).
+6. Before doing anything else, confirm the **STAGING** banner appears at the top of the app.
+
+Optional seed: set `GOOGLE_APPLICATION_CREDENTIALS` to the staging service account JSON (kept outside the repo), run `npm run seed:staging -- --dry-run` first, then `npm run seed:staging`. For the four test logins, set `SEED_PASSWORD` and add `--with-auth`. The script refuses to run against production.
 
 ```bash
-nvm install 24
-nvm use 24
-cd email-form-app
-npm install
-npm start
+export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/staging-service-account.json
+npm run seed:staging -- --dry-run
+npm run seed:staging
 ```
-
-Open [http://localhost:3000](http://localhost:3000). Staff app: [http://localhost:3000/staff_login](http://localhost:3000/staff_login).
 
 ```bash
-npm run build      # production bundle in dist/
-npm run build:dev  # development bundle only; does not start a server
+export SEED_PASSWORD='your-password'
+npm run seed:staging -- --with-auth
 ```
+
+Until the super-admin roles PR is on staging, sign in as `test-person-02@example.com` (admin) for user management.
+
+`npm test` and `npm run lint`.
+
+Details are in [STAGING.md](./STAGING.md).
+
+## Running in production
+
+Leave `APP_ENV` unset and do not create `.env.local`. The app uses the built-in production Firebase project `fit-test-result-e-card-2026` and shows no **STAGING** banner. That is live data, so be careful.
+
+Production Vercel sets no `APP_ENV` or `FIREBASE_*` variables. The staging web API key is stored only in Vercel and is not in git. Those builds keep the Firebase web config already compiled for `fit-test-result-e-card-2026`. `main` is production. `staging` is the long-lived branch Sam QAs before a release. The production release is Sam merging `staging` into `main`. After that merge, production still has none of these environment variables, so it keeps today's Firebase project.
+
+The build refuses to start in staging mode if any `FIREBASE_*` value is missing or matches production. Any other `APP_ENV` value (for example `Staging`) prints a warning and keeps the production config.
+
+Production EmailJS sending is unchanged. The production service id, template id, and public key stay compiled in the app, and sending when `APP_ENV` is unset is the same as today.
+
+The seed script refuses every project except `fit-test-result-e-card-staging`, including `fit-test-result-e-card-2026`. Do not use a service account key from the production project.
+
+Add the production hostname to Firebase **Authorized domains** before testing Google sign-in. Per-deployment `*.vercel.app` URLs are not authorized.
+
+GitHub Actions runs the CI job on pushes and pull requests to both `main` and `staging`. See [STAGING.md](./STAGING.md).
 
 ## Firestore (required for verify and resend)
 
@@ -106,10 +133,13 @@ vercel.json                      # SPA rewrites to index.html
 - [FIREBASE_SETUP.md](./FIREBASE_SETUP.md) — project, Auth, Firestore, indexes
 - [EMAILJS_SETUP.md](./EMAILJS_SETUP.md) — e-card email template
 - [PRODUCTION_SETUP.md](./PRODUCTION_SETUP.md) — Vercel domain and Google sign-in
+- [STAGING.md](./STAGING.md) — staging branch, Preview URL, and QA before main
 
 ## Deploy
 
 Vercel build: `npm run build`, output `dist/`. See [`vercel.json`](./vercel.json) for SPA rewrites.
+
+Local staging setup and the production Firebase fallback are in [Running locally](#running-locally) and [Running in production](#running-in-production). See also [STAGING.md](./STAGING.md) and [`.env.example`](./.env.example).
 
 Add the production hostname to Firebase **Authorized domains** before testing Google sign-in. Per-deployment `*.vercel.app` URLs are not authorized.
 

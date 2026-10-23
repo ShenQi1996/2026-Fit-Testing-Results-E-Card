@@ -189,6 +189,12 @@ const EMAILJS_CONFIG = {
 3. **Important:** Restart your development server after creating `.env` file
 4. The `.env` file is already in `.gitignore`, so it won't be committed to git
 
+## Staging
+
+Production sends use the service, template, and public key compiled in `src/services/emailService.js`. That path is unchanged when `APP_ENV` is unset.
+
+A staging build (`APP_ENV=staging`) refuses to email any recipient that is not `@example.com`, so QA on `securefit-ecard-staging.vercel.app` cannot reach a real customer through this account. Seed data uses only `@example.com`. See [STAGING.md](./STAGING.md).
+
 ## Need Help?
 
 - EmailJS Documentation: [https://www.emailjs.com/docs/](https://www.emailjs.com/docs/)
