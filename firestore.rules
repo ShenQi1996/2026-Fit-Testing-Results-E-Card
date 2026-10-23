@@ -13,8 +13,13 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    // Access requires an explicit status of 'approved'.
+    // Missing and unknown values are not approved.
+    function isApproved() {
+      return isSignedIn() && currentUserDoc().data.get('status', null) == 'approved';
+    }
+
     // Approved admin or super admin. A super admin passes every admin check.
-    // Missing status stays approved (see isApproved).
     // Do not grant superadmin from the client. Confirm the super admin document
     // already has role == 'superadmin' and status == 'approved' before publishing
     // these rules (confirmed Oct 23, 2026), then publish this file.
@@ -28,14 +33,6 @@ service cloud.firestore {
     function isSuperAdmin() {
       return isSignedIn() && isApproved() &&
         currentUserDoc().data.get('role', null) == 'superadmin';
-    }
-
-    // Missing status is treated as approved for backward compatibility.
-    function isApproved() {
-      return isSignedIn() && (
-        !('status' in currentUserDoc().data) ||
-        currentUserDoc().data.status == 'approved'
-      );
     }
 
     // Missing role is treated as tester when an admin edits someone else's doc.

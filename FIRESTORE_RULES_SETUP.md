@@ -27,7 +27,9 @@ Do not invent a shorter rule set. Older snippets in past docs omitted `fitTestVe
 
 `list` is denied on the public collections so they cannot be dumped.
 
-Approved means the user document `status` is `approved`, or `status` is missing (older accounts).
+Approved means the user document `status` is exactly `approved`. A missing or unknown status is pending. An admin or super admin whose status is missing is not staff.
+
+Legacy profiles that already have a role plus a name, email, or provider, and no status, can be marked approved with `npm run backfill:user-status` while signed in as the approved super admin. The script skips that super admin's own document, documents with no role, and role-only `setUserRole` documents that have not been reviewed. See [`scripts/backfillUserStatus.js`](./scripts/backfillUserStatus.js).
 
 ## Indexes
 

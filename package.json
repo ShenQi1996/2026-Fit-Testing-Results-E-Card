@@ -9,7 +9,8 @@
     "build:dev": "webpack --mode=development",
     "lint": "eslint src",
     "test": "jest",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-fit-test-rules \"jest --config jest.rules.config.js --forceExit\""
+    "test:rules": "firebase emulators:exec --only firestore --project demo-fit-test-rules \"jest --config jest.rules.config.js --forceExit\"",
+    "backfill:user-status": "node scripts/backfillUserStatus.js"
   },
   "keywords": [
     "fit-test",

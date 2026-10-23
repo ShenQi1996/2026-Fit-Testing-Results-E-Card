@@ -105,10 +105,12 @@ test('setUserRole refuses an admin grant from a regular admin', async () => {
 
 test('setUserRole lets a super admin grant admin', async () => {
   await setUserRole('super-1', 'tester-1', 'admin');
-  expect(updateDoc).toHaveBeenCalledWith(
+  expect(setDoc).toHaveBeenCalledWith(
     expect.anything(),
-    expect.objectContaining({ role: 'admin' })
+    expect.objectContaining({ role: 'admin' }),
+    { merge: true }
   );
+  expect(updateDoc).not.toHaveBeenCalled();
 });
 
 test('setUserRole refuses a super admin demoting themselves', async () => {
@@ -116,6 +118,7 @@ test('setUserRole refuses a super admin demoting themselves', async () => {
     /cannot remove your own super admin role/i
   );
   expect(updateDoc).not.toHaveBeenCalled();
+  expect(setDoc).not.toHaveBeenCalled();
 });
 
 test('a regular admin cannot delete an admin profile', async () => {
@@ -173,10 +176,13 @@ test('setUserRole refuses to create a superadmin document', async () => {
 
 test('setUserRole lets a super admin promote an existing user to superadmin', async () => {
   await setUserRole('super-1', 'admin-2', 'superadmin');
-  expect(updateDoc).toHaveBeenCalledWith(
+  expect(setDoc).toHaveBeenCalledWith(
     expect.anything(),
-    expect.objectContaining({ role: 'superadmin' })
+    expect.objectContaining({ role: 'superadmin' }),
+    { merge: true }
   );
+  const payload = setDoc.mock.calls[0][1];
+  expect(payload).not.toHaveProperty('status');
 });
 
 test('an admin cannot grant themselves superadmin', async () => {

@@ -244,20 +244,25 @@ const permissionError = (message) => {
   return error;
 };
 
+/** Missing or unknown status is pending. Approved and rejected pass through. */
+export const normalizeUserStatus = (status) => (
+  USER_STATUSES.includes(status) ? status : USER_STATUS_PENDING
+);
+
 const assertAdmin = async (userId) => {
-  const role = await getUserRole(userId);
-  if (!isAdminOrAbove(role)) {
+  const access = await getUserAccessProfile(userId);
+  if (access.status !== USER_STATUS_APPROVED || !isAdminOrAbove(access.role)) {
     throw permissionError('Only admin users can manage users.');
   }
-  return role;
+  return access.role;
 };
 
 const assertSuperAdmin = async (userId) => {
-  const role = await getUserRole(userId);
-  if (!isSuperAdmin(role)) {
+  const access = await getUserAccessProfile(userId);
+  if (access.status !== USER_STATUS_APPROVED || !isSuperAdmin(access.role)) {
     throw permissionError('Only a super admin can grant or change admin access.');
   }
-  return role;
+  return access.role;
 };
 
 const assertCanAssignRole = async (actorUserId, actorRole, targetUserId, currentRole, nextRole) => {
@@ -283,7 +288,7 @@ const serializeUserDoc = (docSnap) => {
     email: data.email || '',
     name: data.name || '',
     role: data.role || 'tester',
-    status: data.status || USER_STATUS_APPROVED,
+    status: normalizeUserStatus(data.status),
     provider: data.provider || 'unknown',
     requestedAt: toIso(data.requestedAt),
     createdAt: toIso(data.createdAt),
@@ -851,12 +856,16 @@ export const ensureUserProfile = async (userInfo) => {
       return { isNewUser: true };
     }
 
-    // Backfill common profile fields for existing users without changing approval state.
-    await updateDoc(userDocRef, {
-      email: userInfo.email || userDocSnap.data().email || '',
-      name: userInfo.name || userDocSnap.data().name || '',
-      updatedAt: Timestamp.now(),
-    });
+    // Backfill is best-effort. A rules denial must not block sign-in.
+    try {
+      await updateDoc(userDocRef, {
+        email: userInfo.email || userDocSnap.data().email || '',
+        name: userInfo.name || userDocSnap.data().name || '',
+        updatedAt: Timestamp.now(),
+      });
+    } catch (backfillError) {
+      console.error('Error backfilling user profile:', backfillError);
+    }
 
     return { isNewUser: false };
   } catch (error) {
@@ -867,7 +876,7 @@ export const ensureUserProfile = async (userInfo) => {
 
 /**
  * Get user access profile including role + approval status
- * Missing status defaults to approved for backward compatibility.
+ * Missing or unknown status is pending. Only 'approved' can sign in.
  * @param {string} userId - User ID
  * @returns {Promise<{role: string, status: string}>}
  */
@@ -884,10 +893,10 @@ export const getUserAccessProfile = async (userId) => {
       return { role: 'tester', status: USER_STATUS_PENDING };
     }
 
-    const data = userDocSnap.data();
+    const data = userDocSnap.data() || {};
     return {
       role: data.role || 'tester',
-      status: data.status || USER_STATUS_APPROVED,
+      status: normalizeUserStatus(data.status),
     };
   } catch (error) {
     console.error('Error getting user access profile:', error);
@@ -984,7 +993,9 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
     const nextName = typeof updates.name === 'string' ? updates.name.trim() : current.name || '';
     const nextEmail = typeof updates.email === 'string' ? updates.email.trim() : current.email || '';
     const nextRole = updates.role || current.role || USER_ROLE_TESTER;
-    const nextStatus = updates.status || current.status || USER_STATUS_APPROVED;
+    const nextStatus = normalizeUserStatus(
+      updates.status !== undefined ? updates.status : current.status
+    );
     const profileChanged = nextName !== (current.name || '') || nextEmail !== (current.email || '');
     if (profileChanged && !isSuperAdmin(actorRole)) {
       throw permissionError('Only a super admin can edit name or email. Admins can update tester role and status.');
@@ -1024,7 +1035,9 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
 };
 
 /**
- * Admin-only: delete a user profile document
+ * Admin-only: delete a user profile document.
+ * The Auth login is left in place. The client SDK cannot delete another
+ * user's Auth account on the Spark plan.
  * @param {string} adminUserId
  * @param {string} targetUserId
  */
@@ -1081,7 +1094,7 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
       throw permissionError('A super admin cannot be created from the client.');
     }
     await assertCanAssignRole(adminUserId, actorRole, targetUserId, USER_ROLE_TESTER, role);
-    const status = userData.status || USER_STATUS_APPROVED;
+    const status = normalizeUserStatus(userData.status);
     const provider = userData.provider || 'password';
 
     if (!email) {
@@ -1159,13 +1172,19 @@ export const setUserRole = async (actorUserId, targetUserId, role) => {
     await assertCanAssignRole(actorUserId, actorRole, targetUserId, currentRole, role);
 
     if (userDocSnap.exists()) {
-      await updateDoc(userDocRef, {
+      const data = userDocSnap.data() || {};
+      const payload = {
         role,
         updatedAt: Timestamp.now(),
-      });
+      };
+      if (!USER_STATUSES.includes(data.status)) {
+        payload.status = USER_STATUS_PENDING;
+      }
+      await setDoc(userDocRef, payload, { merge: true });
     } else {
       await setDoc(userDocRef, {
         role,
+        status: USER_STATUS_PENDING,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });

@@ -4,7 +4,7 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { deleteDoc, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 
 const RULES = fs.readFileSync('firestore.rules', 'utf8');
 
@@ -172,14 +172,14 @@ test('a rejected admin is not treated as staff', async () => {
   await assertFails(updateDoc(doc(db, 'users/tester-1'), { status: 'approved' }));
 });
 
-test('an admin with no status can still manage testers', async () => {
+test('an admin with no status cannot manage testers', async () => {
   await seed([
     ['users/admin-1', { role: 'admin', email: 'admin@example.com' }],
     ['users/tester-1', { role: 'tester', email: 'tester@example.com' }],
   ]);
   const db = testEnv.authenticatedContext('admin-1').firestore();
 
-  await assertSucceeds(updateDoc(doc(db, 'users/tester-1'), { status: 'approved' }));
+  await assertFails(updateDoc(doc(db, 'users/tester-1'), { status: 'approved' }));
 });
 
 test('a regular admin cannot edit a tester name or email', async () => {
@@ -266,4 +266,94 @@ test('an owner with no status can update their name', async () => {
   const db = testEnv.authenticatedContext('staff-1').firestore();
 
   await assertSucceeds(updateDoc(doc(db, 'users/staff-1'), { name: 'Staff' }));
+});
+
+const backfill = {
+  email: 'staff@example.com',
+  name: 'Staff',
+  updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+};
+
+test('role-only doc owner can write the sign-in backfill', async () => {
+  await seed([['users/staff-1', { role: 'tester' }]]);
+  const db = testEnv.authenticatedContext('staff-1').firestore();
+
+  await assertSucceeds(updateDoc(doc(db, 'users/staff-1'), backfill));
+});
+
+test('approved doc without approvedBy can write the sign-in backfill', async () => {
+  await seed([[
+    'users/staff-2',
+    { role: 'tester', status: 'approved', email: 'old@example.com' },
+  ]]);
+  const db = testEnv.authenticatedContext('staff-2').firestore();
+
+  await assertSucceeds(updateDoc(doc(db, 'users/staff-2'), {
+    ...backfill,
+    email: 'staff2@example.com',
+  }));
+});
+
+test('owner cannot approve themselves', async () => {
+  await seed([['users/staff-3', { role: 'tester', status: 'pending' }]]);
+  const db = testEnv.authenticatedContext('staff-3').firestore();
+
+  await assertFails(updateDoc(doc(db, 'users/staff-3'), { status: 'approved' }));
+});
+
+test('owner cannot grant themselves admin', async () => {
+  await seed([['users/staff-4', { role: 'tester', status: 'approved' }]]);
+  const db = testEnv.authenticatedContext('staff-4').firestore();
+
+  await assertFails(updateDoc(doc(db, 'users/staff-4'), { role: 'admin' }));
+});
+
+test('a role-only user is not approved for fit test reads', async () => {
+  await seed([
+    ['users/staff-1', { role: 'tester' }],
+    ['fitTests/test-1', { userId: 'staff-1' }],
+  ]);
+  const db = testEnv.authenticatedContext('staff-1').firestore();
+
+  await assertFails(getDoc(doc(db, 'fitTests/test-1')));
+});
+
+test('an unknown status is not approved for fit test reads', async () => {
+  await seed([
+    ['users/staff-1', { role: 'tester', status: 'active' }],
+    ['fitTests/test-1', { userId: 'staff-1' }],
+  ]);
+  const db = testEnv.authenticatedContext('staff-1').firestore();
+
+  await assertFails(getDoc(doc(db, 'fitTests/test-1')));
+});
+
+test('an admin with no status cannot approve their own doc', async () => {
+  await seed([[
+    'users/admin-1',
+    { role: 'admin', email: 'admin@example.com', name: 'Admin' },
+  ]]);
+  const db = testEnv.authenticatedContext('admin-1').firestore();
+
+  await assertFails(updateDoc(doc(db, 'users/admin-1'), { status: 'approved' }));
+});
+
+test('an approved super admin can set status on another profile', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/legacy-1', { role: 'admin', email: 'other@example.com', name: 'Other' }],
+  ]);
+  const db = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertSucceeds(updateDoc(doc(db, 'users/legacy-1'), { status: 'approved' }));
+});
+
+test('a super admin cannot fill in their own missing status', async () => {
+  await seed([[
+    'users/super-1',
+    { role: 'superadmin', email: 'sam@example.com', name: 'Sam' },
+  ]]);
+  const db = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertFails(updateDoc(doc(db, 'users/super-1'), { status: 'approved' }));
 });
