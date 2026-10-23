@@ -13,33 +13,77 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    function isAdmin() {
-      return isSignedIn() && currentUserDoc().data.role == 'admin';
+    // Access requires an explicit status of 'approved'.
+    // Missing and unknown values are not approved.
+    function isApproved() {
+      return isSignedIn() && currentUserDoc().data.get('status', null) == 'approved';
     }
 
-    // Missing status is treated as approved for backward compatibility.
-    function isApproved() {
-      return isSignedIn() && (
-        !('status' in currentUserDoc().data) ||
-        currentUserDoc().data.status == 'approved'
+    // Approved admin or super admin. A super admin passes every admin check.
+    // Do not grant superadmin from the client. Confirm the super admin document
+    // already has role == 'superadmin' and status == 'approved' before publishing
+    // these rules (confirmed Oct 23, 2026), then publish this file.
+    function isAdmin() {
+      return isSignedIn() && isApproved() && (
+        currentUserDoc().data.get('role', null) == 'admin' ||
+        currentUserDoc().data.get('role', null) == 'superadmin'
       );
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && isApproved() &&
+        currentUserDoc().data.get('role', null) == 'superadmin';
+    }
+
+    // Missing role is treated as tester when an admin edits someone else's doc.
+    function roleOf(data) {
+      return data.get('role', 'tester');
     }
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
+      // No client create may set role to superadmin.
+      // Owners may create only their own pending tester profile.
+      // Admins may create a tester profile for someone else.
+      // A super admin may create a tester or admin profile for someone else.
       allow create: if
-        (isOwner(userId)
-          && request.resource.data.role == 'tester'
-          && request.resource.data.status == 'pending')
-        || isAdmin();
+        request.resource.data.get('role', null) != 'superadmin'
+        && (
+          (isOwner(userId)
+            && request.resource.data.role == 'tester'
+            && request.resource.data.status == 'pending')
+          || (isSuperAdmin()
+            && request.auth.uid != userId
+            && (request.resource.data.role == 'tester'
+              || request.resource.data.role == 'admin'))
+          || (isAdmin() && !isSuperAdmin()
+            && request.auth.uid != userId
+            && request.resource.data.role == 'tester')
+        );
+      // Owners cannot change role, status, approvedBy, or approvedAt, so nobody
+      // can self-escalate. .get(..., null) keeps a missing field from failing
+      // the whole rule. A super admin cannot demote or delete themselves.
+      // Role changes to or from admin or superadmin are super-admin only.
+      // A regular admin may update only role and status on a tester doc
+      // (plus approval bookkeeping). The role must stay tester.
       allow update: if
         (isOwner(userId)
-          && request.resource.data.role == resource.data.role
-          && request.resource.data.status == resource.data.status
-          && request.resource.data.approvedBy == resource.data.approvedBy
-          && request.resource.data.approvedAt == resource.data.approvedAt)
-        || isAdmin();
-      allow delete: if isAdmin();
+          && request.resource.data.get('role', null) == resource.data.get('role', null)
+          && request.resource.data.get('status', null) == resource.data.get('status', null)
+          && request.resource.data.get('approvedBy', null) == resource.data.get('approvedBy', null)
+          && request.resource.data.get('approvedAt', null) == resource.data.get('approvedAt', null))
+        || (isSuperAdmin() && request.auth.uid != userId)
+        || (isAdmin() && !isSuperAdmin()
+          && request.auth.uid != userId
+          && roleOf(resource.data) == 'tester'
+          && roleOf(request.resource.data) == 'tester'
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'updatedAt']));
+      allow delete: if
+        (isSuperAdmin() && request.auth.uid != userId)
+        || (isAdmin() && !isSuperAdmin()
+          && request.auth.uid != userId
+          && roleOf(resource.data) == 'tester');
 
       match /solutionProfiles/{profileId} {
         allow read, write: if isOwner(userId) && isApproved();

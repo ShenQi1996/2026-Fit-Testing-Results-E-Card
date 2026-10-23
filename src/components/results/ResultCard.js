@@ -16,6 +16,7 @@ import {
   medicalRestrictionsReceivedAnswer,
 } from './resultsUtils';
 import ResultCardEditForm from './ResultCardEditForm';
+import { isAdminOrAbove } from '../../utils/roles';
 
 const ResultRow = ({ label, value, wrap = false, style }) => (
   <div className="result-row">
@@ -372,7 +373,7 @@ const ResultCard = ({
           </>
         ) : (
           <>
-            {user?.role === 'admin' && (
+            {isAdminOrAbove(user?.role) && (
               <>
                 <button
                   onClick={() => onEditClick(test)}
@@ -420,7 +421,7 @@ const ResultCard = ({
             >
               {resending === test.id ? 'Sending...' : '📧 Resend'}
             </button>
-            {user?.role !== 'admin' && (
+            {!isAdminOrAbove(user?.role) && (
               <div style={{ fontSize: '12px', color: '#666', marginTop: '8px', fontStyle: 'italic' }}>
                 Only admin users can edit or delete test results.
               </div>

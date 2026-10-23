@@ -15,6 +15,7 @@ import {
   updateUserApprovalStatus,
 } from '../../services/firebaseDb';
 import { useSavedProfiles } from '../../hooks/useSavedProfiles';
+import { canModifyManagedUser, isAdminOrAbove, isSuperAdmin } from '../../utils/roles';
 import SavedProfilesPanel from './SavedProfilesPanel';
 import './EditAccount.css';
 
@@ -42,6 +43,8 @@ const EMPTY_SCHOOL_FORM = {
 
 const EditAccount = ({ onBack }) => {
   const { user, updateUser } = useAuth();
+  const staffAdmin = isAdminOrAbove(user?.role);
+  const superAdmin = isSuperAdmin(user?.role);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -93,7 +96,7 @@ const EditAccount = ({ onBack }) => {
   }, [user]);
 
   const loadPendingUsers = async () => {
-    if (!user?.uid || user?.role !== 'admin') return;
+    if (!user?.uid || !staffAdmin) return;
     setPendingUsersLoading(true);
     setPendingUsersError('');
     try {
@@ -121,7 +124,7 @@ const EditAccount = ({ onBack }) => {
   };
 
   const handleApprovalAction = async (targetUserId, nextStatus) => {
-    if (!user?.uid || user?.role !== 'admin') return;
+    if (!user?.uid || !staffAdmin) return;
     setPendingUsersError('');
     setPendingUsersSuccess('');
 
@@ -184,6 +187,10 @@ const EditAccount = ({ onBack }) => {
     }
   };
 
+  const visiblePendingUsers = pendingUsers.filter((pendingUser) => (
+    canModifyManagedUser(user?.role, pendingUser.role || 'tester')
+  ));
+
   return (
     <div className="edit-account-container">
       <div className="edit-account-card">
@@ -240,15 +247,17 @@ const EditAccount = ({ onBack }) => {
                 borderRadius: '4px',
                 cursor: 'not-allowed',
                 fontWeight: 500,
-                color: user?.role === 'admin' ? 'var(--accent-blue, #2563eb)' : 'var(--text-secondary, #666)',
+                color: staffAdmin ? 'var(--accent-blue, #2563eb)' : 'var(--text-secondary, #666)',
                 fontSize: '14px'
               }}>
                 {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Tester'}
               </div>
               <small style={{ display: 'block', marginTop: '4px', color: 'var(--text-secondary, #666)', fontSize: '12px' }}>
-                {user?.role === 'admin'
-                  ? 'You have admin privileges and can edit/delete test results.'
-                  : 'You have tester privileges. Contact an admin to change your role.'}
+                {superAdmin
+                  ? 'You are a super admin. You can grant admin access and edit or delete test results.'
+                  : staffAdmin
+                    ? 'You have admin privileges. You can approve testers and edit or delete test results.'
+                    : 'You have tester privileges. Contact an admin to change your role.'}
               </small>
             </div>
           </div>
@@ -377,7 +386,7 @@ const EditAccount = ({ onBack }) => {
             }
           />
 
-          {user?.role === 'admin' && (
+          {staffAdmin && (
             <div className="form-section">
               <h3 className="section-title">Pending User Approvals</h3>
               <p className="section-description">
@@ -400,14 +409,15 @@ const EditAccount = ({ onBack }) => {
               <div className="solution-profile-list">
                 {pendingUsersLoading ? (
                   <div className="solution-empty">Loading pending approvals...</div>
-                ) : pendingUsers.length === 0 ? (
+                ) : visiblePendingUsers.length === 0 ? (
                   <div className="solution-empty">No pending users.</div>
                 ) : (
-                  pendingUsers.map((pendingUser) => (
+                  visiblePendingUsers.map((pendingUser) => (
                     <div key={pendingUser.id} className="solution-profile-item">
                       <div className="solution-profile-details">
                         <strong>{pendingUser.name || 'No Name'}</strong>
                         <span>{pendingUser.email || 'No Email'}</span>
+                        <span>Role: {pendingUser.role || 'tester'}</span>
                         <span>
                           Requested:{' '}
                           {pendingUser.requestedAt
