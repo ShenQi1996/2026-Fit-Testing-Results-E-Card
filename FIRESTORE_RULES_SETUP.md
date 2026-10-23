@@ -18,7 +18,7 @@ Do not invent a shorter rule set. Older snippets in past docs omitted `fitTestVe
 
 | Collection | Read | Write |
 |------------|------|--------|
-| `users` | Owner or admin (super admin counts as admin) | Create pending testers; owner cannot change `role`/`status`; admins may change only a tester's `role` and `status` (role stays `tester`); only a super admin changes role to or from `admin` or `superadmin`, or edits name and email; no client create sets `superadmin` |
+| `users` | Owner, or super admin. A scoped admin can get a tester whose `school` is in their `schools`, or an admin whose `schools` sit inside that list. A scoped admin can list only testers with `role == tester` and `school in` their `schools` (Firestore `in` allows at most 30 values). A super admin can list every user | Create pending testers; owner cannot change `role`, `status`, `school`, or `schools`; a scoped admin may change only role and status on an in-scope tester (role stays `tester`) or an in-scope admin (role stays `admin`); only a super admin changes role to or from `admin` or `superadmin`, edits name and email, or sets `school` / `schools` (not on their own doc); no client create sets `superadmin` |
 | `solutionProfiles` / `schoolProfiles` | Approved owner | Approved owner |
 | `fitTests` | Approved owner or admin | Approved owner or admin |
 | `fitTestLookups/{lookupKey}` | Public **get** of one doc if the key is known | Approved staff create/update; owner or admin delete |
@@ -28,6 +28,8 @@ Do not invent a shorter rule set. Older snippets in past docs omitted `fitTestVe
 `list` is denied on the public collections so they cannot be dumped.
 
 Approved means the user document `status` is exactly `approved`. A missing or unknown status is pending. An admin or super admin whose status is missing is not staff.
+
+A plain admin document stores `schools` (a list of school names). A tester document stores `school` (one name). A super admin bypasses those checks. Only a super admin can write `school` or `schools`, and not on their own user document. A scoped admin's user list must filter `school in` that admin's `schools`. Firestore allows at most 30 values in one `in` query, so longer lists are queried in chunks of 30. `fitTests`, `fitTestLookups`, and `fitTestVerifications` are not school-scoped.
 
 Legacy profiles that already have a role plus a name, email, or provider, and no status, can be marked approved with `npm run backfill:user-status` while signed in as the approved super admin. The script skips that super admin's own document, documents with no role, and role-only `setUserRole` documents that have not been reviewed. See [`scripts/backfillUserStatus.js`](./scripts/backfillUserStatus.js).
 

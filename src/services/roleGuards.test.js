@@ -1,7 +1,8 @@
-import { deleteDoc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
+import { deleteDoc, getDoc, getDocs, setDoc, updateDoc, where } from 'firebase/firestore';
 import {
   createManagedUserProfile,
   deleteManagedUser,
+  getAllUsers,
   getPendingUsers,
   setUserRole,
   updateManagedUser,
@@ -73,6 +74,29 @@ test('a super admin can rename a tester', async () => {
   await updateManagedUser('super-1', 'tester-1', { name: 'Renamed' });
   expect(updateDoc).toHaveBeenCalledTimes(1);
   expect(updateDoc.mock.calls[0][1]).toEqual(expect.objectContaining({ name: 'Renamed' }));
+});
+
+test('a super admin can set school tags, and a regular admin cannot', async () => {
+  await updateManagedUser('admin-1', 'tester-1', {
+    status: 'approved',
+    school: 'Helene College of Nursing',
+    schools: ['Helene College of Nursing'],
+  });
+  expect(updateDoc.mock.calls[0][1]).not.toHaveProperty('school');
+  expect(updateDoc.mock.calls[0][1]).not.toHaveProperty('schools');
+
+  updateDoc.mockClear();
+  await updateManagedUser('super-1', 'tester-1', { school: 'Helene College of Nursing' });
+  expect(updateDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+    school: 'Helene College of Nursing',
+  }));
+
+  updateDoc.mockClear();
+  await updateManagedUser('super-1', 'super-1', {
+    name: 'Sam',
+    schools: ['Helene College of Nursing'],
+  });
+  expect(updateDoc.mock.calls[0][1]).not.toHaveProperty('schools');
 });
 
 test('a regular admin can approve a tester', async () => {
@@ -207,6 +231,7 @@ test('a tester cannot approve a user', async () => {
 });
 
 test('pending approvals hide admin accounts from a regular admin', async () => {
+  users['admin-1'] = { ...users['admin-1'], schools: ['Helene College of Nursing'] };
   users['admin-2'] = { ...users['admin-2'], status: 'pending' };
   getDocs.mockResolvedValueOnce({
     forEach(callback) {
@@ -240,4 +265,38 @@ test('pending approvals hide admin accounts from a regular admin', async () => {
 
   const forSuperAdmin = await getPendingUsers('super-1');
   expect(forSuperAdmin.map((item) => item.id).sort()).toEqual(['admin-2', 'tester-1']);
+});
+
+test('scoped admin lists query testers in their own schools', async () => {
+  const schools = ['Helene College of Nursing', 'Example Second School'];
+  users['admin-1'] = { ...users['admin-1'], schools };
+  getDocs.mockResolvedValue({ forEach() {} });
+
+  await getAllUsers('admin-1');
+  expect(where).toHaveBeenCalledWith('role', '==', 'tester');
+  expect(where).toHaveBeenCalledWith('school', 'in', schools);
+
+  where.mockClear();
+  await getPendingUsers('admin-1');
+  expect(where).toHaveBeenCalledWith('status', '==', 'pending');
+  expect(where).toHaveBeenCalledWith('role', '==', 'tester');
+  expect(where).toHaveBeenCalledWith('school', 'in', schools);
+
+  where.mockClear();
+  getDocs.mockClear();
+  await getAllUsers('super-1');
+  expect(where).not.toHaveBeenCalled();
+  expect(getDocs).toHaveBeenCalled();
+
+  getDocs.mockClear();
+  users['admin-1'] = { ...users['admin-1'], schools: [] };
+  await expect(getAllUsers('admin-1')).resolves.toEqual([]);
+  expect(getDocs).not.toHaveBeenCalled();
+
+  const manySchools = Array.from({ length: 31 }, (_, index) => `School ${index}`);
+  users['admin-1'] = { ...users['admin-1'], schools: manySchools };
+  getDocs.mockResolvedValue({ forEach() {} });
+  await getAllUsers('admin-1');
+  const inCalls = where.mock.calls.filter((call) => call[0] === 'school' && call[1] === 'in');
+  expect(inCalls.map((call) => call[2].length)).toEqual([30, 1]);
 });

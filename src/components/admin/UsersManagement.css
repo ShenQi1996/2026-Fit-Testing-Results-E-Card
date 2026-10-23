@@ -142,6 +142,7 @@
 .users-form-grid input,
 .users-form-grid select,
 .users-form-grid .user-role-readonly,
+.users-form-grid .user-school-readonly,
 .users-filters select,
 .users-search {
   width: 100%;

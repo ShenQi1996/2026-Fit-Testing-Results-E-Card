@@ -4,7 +4,17 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { deleteDoc, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 
 const RULES = fs.readFileSync('firestore.rules', 'utf8');
 
@@ -34,12 +44,27 @@ beforeEach(async () => {
   await testEnv.clearFirestore();
 });
 
-const approved = (role, email) => ({ role, status: 'approved', email });
+const HELENE = 'Helene College of Nursing';
+const SECOND = 'Example Second School';
+
+const approved = (role, email, extra = {}) => ({ role, status: 'approved', email, ...extra });
+
+const scopedAdmin = (schools = [HELENE], email = 'admin@example.com') => (
+  approved('admin', email, { schools })
+);
+
+const testerAt = (school, extra = {}) => ({
+  role: 'tester',
+  status: 'pending',
+  email: 'tester@example.com',
+  school,
+  ...extra,
+});
 
 test('a regular admin can approve a tester', async () => {
   await seed([
-    ['users/admin-1', approved('admin', 'admin@example.com')],
-    ['users/tester-1', { role: 'tester', status: 'pending', email: 'tester@example.com' }],
+    ['users/admin-1', scopedAdmin()],
+    ['users/tester-1', testerAt(HELENE)],
   ]);
   const db = testEnv.authenticatedContext('admin-1').firestore();
 
@@ -48,8 +73,8 @@ test('a regular admin can approve a tester', async () => {
 
 test('a regular admin cannot grant admin', async () => {
   await seed([
-    ['users/admin-1', approved('admin', 'admin@example.com')],
-    ['users/tester-1', { role: 'tester', status: 'pending', email: 'tester@example.com' }],
+    ['users/admin-1', scopedAdmin()],
+    ['users/tester-1', testerAt(HELENE)],
   ]);
   const db = testEnv.authenticatedContext('admin-1').firestore();
 
@@ -58,8 +83,8 @@ test('a regular admin cannot grant admin', async () => {
 
 test('a regular admin cannot update an admin or super admin doc', async () => {
   await seed([
-    ['users/admin-1', approved('admin', 'admin@example.com')],
-    ['users/admin-2', approved('admin', 'other@example.com')],
+    ['users/admin-1', scopedAdmin()],
+    ['users/admin-2', scopedAdmin([HELENE], 'other@example.com')],
     ['users/super-1', approved('superadmin', 'sam@example.com')],
   ]);
   const db = testEnv.authenticatedContext('admin-1').firestore();
@@ -124,8 +149,8 @@ test('a super admin cannot update someone else to superadmin', async () => {
 
 test('a regular admin cannot set a role to superadmin', async () => {
   await seed([
-    ['users/admin-1', approved('admin', 'admin@example.com')],
-    ['users/tester-1', { role: 'tester', status: 'pending', email: 'tester@example.com' }],
+    ['users/admin-1', scopedAdmin()],
+    ['users/tester-1', testerAt(HELENE)],
   ]);
   const db = testEnv.authenticatedContext('admin-1').firestore();
 
@@ -167,9 +192,9 @@ test('another super admin can demote a super admin', async () => {
 
 test('a regular admin can delete a tester but not an admin', async () => {
   await seed([
-    ['users/admin-1', approved('admin', 'admin@example.com')],
-    ['users/tester-1', { role: 'tester', status: 'approved', email: 'tester@example.com' }],
-    ['users/admin-2', approved('admin', 'other@example.com')],
+    ['users/admin-1', scopedAdmin()],
+    ['users/tester-1', testerAt(HELENE, { status: 'approved' })],
+    ['users/admin-2', scopedAdmin([HELENE], 'other@example.com')],
   ]);
   const db = testEnv.authenticatedContext('admin-1').firestore();
 
@@ -210,8 +235,8 @@ test('an admin with no status cannot manage testers', async () => {
 
 test('a regular admin cannot edit a tester name or email', async () => {
   await seed([
-    ['users/admin-1', approved('admin', 'admin@example.com')],
-    ['users/tester-1', { role: 'tester', status: 'pending', email: 'tester@example.com', name: 'Tester' }],
+    ['users/admin-1', scopedAdmin()],
+    ['users/tester-1', testerAt(HELENE, { name: 'Tester' })],
   ]);
   const db = testEnv.authenticatedContext('admin-1').firestore();
 
@@ -389,4 +414,154 @@ test('a super admin cannot fill in their own missing status', async () => {
   const db = testEnv.authenticatedContext('super-1').firestore();
 
   await assertFails(updateDoc(doc(db, 'users/super-1'), { status: 'approved' }));
+});
+
+test('a scoped admin can read and update a tester in their schools', async () => {
+  await seed([
+    ['users/admin-1', scopedAdmin()],
+    ['users/tester-1', testerAt(HELENE, { name: 'Tess' })],
+  ]);
+  const db = testEnv.authenticatedContext('admin-1').firestore();
+
+  await assertSucceeds(getDoc(doc(db, 'users/tester-1')));
+  await assertSucceeds(updateDoc(doc(db, 'users/tester-1'), {
+    status: 'approved',
+    approvedBy: 'admin-1',
+  }));
+});
+
+test('a scoped admin cannot read or update a tester from another school', async () => {
+  await seed([
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/tester-1', testerAt(SECOND)],
+    ['users/tester-blank', { role: 'tester', status: 'pending', email: 'blank@example.com' }],
+  ]);
+  const db = testEnv.authenticatedContext('admin-1').firestore();
+
+  await assertFails(getDocs(collection(db, 'users')));
+  await assertFails(getDoc(doc(db, 'users/tester-1')));
+  await assertFails(updateDoc(doc(db, 'users/tester-1'), { status: 'approved' }));
+  await assertFails(getDoc(doc(db, 'users/tester-blank')));
+  await assertFails(deleteDoc(doc(db, 'users/tester-1')));
+});
+
+test('a scoped admin can manage an admin whose schools are within theirs', async () => {
+  await seed([
+    ['users/admin-1', scopedAdmin([HELENE, SECOND])],
+    ['users/admin-2', scopedAdmin([HELENE], 'other@example.com')],
+  ]);
+  const db = testEnv.authenticatedContext('admin-1').firestore();
+
+  await assertSucceeds(getDoc(doc(db, 'users/admin-2')));
+  await assertSucceeds(updateDoc(doc(db, 'users/admin-2'), { status: 'rejected' }));
+  await assertFails(updateDoc(doc(db, 'users/admin-2'), { name: 'Renamed' }));
+  await assertFails(deleteDoc(doc(db, 'users/admin-2')));
+});
+
+test('a scoped admin cannot manage an admin outside their schools', async () => {
+  await seed([
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/admin-wide', scopedAdmin([HELENE, SECOND], 'wide@example.com')],
+    ['users/admin-other', scopedAdmin([SECOND], 'other@example.com')],
+    ['users/admin-empty', approved('admin', 'empty@example.com', { schools: [] })],
+  ]);
+  const db = testEnv.authenticatedContext('admin-1').firestore();
+
+  await assertFails(getDoc(doc(db, 'users/admin-wide')));
+  await assertFails(updateDoc(doc(db, 'users/admin-wide'), { status: 'rejected' }));
+  await assertFails(getDoc(doc(db, 'users/admin-other')));
+  await assertFails(updateDoc(doc(db, 'users/admin-other'), { status: 'rejected' }));
+  await assertFails(getDoc(doc(db, 'users/admin-empty')));
+});
+
+test('a super admin bypasses school scope', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/tester-1', testerAt(SECOND)],
+    ['users/tester-blank', { role: 'tester', status: 'pending', email: 'blank@example.com' }],
+    ['users/admin-2', scopedAdmin([SECOND], 'other@example.com')],
+  ]);
+  const db = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertSucceeds(getDoc(doc(db, 'users/tester-1')));
+  await assertSucceeds(getDoc(doc(db, 'users/tester-blank')));
+  await assertSucceeds(updateDoc(doc(db, 'users/tester-blank'), { status: 'approved' }));
+  await assertSucceeds(getDocs(collection(db, 'users')));
+  await assertSucceeds(updateDoc(doc(db, 'users/admin-2'), { name: 'Renamed' }));
+});
+
+test('only a super admin can set or change school tags', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com', { schools: [HELENE] })],
+    ['users/super-2', approved('superadmin', 'second@example.com')],
+    ['users/admin-1', scopedAdmin()],
+    ['users/tester-1', testerAt(HELENE)],
+    ['users/owner-1', testerAt(HELENE, { status: 'approved', email: 'owner@example.com' })],
+  ]);
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const ownerDb = testEnv.authenticatedContext('owner-1').firestore();
+  const freshDb = testEnv.authenticatedContext('fresh-1').firestore();
+
+  await assertFails(updateDoc(doc(adminDb, 'users/tester-1'), { school: SECOND }));
+  await assertFails(updateDoc(doc(adminDb, 'users/admin-1'), { schools: [SECOND] }));
+  await assertFails(updateDoc(doc(ownerDb, 'users/owner-1'), { school: SECOND }));
+  await assertSucceeds(updateDoc(doc(ownerDb, 'users/owner-1'), { name: 'Owner' }));
+  await assertFails(updateDoc(doc(superDb, 'users/super-1'), { schools: [SECOND] }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/tester-1'), { school: SECOND }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/admin-1'), { schools: [HELENE, SECOND] }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/super-2'), { schools: [SECOND] }));
+
+  await assertFails(setDoc(doc(adminDb, 'users/new-tester'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'new@example.com',
+    school: HELENE,
+  }));
+  await assertFails(setDoc(doc(freshDb, 'users/fresh-1'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'fresh@example.com',
+    school: HELENE,
+  }));
+  await assertSucceeds(setDoc(doc(superDb, 'users/new-admin'), {
+    role: 'admin',
+    status: 'approved',
+    email: 'new-admin@example.com',
+    schools: [HELENE],
+  }));
+  await assertFails(setDoc(doc(superDb, 'users/super-3'), {
+    role: 'superadmin',
+    status: 'approved',
+    email: 'third@example.com',
+    schools: [HELENE],
+  }));
+});
+
+test('scoped admin lists are limited to testers in their schools', async () => {
+  await seed([
+    ['users/admin-1', scopedAdmin([HELENE, SECOND])],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/tester-1', testerAt(HELENE)],
+    ['users/tester-2', testerAt(SECOND)],
+    ['users/tester-other', testerAt('C')],
+  ]);
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+  const adminUsers = collection(adminDb, 'users');
+
+  await assertFails(getDocs(adminUsers));
+  await assertFails(getDocs(query(adminUsers, where('school', '==', 'C'))));
+  await assertFails(getDocs(query(adminUsers, where('role', '==', 'superadmin'))));
+  await assertFails(getDocs(query(
+    adminUsers,
+    where('role', '==', 'tester'),
+    where('school', 'in', [HELENE, 'C']),
+  )));
+  await assertSucceeds(getDocs(query(
+    adminUsers,
+    where('role', '==', 'tester'),
+    where('school', 'in', [HELENE, SECOND]),
+  )));
+  await assertSucceeds(getDocs(collection(superDb, 'users')));
 });

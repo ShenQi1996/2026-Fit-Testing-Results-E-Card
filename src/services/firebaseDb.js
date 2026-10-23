@@ -42,6 +42,7 @@ import {
   isAdminOrAbove,
   isSuperAdmin,
 } from '../utils/roles';
+import { normalizeSchoolList } from '../utils/schoolScope';
 
 const FIRESTORE_BATCH_LIMIT = 400;
 
@@ -257,6 +258,42 @@ const assertAdmin = async (userId) => {
   return access.role;
 };
 
+// Firestore `in` filters accept at most 30 values.
+const FIRESTORE_IN_LIMIT = 30;
+
+const chunkValues = (values, size) => {
+  const chunks = [];
+  for (let i = 0; i < values.length; i += size) {
+    chunks.push(values.slice(i, i + size));
+  }
+  return chunks;
+};
+
+const docsById = (snapshots) => {
+  const byId = new Map();
+  snapshots.forEach((snapshot) => {
+    snapshot.forEach((docSnap) => {
+      byId.set(docSnap.id, docSnap);
+    });
+  });
+  return [...byId.values()];
+};
+
+// Scoped admins may list only testers whose school is in their own schools.
+const listScopedTesters = async (schools, extraConstraints = []) => {
+  const scopedSchools = normalizeSchoolList(schools);
+  if (scopedSchools.length === 0) return [];
+  const snapshots = await Promise.all(
+    chunkValues(scopedSchools, FIRESTORE_IN_LIMIT).map((chunk) => getDocs(query(
+      collection(db, USERS_COLLECTION),
+      ...extraConstraints,
+      where('role', '==', USER_ROLE_TESTER),
+      where('school', 'in', chunk),
+    )))
+  );
+  return docsById(snapshots);
+};
+
 const assertSuperAdmin = async (userId) => {
   const access = await getUserAccessProfile(userId);
   if (access.status !== USER_STATUS_APPROVED || !isSuperAdmin(access.role)) {
@@ -295,6 +332,8 @@ const serializeUserDoc = (docSnap) => {
     updatedAt: toIso(data.updatedAt),
     approvedAt: toIso(data.approvedAt),
     approvedBy: data.approvedBy || null,
+    school: typeof data.school === 'string' ? data.school : '',
+    schools: normalizeSchoolList(data.schools),
   };
 };
 
@@ -883,24 +922,25 @@ export const ensureUserProfile = async (userInfo) => {
 export const getUserAccessProfile = async (userId) => {
   try {
     if (!userId) {
-      return { role: 'tester', status: USER_STATUS_PENDING };
+      return { role: 'tester', status: USER_STATUS_PENDING, schools: [] };
     }
 
     const userDocRef = doc(db, USERS_COLLECTION, userId);
     const userDocSnap = await getDoc(userDocRef);
 
     if (!userDocSnap.exists()) {
-      return { role: 'tester', status: USER_STATUS_PENDING };
+      return { role: 'tester', status: USER_STATUS_PENDING, schools: [] };
     }
 
     const data = userDocSnap.data() || {};
     return {
       role: data.role || 'tester',
       status: normalizeUserStatus(data.status),
+      schools: normalizeSchoolList(data.schools),
     };
   } catch (error) {
     console.error('Error getting user access profile:', error);
-    return { role: 'tester', status: USER_STATUS_PENDING };
+    return { role: 'tester', status: USER_STATUS_PENDING, schools: [] };
   }
 };
 
@@ -912,15 +952,22 @@ export const getUserAccessProfile = async (userId) => {
 export const getPendingUsers = async (adminUserId) => {
   try {
     const actorRole = await assertAdmin(adminUserId);
-
-    const pendingQuery = query(
-      collection(db, USERS_COLLECTION),
-      where('status', '==', USER_STATUS_PENDING)
-    );
-    const querySnapshot = await getDocs(pendingQuery);
+    const pendingConstraint = where('status', '==', USER_STATUS_PENDING);
+    let docSnaps;
+    if (isSuperAdmin(actorRole)) {
+      const querySnapshot = await getDocs(query(
+        collection(db, USERS_COLLECTION),
+        pendingConstraint,
+      ));
+      docSnaps = [];
+      querySnapshot.forEach((docSnap) => docSnaps.push(docSnap));
+    } else {
+      const { schools } = await getUserAccessProfile(adminUserId);
+      docSnaps = await listScopedTesters(schools, [pendingConstraint]);
+    }
 
     const users = [];
-    querySnapshot.forEach((docSnap) => {
+    docSnaps.forEach((docSnap) => {
       const pendingUser = serializeUserDoc(docSnap);
       if (!canModifyManagedUser(actorRole, pendingUser.role)) return;
       users.push(pendingUser);
@@ -947,11 +994,19 @@ export const getPendingUsers = async (adminUserId) => {
  */
 export const getAllUsers = async (adminUserId) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
+    let docSnaps;
+    if (isSuperAdmin(actorRole)) {
+      const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
+      docSnaps = [];
+      querySnapshot.forEach((docSnap) => docSnaps.push(docSnap));
+    } else {
+      const { schools } = await getUserAccessProfile(adminUserId);
+      docSnaps = await listScopedTesters(schools);
+    }
 
-    const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
     const users = [];
-    querySnapshot.forEach((docSnap) => {
+    docSnaps.forEach((docSnap) => {
       users.push(serializeUserDoc(docSnap));
     });
 
@@ -1021,6 +1076,22 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
       if (nextStatus === USER_STATUS_APPROVED || nextStatus === USER_STATUS_REJECTED) {
         payload.approvedAt = Timestamp.now();
         payload.approvedBy = adminUserId;
+      }
+    }
+
+    // School tags are super-admin only, and not on the caller's own document.
+    if (isSuperAdmin(actorRole) && adminUserId !== targetUserId) {
+      if (typeof updates.school === 'string') {
+        const nextSchool = updates.school.trim();
+        const currentSchool = typeof current.school === 'string' ? current.school : '';
+        if (nextSchool !== currentSchool) payload.school = nextSchool;
+      }
+      if (Array.isArray(updates.schools)) {
+        const nextSchools = normalizeSchoolList(updates.schools);
+        const currentSchools = normalizeSchoolList(current.schools);
+        const sameSchools = nextSchools.length === currentSchools.length
+          && nextSchools.every((school, index) => school === currentSchools[index]);
+        if (!sameSchools) payload.schools = nextSchools;
       }
     }
 

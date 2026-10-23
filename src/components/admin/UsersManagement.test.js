@@ -29,6 +29,9 @@ jest.mock('../../services/firebaseAuth', () => ({
   createManagedAuthUser: jest.fn(),
 }));
 
+const HELENE = 'Helene College of Nursing';
+const SECOND = 'Example Second School';
+
 const USERS = [
   {
     id: 'super-1',
@@ -36,6 +39,7 @@ const USERS = [
     email: 'sam@example.com',
     role: 'superadmin',
     status: 'approved',
+    schools: [HELENE, SECOND],
   },
   {
     id: 'admin-2',
@@ -43,6 +47,15 @@ const USERS = [
     email: 'ada@example.com',
     role: 'admin',
     status: 'approved',
+    schools: [HELENE, SECOND],
+  },
+  {
+    id: 'admin-helene',
+    name: 'Helen Admin',
+    email: 'helen-admin@example.com',
+    role: 'admin',
+    status: 'approved',
+    schools: [HELENE],
   },
   {
     id: 'tester-1',
@@ -50,8 +63,24 @@ const USERS = [
     email: 'tess@example.com',
     role: 'tester',
     status: 'pending',
+    school: HELENE,
+  },
+  {
+    id: 'tester-2',
+    name: 'Other School',
+    email: 'other-school@example.com',
+    role: 'tester',
+    status: 'approved',
+    school: SECOND,
   },
 ];
+
+const scopedAdmin = {
+  uid: 'admin-helene',
+  role: 'admin',
+  email: 'helen-admin@example.com',
+  schools: [HELENE],
+};
 
 const PENDING_USERS = [
   {
@@ -60,6 +89,7 @@ const PENDING_USERS = [
     email: 'pat@example.com',
     role: 'admin',
     status: 'pending',
+    schools: [HELENE],
     requestedAt: '2026-10-01T12:00:00.000Z',
   },
   {
@@ -68,9 +98,26 @@ const PENDING_USERS = [
     email: 'tess@example.com',
     role: 'tester',
     status: 'pending',
+    school: HELENE,
     requestedAt: '2026-10-02T12:00:00.000Z',
   },
+  {
+    id: 'tester-2',
+    name: 'Other School',
+    email: 'other-school@example.com',
+    role: 'tester',
+    status: 'pending',
+    school: SECOND,
+    requestedAt: '2026-10-03T12:00:00.000Z',
+  },
 ];
+
+const heleneAdmin = {
+  uid: 'admin-1',
+  role: 'admin',
+  email: 'admin@example.com',
+  schools: [HELENE],
+};
 
 const optionValues = (select) => select.findAllByType('option').map((option) => option.props.value);
 
@@ -156,17 +203,12 @@ test('role choices are tester or admin, and an existing superadmin stays read-on
 });
 
 test('a regular admin is not offered superadmin', async () => {
-  const renderer = await renderPage({
-    uid: 'admin-1',
-    role: 'admin',
-    email: 'admin@example.com',
-  });
+  const renderer = await renderPage(scopedAdmin);
 
   expect(renderer.root.findAllByType('option').map((option) => option.props.value))
     .not.toContain('superadmin');
   expect(optionValues(selectsByLabel(renderer, 'Role filter')[0])).toEqual(['all', 'tester', 'admin']);
-  expect(cardFor(renderer, 'super-1').findByProps({ className: 'user-role-readonly' }).children)
-    .toEqual(['superadmin']);
+  expect(cardFor(renderer, 'super-1')).toBeUndefined();
   expect(optionValues(cardFor(renderer, 'tester-1').findAll(
     (node) => node.type === 'select' && node.props['aria-label'] === 'Role',
   )[0])).toEqual(['tester']);
@@ -211,12 +253,67 @@ test('saving a superadmin keeps the role instead of dropping it', async () => {
     .toEqual(['superadmin']);
 });
 
+test('a scoped admin sees only users in their schools and cannot edit school tags', async () => {
+  const renderer = await renderPage(scopedAdmin);
+  const visibleIds = renderer.root.findAllByProps({ className: 'user-id' })
+    .map((node) => node.children.join('').replace('UID: ', ''));
+
+  expect(visibleIds).toEqual(['admin-helene', 'tester-1']);
+  expect(cardFor(renderer, 'tester-1').findByProps({ 'aria-label': 'School' }).children)
+    .toEqual([HELENE]);
+  expect(cardFor(renderer, 'tester-1').findAll(
+    (node) => node.type === 'input' && node.props['aria-label'] === 'School',
+  )).toHaveLength(0);
+
+  const editableRoles = renderer.root.findAll(
+    (node) => node.type === 'select' && node.props['aria-label'] === 'Role' && !node.props.disabled,
+  );
+  expect(editableRoles.map(optionValues)).toEqual([['tester']]);
+});
+
+test('a super admin sees every user and can set school tags', async () => {
+  updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
+    id,
+    ...draft,
+    schools: draft.schools || [],
+  }));
+  const renderer = await renderPage({
+    uid: 'super-1',
+    role: 'superadmin',
+    email: 'sam@example.com',
+    schools: [HELENE, SECOND],
+  });
+  const visibleIds = renderer.root.findAllByProps({ className: 'user-id' })
+    .map((node) => node.children.join('').replace('UID: ', ''));
+
+  expect(visibleIds).toEqual(['super-1', 'admin-2', 'admin-helene', 'tester-1', 'tester-2']);
+  expect(cardFor(renderer, 'super-1').findByProps({ 'aria-label': 'Schools' }).children)
+    .toEqual([`${HELENE}, ${SECOND}`]);
+
+  const testerCard = cardFor(renderer, 'tester-1');
+  const schoolInput = testerCard.findByProps({ 'aria-label': 'School' });
+  await act(async () => {
+    schoolInput.props.onChange({ target: { value: SECOND } });
+  });
+  const save = cardFor(renderer, 'tester-1').findAllByType('button')
+    .find((button) => button.children.includes('Save'));
+  await act(async () => {
+    save.props.onClick();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(updateManagedUser).toHaveBeenCalledWith(
+    'super-1',
+    'tester-1',
+    expect.objectContaining({ school: SECOND, role: 'tester' }),
+  );
+  expect(updateManagedUser.mock.calls[0][2]).not.toHaveProperty('schools');
+});
+
 test('pending approval tab lists users an admin can approve and hides other admins', async () => {
-  const admin = await renderPage({
-    uid: 'admin-1',
-    role: 'admin',
-    email: 'admin@example.com',
-  }, PENDING_USERS);
+  const admin = await renderPage(heleneAdmin, PENDING_USERS);
   await openPendingTab(admin);
 
   expect(getPendingUsers).toHaveBeenCalledWith('admin-1');
@@ -237,13 +334,19 @@ test('pending approval tab lists users an admin can approve and hides other admi
   expect(listed).toContain('Role: admin');
 });
 
+test('a scoped admin only sees pending testers in their schools', async () => {
+  const renderer = await renderPage(scopedAdmin, PENDING_USERS);
+  await openPendingTab(renderer);
+
+  const listed = pendingCards(renderer).map(cardText).join('\n');
+  expect(listed).toContain('tess@example.com');
+  expect(listed).not.toContain('other-school@example.com');
+  expect(listed).not.toContain('pat@example.com');
+});
+
 test('approve and reject on the pending tab call updateUserApprovalStatus', async () => {
   updateUserApprovalStatus.mockResolvedValue();
-  const renderer = await renderPage({
-    uid: 'admin-1',
-    role: 'admin',
-    email: 'admin@example.com',
-  }, PENDING_USERS);
+  const renderer = await renderPage(heleneAdmin, PENDING_USERS);
   await openPendingTab(renderer);
 
   const tessCard = pendingCards(renderer).find((card) => cardText(card).includes('tess@example.com'));
