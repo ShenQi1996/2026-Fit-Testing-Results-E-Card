@@ -155,9 +155,9 @@ const pendingCards = (renderer) => renderer.root.findAllByProps({
 
 const cardText = (card) => card.findAllByType('p').map((node) => node.children.join('')).join(' ');
 
-const renderPage = async (user, pendingUsers = USERS.filter((item) => item.status === 'pending')) => {
+const renderPage = async (user, pendingUsers = USERS.filter((item) => item.status === 'pending'), users = USERS) => {
   useAuth.mockReturnValue({ user });
-  getAllUsers.mockResolvedValue(USERS);
+  getAllUsers.mockResolvedValue(users);
   getFitTestCountsByUser.mockResolvedValue({});
   getPendingUsers.mockResolvedValue(pendingUsers);
   let renderer;
@@ -326,7 +326,7 @@ test('a super admin sees every user and can set school tags', async () => {
 
   expect(visibleIds).toEqual(['super-1', 'admin-2', 'admin-helene', 'tester-1', 'tester-2']);
   expect(cardFor(renderer, 'super-1').findByProps({ 'aria-label': 'Schools' }).children)
-    .toEqual([`${HELENE}, ${SECOND}`]);
+    .toEqual(['All']);
 
   const testerCard = cardFor(renderer, 'tester-1');
   const schoolInput = testerCard.findByProps({ 'aria-label': 'School' });
@@ -635,27 +635,30 @@ test('the schools section is only shown to a super admin', async () => {
 
   const adminRenderer = await renderPage(scopedAdmin);
   expect(adminRenderer.root.findAllByProps({ 'aria-label': 'Master schools' })).toHaveLength(0);
-  expect(adminRenderer.root.findAllByType('button').some((button) => button.children.includes('Add school')))
+  expect(adminRenderer.root.findAllByType('button').some((button) => button.children.includes('+ Add School')))
     .toBe(false);
 
   const renderer = await renderPage(superAdminUser);
   const section = renderer.root.findByProps({ 'aria-label': 'Master schools' });
-  expect(section.findAllByType('button').map((button) => button.children.join('')))
-    .toEqual(expect.arrayContaining([`Edit`, `Remove ${HELENE}`, 'Add school']));
+  const sectionLabels = section.findAllByType('button').map((button) => button.props['aria-label']);
+  expect(sectionLabels).toEqual(expect.arrayContaining([`Edit ${HELENE}`, `Remove ${HELENE}`]));
+  expect(section.findAllByType('button').some((button) => button.children.includes('+ Add School'))).toBe(true);
+  expect(section.findAllByProps({ className: 'solution-profile-item' })).toHaveLength(1);
 
   await act(async () => {
     section.findAllByType('button')
-      .find((button) => button.children.includes(`Remove ${HELENE}`))
+      .find((button) => button.props['aria-label'] === `Remove ${HELENE}`)
       .props.onClick();
   });
   expect(removeMasterSchool).toHaveBeenCalledWith('super-1', HELENE);
 
   const nameInput = renderer.root.findByProps({ 'aria-label': 'New school name' });
+  expect(nameInput.props.className).toBe('users-search');
   await act(async () => {
     nameInput.props.onChange({ target: { value: 'North Campus' } });
   });
   await act(async () => {
-    renderer.root.findAllByType('button').find((button) => button.children.includes('Add school')).props.onClick();
+    renderer.root.findAllByType('button').find((button) => button.children.includes('+ Add School')).props.onClick();
   });
   await act(async () => {
     await Promise.resolve();
@@ -665,7 +668,7 @@ test('the schools section is only shown to a super admin', async () => {
   await act(async () => {
     renderer.root.findByProps({ 'aria-label': 'Master schools' })
       .findAllByType('button')
-      .find((button) => button.children.includes('Edit'))
+      .find((button) => button.props['aria-label'] === `Edit ${HELENE}`)
       .props.onClick();
   });
   await act(async () => {
@@ -674,9 +677,67 @@ test('the schools section is only shown to a super admin', async () => {
     });
   });
   await act(async () => {
-    renderer.root.findAllByType('button').find((button) => button.children.includes('Save school')).props.onClick();
+    renderer.root.findAllByType('button').find((button) => button.props['aria-label'] === 'Save school name').props.onClick();
   });
   expect(renameMasterSchool).toHaveBeenCalledWith('super-1', HELENE, 'North Campus');
+});
+
+test('super admin cards show All and a save does not change stored schools', async () => {
+  updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
+    id,
+    role: 'superadmin',
+    ...draft,
+  }));
+  const stored = {
+    id: 'super-stored',
+    name: 'Other Super',
+    email: 'other-super@example.com',
+    role: 'superadmin',
+    status: 'approved',
+    schools: [HELENE],
+  };
+  const sam = {
+    id: 'super-sam',
+    name: 'Sam',
+    email: 'qisam1989@gmail.com',
+    role: 'superadmin',
+    status: 'approved',
+  };
+  const renderer = await renderPage({
+    uid: 'super-sam',
+    role: 'superadmin',
+    email: 'qisam1989@gmail.com',
+  }, [], [stored, sam]);
+
+  expect(cardFor(renderer, 'super-stored').findByProps({ 'aria-label': 'Schools' }).children)
+    .toEqual(['All']);
+  expect(cardFor(renderer, 'super-sam').findByProps({ 'aria-label': 'Schools' }).children)
+    .toEqual(['All']);
+  expect(cardFor(renderer, 'super-stored').findAll(
+    (node) => node.type === 'select' && node.props['aria-label'] === 'Schools',
+  )).toHaveLength(0);
+  expect(cardFor(renderer, 'super-sam').findAll(
+    (node) => node.type === 'select' && node.props['aria-label'] === 'Schools',
+  )).toHaveLength(0);
+
+  const name = cardFor(renderer, 'super-stored').findAllByType('input')
+    .find((input) => input.props.type === 'text');
+  await act(async () => {
+    name.props.onChange({ target: { value: 'Renamed Super' } });
+  });
+  const save = cardFor(renderer, 'super-stored').findAllByType('button')
+    .find((button) => button.children.includes('Save'));
+  await act(async () => {
+    save.props.onClick();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  const payload = updateManagedUser.mock.calls[0][2];
+  expect(payload.name).toBe('Renamed Super');
+  expect(payload).not.toHaveProperty('schools');
+  expect(payload).not.toHaveProperty('school');
 });
 
 test('a super admin multi-selects schools when creating an admin', async () => {

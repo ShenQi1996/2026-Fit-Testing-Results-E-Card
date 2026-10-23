@@ -155,6 +155,51 @@
   box-sizing: border-box;
 }
 
+.users-schools-section {
+  margin-bottom: 24px;
+}
+
+.users-schools-section .solution-profile-list,
+.users-schools-section .users-search,
+.users-schools-section .solution-add-button {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.users-schools-section .solution-profile-item,
+.users-schools-section .users-search,
+.users-schools-section .solution-add-button {
+  min-height: 44px;
+}
+
+.users-schools-section .users-search {
+  margin-bottom: 12px;
+}
+
+.users-schools-section .solution-add-button {
+  margin-bottom: 0;
+}
+
+.users-schools-section .solution-profile-item .users-search {
+  flex: 1 1 160px;
+  width: auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.users-schools-section .solution-profile-details {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .users-schools-section .solution-profile-item {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+}
+
 .users-view-tabs {
   display: flex;
   gap: 8px;

@@ -292,8 +292,8 @@ const UsersManagement = () => {
         role: draft.role,
         status: draft.status,
       };
-      if (superAdmin && targetUserId !== user.uid) {
-        if (tagRole === USER_ROLE_ADMIN || tagRole === USER_ROLE_SUPERADMIN) {
+      if (superAdmin && targetUserId !== user.uid && tagRole !== USER_ROLE_SUPERADMIN) {
+        if (tagRole === USER_ROLE_ADMIN) {
           updates.schools = normalizeSchoolList(draft.schools);
         } else {
           updates.school = draft.school || '';
@@ -556,50 +556,66 @@ const UsersManagement = () => {
         {success && <div className="users-success">{success}</div>}
 
         {superAdmin && (
-          <section className="users-schools-section" aria-label="Master schools">
-            <h3>Schools</h3>
-            <p className="users-hint">
+          <section className="form-section users-schools-section" aria-label="Master schools">
+            <h3 className="section-title">Schools</h3>
+            <p className="section-description">
               Master list of school names. Renaming or removing a school does not change existing user or fit-test records.
             </p>
             {schoolListError && <div className="users-error">{schoolListError}</div>}
-            <ul>
+            <div className="solution-profile-list">
               {masterSchools.map((name) => (
-                <li key={name}>
+                <div key={name} className="solution-profile-item">
                   {editingSchool?.from === name ? (
-                    <>
-                      <input
-                        aria-label="Edit school name"
-                        value={editingSchool.to}
-                        onChange={(e) => setEditingSchool({ from: name, to: e.target.value })}
-                      />
-                      <button type="button" onClick={handleRenameSchool}>Save school</button>
-                    </>
+                    <input
+                      className="users-search"
+                      aria-label="Edit school name"
+                      value={editingSchool.to}
+                      onChange={(e) => setEditingSchool({ from: name, to: e.target.value })}
+                    />
                   ) : (
-                    <>
-                      <span>{name}</span>
-                      <button
-                        type="button"
-                        onClick={() => setEditingSchool({ from: name, to: name })}
-                      >
-                        Edit
-                      </button>
-                      <button type="button" onClick={() => handleRemoveSchool(name)}>
-                        {`Remove ${name}`}
-                      </button>
-                    </>
+                    <div className="solution-profile-details">
+                      <strong>{name}</strong>
+                    </div>
                   )}
-                </li>
+                  <div className="solution-profile-actions">
+                    {editingSchool?.from === name ? (
+                      <button type="button" aria-label="Save school name" onClick={handleRenameSchool}>
+                        Save
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          aria-label={`Edit ${name}`}
+                          title="Edit"
+                          onClick={() => setEditingSchool({ from: name, to: name })}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${name}`}
+                          title="Remove"
+                          onClick={() => handleRemoveSchool(name)}
+                        >
+                          🗑️
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
               ))}
-            </ul>
-            <label>
-              New school name
-              <input
-                aria-label="New school name"
-                value={newSchoolName}
-                onChange={(e) => setNewSchoolName(e.target.value)}
-              />
-            </label>
-            <button type="button" onClick={handleAddSchool}>Add school</button>
+            </div>
+            <input
+              className="users-search"
+              aria-label="New school name"
+              placeholder="New school name"
+              value={newSchoolName}
+              onChange={(e) => setNewSchoolName(e.target.value)}
+            />
+            <button type="button" className="solution-add-button" onClick={handleAddSchool}>
+              + Add School
+            </button>
           </section>
         )}
 
@@ -831,17 +847,19 @@ const UsersManagement = () => {
                 : locked
                   ? [currentRole]
                   : assignableRoles.filter((role) => role !== USER_ROLE_SUPERADMIN);
-              const schoolTagIsList = currentRole === 'admin' || roleIsSuperAdmin;
-              const schoolTagLabel = schoolTagIsList ? 'Schools' : 'School';
+              const schoolTagIsList = currentRole === USER_ROLE_ADMIN;
+              const schoolTagLabel = roleIsSuperAdmin || schoolTagIsList ? 'Schools' : 'School';
               const assignedSchools = normalizeSchoolList(draft.schools);
-              const schoolTagValue = schoolTagIsList
-                ? assignedSchools.join(', ')
-                : (draft.school || '');
+              const schoolTagValue = roleIsSuperAdmin
+                ? 'All'
+                : schoolTagIsList
+                  ? assignedSchools.join(', ')
+                  : (draft.school || '');
               const schoolChoices = withAssignedNames(
                 masterSchools,
                 schoolTagIsList ? assignedSchools : [draft.school || ''],
               );
-              const canEditSchoolTags = superAdmin && !isSelf;
+              const canEditSchoolTags = superAdmin && !isSelf && !roleIsSuperAdmin;
               return (
                 <article key={item.id} className="user-card">
                   <div className="user-card-top">
