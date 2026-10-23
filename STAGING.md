@@ -18,67 +18,76 @@ Staging must use its own Firebase project. QA writes must not land in production
 
 `vercel.json` only sets `buildCommand`, `installCommand`, `outputDirectory`, and the SPA rewrite to `index.html`. It does not set `git.deploymentEnabled` or an `ignoreCommand`, so it does not turn Preview deploys off.
 
-## Set up the staging Firebase project (Spark)
+## Staging Firebase project
 
-Do this once. The free Spark plan is enough. Nothing in this repo creates the Firebase project for you.
+The Spark project **`fit-test-result-e-card-staging`** already exists. Email/Password and Google sign-in are enabled. Firestore is in `nam5`, production mode. The rules currently published there are `main`'s [`firestore.rules`](./firestore.rules).
 
-1. **Create the project.** [Firebase console](https://console.firebase.google.com/) → Add project. Name it `fit-test-result-e-card-staging`. Leave it on the Spark plan. Do not use `fit-test-result-e-card-2026`.
-2. **Add a web app and copy the config.** Project settings → Your apps → Web (`</>`). Register the app. Copy the config values into the env var names below. Those values are the only connection between this repo and the staging project.
-3. **Turn on sign-in providers.** Authentication → Sign-in method → enable **Email/Password** and **Google**.
-4. **Authorize the staging host.** Authentication → Settings → Authorized domains → Add domain. Add the hostname only (no `https://`):
+Web app config (the API key is not stored in this repo):
 
-   `2026-fit-testing-results-e-card-git-staging-shenqi1996s-projects.vercel.app`
+| Field | Value |
+| --- | --- |
+| `projectId` | `fit-test-result-e-card-staging` |
+| `authDomain` | `fit-test-result-e-card-staging.firebaseapp.com` |
+| `storageBucket` | `fit-test-result-e-card-staging.firebasestorage.app` |
+| `messagingSenderId` | `966738964858` |
+| `appId` | `1:966738964858:web:9a5324a2db3326169666c3` |
+| `apiKey` | Vercel env var `FIREBASE_API_KEY` only. Copy it from Firebase → Project settings → Your apps. Do not commit it. |
 
-   Also add a custom staging domain if you assign one in the next section. Google sign-in fails on a host that is not in this list. See [PRODUCTION_SETUP.md](./PRODUCTION_SETUP.md).
-5. **Create Firestore.** Build → Firestore Database → Create database. Pick a region and start in production mode. Spark includes Firestore.
-6. **Publish the rules.** Firestore → Rules → paste [`firestore.rules`](./firestore.rules) from this repo → Publish. Or, after `firebase login`:
+`npm run seed:staging` refuses to run when the service account project id is the production project `fit-test-result-e-card-2026`.
 
-   ```bash
-   firebase deploy --only firestore:rules --project fit-test-result-e-card-staging
-   ```
+## Seed fake data
 
-7. **Create a service account key for the seed script.** Project settings → Service accounts → Generate new private key. Save the JSON outside the repo. Do not commit it. `.gitignore` ignores `*serviceAccount*.json` and `*-firebase-adminsdk-*.json`.
-8. **Seed fake data.** From this repo, with Node 24:
+Still requires a service account key. Project settings → Service accounts → Generate new private key. Save the JSON outside the repo. Do not commit it. `.gitignore` ignores `*serviceAccount*.json` and `*-firebase-adminsdk-*.json`.
 
-   ```bash
-   export FIREBASE_SERVICE_ACCOUNT_PATH=/absolute/path/to/staging-service-account.json
-   npm run seed:staging
-   ```
+From this repo, with Node 24:
 
-   The script uses the Firebase Admin SDK. It reads the project id from that key and **exits without writing** if the id is `fit-test-result-e-card-2026`. It creates four Auth users and these collections:
+```bash
+export FIREBASE_SERVICE_ACCOUNT_PATH=/absolute/path/to/staging-service-account.json
+npm run seed:staging
+```
 
-   | Collection | What |
-   | --- | --- |
-   | `users` | `staging-superadmin@example.com` (`superadmin`, approved), `staging-admin@example.com` (`admin`, approved), `staging-tester@example.com` (`tester`, approved), `staging-pending@example.com` (`tester`, pending) |
-   | `fitTests` | One fake card, `userId` of the tester, `fitTester` `Staging Tester` |
-   | `fitTestVerifications` | Public verify doc for token `c0ffee00c0ffee00c0ffee00c0ffee00` |
-   | `fitTestLookups` | Public resend doc for Fake Client, DOB `01/15/1990`, `fake-client@example.com` |
+The script uses the Firebase Admin SDK. It reads the project id from that key and exits without writing if the id is `fit-test-result-e-card-2026`. It creates four Auth users and these collections:
 
-   New Auth users get password `Staging-only-1` unless you set `STAGING_SEED_PASSWORD` (at least 6 characters). Re-running the script updates the same docs. The current app treats role `admin` as staff. Role `superadmin` is stored for the separate super-admin change; until that is merged, sign in as the staging admin account for Users management.
+| Collection | What |
+| --- | --- |
+| `users` | `staging-superadmin@example.com` (`superadmin`, approved), `staging-admin@example.com` (`admin`, approved), `staging-tester@example.com` (`tester`, approved), `staging-pending@example.com` (`tester`, pending) |
+| `fitTests` | One fake card, `userId` of the tester, `fitTester` `Staging Tester` |
+| `fitTestVerifications` | Public verify doc for token `c0ffee00c0ffee00c0ffee00c0ffee00` |
+| `fitTestLookups` | Public resend doc for Fake Client, DOB `01/15/1990`, `fake-client@example.com` |
 
-9. **Point Vercel at the two projects.** Vercel → this project → Settings → Environment Variables.
+New Auth users get password `Staging-only-1` unless you set `STAGING_SEED_PASSWORD` (at least 6 characters). Re-running the script updates the same docs. The current app treats role `admin` as staff. Role `superadmin` is stored for the separate super-admin change; until that is on `staging`, sign in as the staging admin account for Users management.
 
-   Set these six for **Production** to the current project `fit-test-result-e-card-2026` (Firebase → Project settings → Your apps → SDK setup):
+## Remaining manual steps
 
-   - `FIREBASE_API_KEY`
-   - `FIREBASE_AUTH_DOMAIN`
-   - `FIREBASE_PROJECT_ID` = `fit-test-result-e-card-2026`
-   - `FIREBASE_STORAGE_BUCKET`
-   - `FIREBASE_MESSAGING_SENDER_ID`
-   - `FIREBASE_APP_ID`
+- [ ] **Vercel Preview env vars, scoped to Git branch `staging`.** Vercel → this project → Settings → Environment Variables → Preview, and limit the branch to `staging`. Production values are not copied to Preview. A Preview build of `staging` fails if any of these are missing.
 
-   Set the same six again for **Preview**, and in the branch picker limit them to Git branch `staging`, using the **staging** web app config (`FIREBASE_PROJECT_ID` = `fit-test-result-e-card-staging`). Production values are not copied to Preview. A Preview build of `staging` fails if these are missing, instead of falling back to production.
+  | Env var | Value |
+  | --- | --- |
+  | `FIREBASE_API_KEY` | Staging web app API key, set only in Vercel |
+  | `FIREBASE_AUTH_DOMAIN` | `fit-test-result-e-card-staging.firebaseapp.com` |
+  | `FIREBASE_PROJECT_ID` | `fit-test-result-e-card-staging` |
+  | `FIREBASE_STORAGE_BUCKET` | `fit-test-result-e-card-staging.firebasestorage.app` |
+  | `FIREBASE_MESSAGING_SENDER_ID` | `966738964858` |
+  | `FIREBASE_APP_ID` | `1:966738964858:web:9a5324a2db3326169666c3` |
 
-   Do the Production values **before** this change is deployed, or the production Vercel build fails closed.
+  Before a production deploy of this change, set the same six names on Vercel **Production** to project `fit-test-result-e-card-2026`. This pull request targets `staging` only. Locally, copy [`.env.example`](./.env.example) to `.env.local`. `.env.local` is gitignored.
 
-   Locally, copy [`.env.example`](./.env.example) to `.env.local` and fill in whichever project you are running. `.env.local` is gitignored.
+- [ ] **Authorize the staging Vercel host** on the staging Firebase project. Authentication → Settings → Authorized domains. Add the hostname only (no `https://`):
 
-10. **EmailJS.** The e-card sender still uses the EmailJS service, template, and public key compiled in `src/services/emailService.js`. Staging Firestore is separate, but a sent card still goes out through that EmailJS account. For QA, use an EmailJS test template or a sandbox service, and only the fake `example.com` addresses from the seed, so a test send does not reach a real person.
+  `2026-fit-testing-results-e-card-git-staging-shenqi1996s-projects.vercel.app`
 
-## Other manual setup
+  Google sign-in fails until that host is listed. See [PRODUCTION_SETUP.md](./PRODUCTION_SETUP.md).
 
-- [ ] **Optional staging domain.** Vercel → Settings → Domains. Assign a hostname to Git branch `staging`, then add that hostname under the staging project’s Firebase Authorized domains.
-- [ ] **Branch protection for `staging`.** GitHub → Settings → Branches → add a rule for `staging` (pull request required, and the CI check required). This repo change does not enable that rule.
-- [ ] **Vercel Deployment Protection.** Preview URLs can sit behind a Vercel login. Adjust it if someone outside the team needs to open the staging alias.
+- [ ] **Republish Firestore rules after PR #12 and PR #13 land on `staging`.** The rules in `fit-test-result-e-card-staging` today are `main`'s rules. Those pull requests are not merged into `staging` by this change. After Sam approves them onto `staging`, publish that branch's `firestore.rules` again:
+
+  ```bash
+  firebase deploy --only firestore:rules --project fit-test-result-e-card-staging
+  ```
+
+- [ ] **Service account key, then seed.** Generate the staging key as described above and run `npm run seed:staging`. The script will not write to `fit-test-result-e-card-2026`.
+
+- [ ] **EmailJS.** The e-card sender still uses the EmailJS service, template, and public key compiled in `src/services/emailService.js`. For QA, use a test template or a sandbox service, and only the fake `example.com` addresses from the seed.
+
+- [ ] **Optional.** Assign a custom domain to Git branch `staging` in Vercel, then add that hostname to the staging project's authorized domains. GitHub branch protection for `staging` is also still unset. Preview URLs can sit behind Vercel Deployment Protection.
 
 GitHub Actions compiles with placeholder Firebase values (`ci-not-production`). Those placeholders are not a real project and are not used by Vercel.

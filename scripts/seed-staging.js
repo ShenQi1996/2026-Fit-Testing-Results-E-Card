@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
+// Live production project. The seed refuses this id so it cannot write production data.
 const PROD_PROJECT_ID = 'fit-test-result-e-card-2026';
 const DEFAULT_PASSWORD = 'Staging-only-1';
 const FIT_TEST_ID = 'staging-fake-fit-test';
