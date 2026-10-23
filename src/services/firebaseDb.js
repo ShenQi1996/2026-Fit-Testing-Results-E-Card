@@ -248,7 +248,8 @@ const serializeUserDoc = (docSnap) => {
     email: data.email || '',
     name: data.name || '',
     role: data.role || 'tester',
-    status: data.status || USER_STATUS_APPROVED,
+    // Missing status is pending. Legacy docs must be backfilled with 'approved'.
+    status: data.status || USER_STATUS_PENDING,
     provider: data.provider || 'unknown',
     requestedAt: toIso(data.requestedAt),
     createdAt: toIso(data.createdAt),
@@ -816,12 +817,16 @@ export const ensureUserProfile = async (userInfo) => {
       return { isNewUser: true };
     }
 
-    // Backfill common profile fields for existing users without changing approval state.
-    await updateDoc(userDocRef, {
-      email: userInfo.email || userDocSnap.data().email || '',
-      name: userInfo.name || userDocSnap.data().name || '',
-      updatedAt: Timestamp.now(),
-    });
+    // Backfill is best-effort. A rules denial must not block sign-in.
+    try {
+      await updateDoc(userDocRef, {
+        email: userInfo.email || userDocSnap.data().email || '',
+        name: userInfo.name || userDocSnap.data().name || '',
+        updatedAt: Timestamp.now(),
+      });
+    } catch (backfillError) {
+      console.error('Error backfilling user profile:', backfillError);
+    }
 
     return { isNewUser: false };
   } catch (error) {
@@ -832,7 +837,7 @@ export const ensureUserProfile = async (userInfo) => {
 
 /**
  * Get user access profile including role + approval status
- * Missing status defaults to approved for backward compatibility.
+ * Missing status is pending. Legacy docs need status set to 'approved'.
  * @param {string} userId - User ID
  * @returns {Promise<{role: string, status: string}>}
  */
@@ -849,10 +854,10 @@ export const getUserAccessProfile = async (userId) => {
       return { role: 'tester', status: USER_STATUS_PENDING };
     }
 
-    const data = userDocSnap.data();
+    const data = userDocSnap.data() || {};
     return {
       role: data.role || 'tester',
-      status: data.status || USER_STATUS_APPROVED,
+      status: data.status || USER_STATUS_PENDING,
     };
   } catch (error) {
     console.error('Error getting user access profile:', error);
@@ -989,7 +994,9 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
 };
 
 /**
- * Admin-only: delete a user profile document
+ * Admin-only: delete a user profile document.
+ * The Auth login is left in place. The client SDK cannot delete another
+ * user's Auth account on the Spark plan.
  * @param {string} adminUserId
  * @param {string} targetUserId
  */

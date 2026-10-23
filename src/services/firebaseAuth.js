@@ -29,6 +29,9 @@ import {
 const PENDING_APPROVAL_MESSAGE = 'Your account is pending admin approval. Please contact an administrator.';
 const REJECTED_APPROVAL_MESSAGE = 'Your account request was not approved. Please contact an administrator.';
 
+// Concurrent callers (Google redirect plus the auth-state listener) share one run.
+const finalizeInFlight = new Map();
+
 const assertUserApproved = async (user) => {
   const accessProfile = await getUserAccessProfile(user.uid);
   if (accessProfile.status === 'approved') {
@@ -51,22 +54,53 @@ const toAppUser = (user, accessProfile) => ({
   status: accessProfile.status,
 });
 
+const signOutQuietly = async () => {
+  try {
+    await signOut(auth);
+  } catch (signOutError) {
+    console.error('Error signing out after a failed sign-in:', signOutError);
+  }
+};
+
+const runFinalizeSignIn = async (user, provider) => {
+  try {
+    await ensureUserProfile({
+      uid: user.uid,
+      email: user.email,
+      name: user.displayName || '',
+      provider: provider || 'unknown',
+    });
+    const accessProfile = await assertUserApproved(user);
+    return toAppUser(user, accessProfile);
+  } catch (error) {
+    // The UI treats a thrown sign-in as logged out. Drop the Auth session too.
+    await signOutQuietly();
+    throw error;
+  }
+};
+
 /**
  * Shared tail of every sign-in path. Creates a pending profile when missing,
  * backfills email/name for an existing profile, then signs out unless approved.
+ * A backfill that rules reject does not block an already-approved user.
  * @param {object} user Firebase user
  * @param {string} provider
  * @returns {Promise<object>}
  */
-export const finalizeSignIn = async (user, provider) => {
-  await ensureUserProfile({
-    uid: user.uid,
-    email: user.email,
-    name: user.displayName || '',
-    provider: provider || 'unknown',
+export const finalizeSignIn = (user, provider) => {
+  const uid = user?.uid;
+  if (uid && finalizeInFlight.has(uid)) {
+    return finalizeInFlight.get(uid);
+  }
+
+  let run;
+  run = runFinalizeSignIn(user, provider).finally(() => {
+    if (uid && finalizeInFlight.get(uid) === run) {
+      finalizeInFlight.delete(uid);
+    }
   });
-  const accessProfile = await assertUserApproved(user);
-  return toAppUser(user, accessProfile);
+  if (uid) finalizeInFlight.set(uid, run);
+  return run;
 };
 
 /**

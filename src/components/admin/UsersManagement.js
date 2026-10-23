@@ -136,7 +136,7 @@ const UsersManagement = () => {
     if (!user?.uid) return;
     const label = targetUser.email || targetUser.name || targetUser.id;
     const confirmed = window.confirm(
-      `Delete user profile for ${label}?\n\nThis removes their Firestore profile and app access. Their Firebase Auth login may still exist.`
+      `Delete the Firestore profile for ${label}?\n\nTheir Firebase Auth login is not deleted. Signing in again creates a new pending profile.`
     );
     if (!confirmed) return;
 
