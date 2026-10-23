@@ -89,9 +89,38 @@ npm run seed:staging -- --with-auth
 
 The password is only read from `SEED_PASSWORD`. It is not stored in the script and it is not printed. Re-running `--with-auth` updates those four uids. If an email already belongs to a different uid, the script stops and does not delete that user.
 
+## Backfill tester schools
+
+`npm run backfill:schools` reads staging Firestore with the Admin SDK and fills `school` on tester user documents. Dry run is the default. It prints every school value found on fit test records, with a count of occurrences, then the planned updates and the skip list. It writes nothing.
+
+`--write` sets `school` on each planned tester document. No other field is changed.
+
+The script reads `GOOGLE_APPLICATION_CREDENTIALS` the same way as `npm run seed:staging`. The Admin SDK bypasses Firestore rules, so the project check is what keeps this off production. It refuses every project except `fit-test-result-e-card-staging`. Production id `fit-test-result-e-card-2026` is refused before the Admin SDK connects, from `FIREBASE_PROJECT_ID` when that variable is set and from the service account `project_id`. It is refused again from the initialized app's project id.
+
+The script loads every `users` document whose `role` is `tester`. A tester who already has a non-blank `school` is skipped, and that tester's fit tests are not read. For each remaining tester it reads `fitTests` where `userId` equals that uid. The school comes from `schoolsList`, or from `schoolName` when a record has that field. `testLocation` (`Harlem`, `Brooklyn`, `Other`) is a location and is left unused. Saved `schoolProfiles` are left unread.
+
+The only school the script will write is `Helene College of Nursing`, the single value in `SCHOOLS_OPTIONS` (`src/constants/fitTestOptions.js`). Any other value is unrecognized. That tester is reported and skipped. Testers with no fit test records, records with no school, or more than one school across their records are also skipped and reported.
+
+Seeded fit tests store `schoolsList` `Example Training School`. The legacy seed card has no `schoolsList`. School profiles store `Example Training School` and `Example Second School`. Those seed strings are unrecognized, so a dry run against seed data skips `seed-user-tester` and writes no `school`. Real staging values are whatever the dry run prints. This script does not guess past `Helene College of Nursing`.
+
+`school` is the single school name on a tester document. This script does not import the school-scoped admin code. It only writes that field.
+
+### Run
+
+Use the staging service account from the seed section. Do not use a key from `fit-test-result-e-card-2026`.
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/staging-service-account.json
+npm run backfill:schools
+npm run backfill:schools -- --write
+```
+
+There is no `--dry-run` flag. A run with no flag is the dry run. It still connects, because it has to read testers and fit tests. `--write` is the run that updates documents.
+
 ## Remaining manual steps
 
 - [ ] **Service account key, then seed.** Generate the staging key as above. Run the dry run, then run the script without `--dry-run`. Do not use a key from `fit-test-result-e-card-2026`.
+- [ ] **Backfill tester schools.** With that same staging key, run `npm run backfill:schools` and read the printed school values. Run `npm run backfill:schools -- --write` when those values are the ones that should be stored. The script writes `school` and leaves every other field unchanged.
 - [ ] **Staging test Auth accounts.** Prefer `npm run seed:staging -- --with-auth` so the Auth uids match `seed-user-superadmin`, `seed-user-admin`, `seed-user-tester`, and `seed-user-pending`. Creating the same emails in the Firebase console assigns different uids, and those sign-ins will not see the seeded role until a `users/{that-uid}` document exists.
 - [ ] **Authorized domain.** On project `fit-test-result-e-card-staging`, Authentication → Settings → Authorized domains, add the hostname `securefit-ecard-staging.vercel.app` (no `https://`). Google sign-in fails until that host is listed.
 - [ ] **Republish Firestore rules after PR #12 and PR #13 land on `staging`.** This change does not merge those pull requests. PR #12 creates a profile on email sign-in. PR #13 adds role `superadmin`. After they are on `staging`, publish that branch's `firestore.rules` to the staging project:
