@@ -82,12 +82,4 @@ module.exports = [
       },
     },
   },
-  {
-    // Matches main on purpose. Two `auth/operation-not-allowed` keys remain,
-    // and the later one is what JavaScript returns. This pull request does not edit the file.
-    files: ["src/services/firebaseAuth.js"],
-    rules: {
-      "no-dupe-keys": "warn",
-    },
-  },
 ];
