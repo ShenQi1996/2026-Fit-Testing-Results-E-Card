@@ -8,15 +8,27 @@ export const USER_ROLES = [
   USER_ROLE_SUPERADMIN,
 ];
 
-export const isSuperAdminRole = (role) => role === USER_ROLE_SUPERADMIN;
+export const isSuperAdmin = (role) => role === USER_ROLE_SUPERADMIN;
 
-export const isStaffAdminRole = (role) => (
+/** Admin screens and admin checks. A super admin is included. */
+export const isAdminOrAbove = (role) => (
   role === USER_ROLE_ADMIN || role === USER_ROLE_SUPERADMIN
 );
 
-/** Role values a signed-in manager may assign. Regular admins only assign tester. */
+/**
+ * Roles a manager may set on an existing user.
+ * A plain admin only keeps tester. A super admin may change role to or from
+ * admin or superadmin. Creating a superadmin document is a separate ban.
+ */
 export const rolesAssignableBy = (actorRole) => (
-  isSuperAdminRole(actorRole) ? USER_ROLES : [USER_ROLE_TESTER]
+  isSuperAdmin(actorRole) ? USER_ROLES : [USER_ROLE_TESTER]
+);
+
+/** Roles that may be written on a new user document. Never superadmin. */
+export const rolesCreatableBy = (actorRole) => (
+  isSuperAdmin(actorRole)
+    ? [USER_ROLE_TESTER, USER_ROLE_ADMIN]
+    : [USER_ROLE_TESTER]
 );
 
 /**
@@ -24,7 +36,7 @@ export const rolesAssignableBy = (actorRole) => (
  * Super admins may change any profile.
  */
 export const canModifyManagedUser = (actorRole, targetRole) => {
-  if (!isStaffAdminRole(actorRole)) return false;
-  if (isSuperAdminRole(actorRole)) return true;
+  if (!isAdminOrAbove(actorRole)) return false;
+  if (isSuperAdmin(actorRole)) return true;
   return (targetRole || USER_ROLE_TESTER) === USER_ROLE_TESTER;
 };

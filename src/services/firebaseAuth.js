@@ -26,8 +26,9 @@ import {
   createManagedUserProfile,
 } from './firebaseDb';
 import {
-  isStaffAdminRole,
-  isSuperAdminRole,
+  isAdminOrAbove,
+  isSuperAdmin,
+  USER_ROLE_SUPERADMIN,
   USER_ROLE_TESTER,
   USER_ROLES,
 } from '../utils/roles';
@@ -368,7 +369,7 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
   let secondaryApp = null;
   try {
     const adminRole = await getUserRole(adminUserId);
-    if (!isStaffAdminRole(adminRole)) {
+    if (!isAdminOrAbove(adminRole)) {
       const error = new Error('Only admin users can create users.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -377,7 +378,12 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
     if (!USER_ROLES.includes(requestedRole)) {
       throw new Error('Invalid role. Must be tester, admin, or superadmin.');
     }
-    if (requestedRole !== USER_ROLE_TESTER && !isSuperAdminRole(adminRole)) {
+    if (requestedRole === USER_ROLE_SUPERADMIN) {
+      const error = new Error('A super admin cannot be created from the client.');
+      error.code = 'PERMISSION_DENIED';
+      throw error;
+    }
+    if (requestedRole !== USER_ROLE_TESTER && !isSuperAdmin(adminRole)) {
       const error = new Error('Only a super admin can create admin accounts.');
       error.code = 'PERMISSION_DENIED';
       throw error;

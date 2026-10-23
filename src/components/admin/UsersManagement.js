@@ -9,7 +9,13 @@ import {
   deleteManagedUser,
 } from '../../services/firebaseDb';
 import { createManagedAuthUser } from '../../services/firebaseAuth';
-import { canModifyManagedUser, isStaffAdminRole, rolesAssignableBy } from '../../utils/roles';
+import {
+  canModifyManagedUser,
+  isAdminOrAbove,
+  isSuperAdmin,
+  rolesAssignableBy,
+  rolesCreatableBy,
+} from '../../utils/roles';
 import './UsersManagement.css';
 
 const EMPTY_CREATE_FORM = {
@@ -46,8 +52,10 @@ const UsersManagement = () => {
   const [createForm, setCreateForm] = useState(EMPTY_CREATE_FORM);
   const [showCreateForm, setShowCreateForm] = useState(false);
 
-  const isAdmin = isStaffAdminRole(user?.role);
+  const isAdmin = isAdminOrAbove(user?.role);
+  const superAdmin = isSuperAdmin(user?.role);
   const assignableRoles = rolesAssignableBy(user?.role);
+  const creatableRoles = rolesCreatableBy(user?.role);
 
   const loadUsers = useCallback(async () => {
     if (!user?.uid || !isAdmin) return;
@@ -279,11 +287,11 @@ const UsersManagement = () => {
               <label>
                 Role
                 <select
-                  value={assignableRoles.includes(createForm.role) ? createForm.role : 'tester'}
+                  value={creatableRoles.includes(createForm.role) ? createForm.role : 'tester'}
                   onChange={(e) => setCreateForm((prev) => ({ ...prev, role: e.target.value }))}
                   disabled={creating}
                 >
-                  {assignableRoles.map((role) => (
+                  {creatableRoles.map((role) => (
                     <option key={role} value={role}>
                       {role}
                     </option>
@@ -347,6 +355,7 @@ const UsersManagement = () => {
               const draft = editDrafts[item.id] || {};
               const isSelf = item.id === user.uid;
               const locked = !canModifyManagedUser(user?.role, item.role);
+              const profileLocked = locked || !superAdmin;
               const roleChoices = locked
                 ? [draft.role || item.role || 'tester']
                 : assignableRoles;
@@ -378,7 +387,7 @@ const UsersManagement = () => {
                         type="text"
                         value={draft.name || ''}
                         onChange={(e) => handleDraftChange(item.id, 'name', e.target.value)}
-                        disabled={locked || savingId === item.id}
+                        disabled={profileLocked || savingId === item.id}
                       />
                     </label>
                     <label>
@@ -387,7 +396,7 @@ const UsersManagement = () => {
                         type="email"
                         value={draft.email || ''}
                         onChange={(e) => handleDraftChange(item.id, 'email', e.target.value)}
-                        disabled={locked || savingId === item.id}
+                        disabled={profileLocked || savingId === item.id}
                       />
                     </label>
                     <label>

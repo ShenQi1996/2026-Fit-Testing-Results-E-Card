@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { getUserFitTests } from '../../services/firebaseDb';
-import { isStaffAdminRole } from '../../utils/roles';
+import { isAdminOrAbove } from '../../utils/roles';
 import './Sidebar.css';
 
 const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
   const { user } = useAuth();
-  const isAdmin = isStaffAdminRole(user?.role);
+  const isAdmin = isAdminOrAbove(user?.role);
   const [testCount, setTestCount] = useState(null);
 
   const loadTestCount = useCallback(async () => {

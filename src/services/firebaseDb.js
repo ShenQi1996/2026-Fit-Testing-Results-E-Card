@@ -38,8 +38,9 @@ import {
   USER_ROLES,
   USER_ROLE_SUPERADMIN,
   USER_ROLE_TESTER,
-  isStaffAdminRole,
-  isSuperAdminRole,
+  canModifyManagedUser,
+  isAdminOrAbove,
+  isSuperAdmin,
 } from '../utils/roles';
 
 const FIRESTORE_BATCH_LIMIT = 400;
@@ -245,7 +246,7 @@ const permissionError = (message) => {
 
 const assertAdmin = async (userId) => {
   const role = await getUserRole(userId);
-  if (!isStaffAdminRole(role)) {
+  if (!isAdminOrAbove(role)) {
     throw permissionError('Only admin users can manage users.');
   }
   return role;
@@ -253,7 +254,7 @@ const assertAdmin = async (userId) => {
 
 const assertSuperAdmin = async (userId) => {
   const role = await getUserRole(userId);
-  if (!isSuperAdminRole(role)) {
+  if (!isSuperAdmin(role)) {
     throw permissionError('Only a super admin can grant or change admin access.');
   }
   return role;
@@ -265,7 +266,7 @@ const assertCanAssignRole = async (actorUserId, actorRole, targetUserId, current
   if (!USER_ROLES.includes(next)) {
     throw new Error('Invalid role. Must be tester, admin, or superadmin.');
   }
-  if (actorUserId === targetUserId && isSuperAdminRole(actorRole) && next !== USER_ROLE_SUPERADMIN) {
+  if (actorUserId === targetUserId && isSuperAdmin(actorRole) && next !== USER_ROLE_SUPERADMIN) {
     throw permissionError('You cannot remove your own super admin role.');
   }
   if (current !== USER_ROLE_TESTER || next !== USER_ROLE_TESTER) {
@@ -423,7 +424,7 @@ export const purgeExpiredFitTests = async (userId) => {
   try {
     const role = await getUserRole(userId);
     const testsQuery =
-      isStaffAdminRole(role)
+      isAdminOrAbove(role)
         ? collection(db, FIT_TESTS_COLLECTION)
         : query(collection(db, FIT_TESTS_COLLECTION), where('userId', '==', userId));
 
@@ -703,7 +704,7 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     }
     
     const userRole = await getUserRole(userId);
-    if (!isStaffAdminRole(userRole)) {
+    if (!isAdminOrAbove(userRole)) {
       const error = new Error('Only admin users can edit test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -770,7 +771,7 @@ export const deleteFitTest = async (fitTestId, userId) => {
     }
     
     const userRole = await getUserRole(userId);
-    if (!isStaffAdminRole(userRole)) {
+    if (!isAdminOrAbove(userRole)) {
       const error = new Error('Only admin users can delete test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -901,7 +902,7 @@ export const getUserAccessProfile = async (userId) => {
  */
 export const getPendingUsers = async (adminUserId) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
 
     const pendingQuery = query(
       collection(db, USERS_COLLECTION),
@@ -911,7 +912,9 @@ export const getPendingUsers = async (adminUserId) => {
 
     const users = [];
     querySnapshot.forEach((docSnap) => {
-      users.push(serializeUserDoc(docSnap));
+      const pendingUser = serializeUserDoc(docSnap);
+      if (!canModifyManagedUser(actorRole, pendingUser.role)) return;
+      users.push(pendingUser);
     });
 
     users.sort((a, b) => {
@@ -982,6 +985,10 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
     const nextEmail = typeof updates.email === 'string' ? updates.email.trim() : current.email || '';
     const nextRole = updates.role || current.role || USER_ROLE_TESTER;
     const nextStatus = updates.status || current.status || USER_STATUS_APPROVED;
+    const profileChanged = nextName !== (current.name || '') || nextEmail !== (current.email || '');
+    if (profileChanged && !isSuperAdmin(actorRole)) {
+      throw permissionError('Only a super admin can edit name or email. Admins can update tester role and status.');
+    }
 
     await assertCanAssignRole(adminUserId, actorRole, targetUserId, current.role, nextRole);
     if (!USER_STATUSES.includes(nextStatus)) {
@@ -1070,6 +1077,9 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
     const email = (userData.email || '').trim();
     const name = (userData.name || '').trim();
     const role = userData.role || USER_ROLE_TESTER;
+    if (role === USER_ROLE_SUPERADMIN) {
+      throw permissionError('A super admin cannot be created from the client.');
+    }
     await assertCanAssignRole(adminUserId, actorRole, targetUserId, USER_ROLE_TESTER, role);
     const status = userData.status || USER_STATUS_APPROVED;
     const provider = userData.provider || 'password';
@@ -1143,6 +1153,9 @@ export const setUserRole = async (actorUserId, targetUserId, role) => {
     const userDocRef = doc(db, USERS_COLLECTION, targetUserId);
     const userDocSnap = await getDoc(userDocRef);
     const currentRole = userDocSnap.exists() ? userDocSnap.data()?.role : USER_ROLE_TESTER;
+    if (!userDocSnap.exists() && role === USER_ROLE_SUPERADMIN) {
+      throw permissionError('A super admin cannot be created from the client.');
+    }
     await assertCanAssignRole(actorUserId, actorRole, targetUserId, currentRole, role);
 
     if (userDocSnap.exists()) {

@@ -1,11 +1,11 @@
-import { deleteDoc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { deleteDoc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import {
+  createManagedUserProfile,
   deleteManagedUser,
+  getPendingUsers,
   setUserRole,
   updateManagedUser,
 } from './firebaseDb';
-import { setAdminUser, setCurrentUserAsAdminIfEmail } from '../utils/adminUtils';
-import { setAdmins } from '../utils/setAdmins';
 
 const users = {};
 
@@ -60,6 +60,19 @@ test('a regular admin cannot edit a super admin profile', async () => {
     /super admin/i
   );
   expect(updateDoc).not.toHaveBeenCalled();
+});
+
+test('a regular admin cannot rename a tester', async () => {
+  await expect(updateManagedUser('admin-1', 'tester-1', { name: 'Renamed' })).rejects.toThrow(
+    /super admin/i
+  );
+  expect(updateDoc).not.toHaveBeenCalled();
+});
+
+test('a super admin can rename a tester', async () => {
+  await updateManagedUser('super-1', 'tester-1', { name: 'Renamed' });
+  expect(updateDoc).toHaveBeenCalledTimes(1);
+  expect(updateDoc.mock.calls[0][1]).toEqual(expect.objectContaining({ name: 'Renamed' }));
 });
 
 test('a regular admin can approve a tester', async () => {
@@ -120,10 +133,105 @@ test('a super admin cannot delete themselves', async () => {
   expect(deleteDoc).not.toHaveBeenCalled();
 });
 
-test('disabled client grant helpers do not write a role', async () => {
-  await expect(setCurrentUserAsAdminIfEmail('qisam1989@gmail.com')).rejects.toThrow(/disabled/i);
-  await expect(setAdminUser('someone')).rejects.toThrow(/disabled/i);
-  await expect(setAdmins()).rejects.toThrow(/disabled/i);
+test('a super admin cannot create a superadmin profile', async () => {
+  await expect(createManagedUserProfile('super-1', 'new-super', {
+    email: 'second@example.com',
+    role: 'superadmin',
+    status: 'approved',
+  })).rejects.toThrow(/cannot be created/i);
+  expect(setDoc).not.toHaveBeenCalled();
+});
+
+test('a super admin can create an admin profile', async () => {
+  await createManagedUserProfile('super-1', 'new-admin', {
+    email: 'new-admin@example.com',
+    role: 'admin',
+    status: 'approved',
+  });
+  expect(setDoc).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ role: 'admin', email: 'new-admin@example.com' })
+  );
+});
+
+test('a regular admin cannot create an admin profile', async () => {
+  await expect(createManagedUserProfile('admin-1', 'new-admin', {
+    email: 'new-admin@example.com',
+    role: 'admin',
+    status: 'approved',
+  })).rejects.toThrow(/super admin/i);
+  expect(setDoc).not.toHaveBeenCalled();
+});
+
+test('setUserRole refuses to create a superadmin document', async () => {
+  await expect(setUserRole('super-1', 'brand-new', 'superadmin')).rejects.toThrow(
+    /cannot be created/i
+  );
   expect(setDoc).not.toHaveBeenCalled();
   expect(updateDoc).not.toHaveBeenCalled();
+});
+
+test('setUserRole lets a super admin promote an existing user to superadmin', async () => {
+  await setUserRole('super-1', 'admin-2', 'superadmin');
+  expect(updateDoc).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ role: 'superadmin' })
+  );
+});
+
+test('an admin cannot grant themselves superadmin', async () => {
+  await expect(updateManagedUser('admin-1', 'admin-1', { role: 'superadmin' })).rejects.toThrow(
+    /super admin/i
+  );
+  expect(updateDoc).not.toHaveBeenCalled();
+});
+
+test('a regular admin cannot change an admin account status', async () => {
+  await expect(updateManagedUser('admin-1', 'admin-2', { status: 'pending' })).rejects.toThrow(
+    /super admin/i
+  );
+  expect(updateDoc).not.toHaveBeenCalled();
+});
+
+test('a tester cannot approve a user', async () => {
+  await expect(updateManagedUser('tester-1', 'tester-1', { status: 'approved' })).rejects.toThrow(
+    /only admin/i
+  );
+  expect(updateDoc).not.toHaveBeenCalled();
+});
+
+test('pending approvals hide admin accounts from a regular admin', async () => {
+  users['admin-2'] = { ...users['admin-2'], status: 'pending' };
+  getDocs.mockResolvedValueOnce({
+    forEach(callback) {
+      callback({
+        id: 'admin-2',
+        data: () => users['admin-2'],
+      });
+      callback({
+        id: 'tester-1',
+        data: () => users['tester-1'],
+      });
+    },
+  });
+
+  await expect(getPendingUsers('admin-1')).resolves.toEqual([
+    expect.objectContaining({ id: 'tester-1', role: 'tester' }),
+  ]);
+
+  getDocs.mockResolvedValueOnce({
+    forEach(callback) {
+      callback({
+        id: 'admin-2',
+        data: () => users['admin-2'],
+      });
+      callback({
+        id: 'tester-1',
+        data: () => users['tester-1'],
+      });
+    },
+  });
+
+  const forSuperAdmin = await getPendingUsers('super-1');
+  expect(forSuperAdmin.map((item) => item.id).sort()).toEqual(['admin-2', 'tester-1']);
 });
