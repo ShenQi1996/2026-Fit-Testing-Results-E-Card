@@ -424,6 +424,7 @@ const getAuthErrorMessage = (errorCode) => {
   const errorMessages = {
     'auth/email-already-in-use': 'This email is already registered. Please use a different email or try logging in.',
     'auth/invalid-email': 'Please enter a valid email address.',
+    'auth/operation-not-allowed': 'Email/password accounts are not enabled. Please contact support.',
     'auth/weak-password': 'Password is too weak. Please use at least 6 characters.',
     'auth/user-disabled': 'This account has been disabled. Please contact support.',
     'auth/user-not-found': 'No account found with this email. Please sign up first.',

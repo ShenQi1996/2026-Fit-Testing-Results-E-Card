@@ -24,7 +24,8 @@ jobs:
       - run: |
           git rev-parse --short HEAD
           node -p "require('./package.json').version"
+          node -v
+          npm -v
       - run: npm run lint --if-present
       - run: npm run build
-      # Runs once tests are added. No test script yet, so this is a no-op.
-      - run: npm test --if-present
+      - run: npm test
