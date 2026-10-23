@@ -41,6 +41,8 @@ describe('user status access', () => {
       role: 'admin',
       status: 'pending',
       schools: [],
+      startDate: null,
+      endDate: null,
     });
 
     await expect(finalizeSignIn({
@@ -59,6 +61,8 @@ describe('user status access', () => {
       role: 'tester',
       status: 'pending',
       schools: [],
+      startDate: null,
+      endDate: null,
     });
 
     await expect(finalizeSignIn({

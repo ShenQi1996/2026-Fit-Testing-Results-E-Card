@@ -41,7 +41,7 @@ const EMPTY_SCHOOL_FORM = {
 
 const EditAccount = ({ onBack }) => {
   const { user, updateUser } = useAuth();
-  const staffAdmin = isAdminOrAbove(user?.role);
+  const staffAdmin = isAdminOrAbove(user);
   const superAdmin = isSuperAdmin(user?.role);
   const [formData, setFormData] = useState({
     name: '',

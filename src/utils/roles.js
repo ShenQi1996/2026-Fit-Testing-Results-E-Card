@@ -10,10 +10,84 @@ export const USER_ROLES = [
 
 export const isSuperAdmin = (role) => role === USER_ROLE_SUPERADMIN;
 
-/** Admin screens and admin checks. A super admin is included. */
-export const isAdminOrAbove = (role) => (
-  role === USER_ROLE_ADMIN || role === USER_ROLE_SUPERADMIN
+const parseAccessInstant = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    const date = value.toDate();
+    return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+/**
+ * Admin access window. A missing start or end leaves that side open.
+ * Super admins and non-admins are always open. A string role has no dates.
+ */
+export const isAccessWindowOpen = (user, now = new Date()) => {
+  if (!user || typeof user !== 'object') return true;
+  if (user.role === USER_ROLE_SUPERADMIN || user.role !== USER_ROLE_ADMIN) return true;
+  const start = parseAccessInstant(user.startDate);
+  const end = parseAccessInstant(user.endDate);
+  if (start && now < start) return false;
+  if (end && now > end) return false;
+  return true;
+};
+
+const roleOf = (userOrRole) => (
+  typeof userOrRole === 'string' ? userOrRole : userOrRole?.role
 );
+
+/**
+ * Admin screens and admin checks. A super admin is included.
+ * A role string is unchanged. A user object also has to be inside its window.
+ */
+export const isAdminOrAbove = (userOrRole, now = new Date()) => {
+  const role = roleOf(userOrRole);
+  if (role !== USER_ROLE_ADMIN && role !== USER_ROLE_SUPERADMIN) return false;
+  if (typeof userOrRole !== 'object' || userOrRole === null) return true;
+  return isAccessWindowOpen(userOrRole, now);
+};
+
+/** Calendar day from a timestamp, ISO string, or Date. Empty when missing. */
+export const accessDateInputValue = (value) => {
+  const date = parseAccessInstant(value);
+  if (!date) return '';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+};
+
+/** Local start or end of a YYYY-MM-DD day. Null when the day is not real. */
+export const accessBoundaryDate = (value, edge) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = edge === 'end'
+    ? new Date(year, month - 1, day, 23, 59, 59, 999)
+    : new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (
+    Number.isNaN(date.getTime())
+    || date.getFullYear() !== year
+    || date.getMonth() !== month - 1
+    || date.getDate() !== day
+  ) {
+    return null;
+  }
+  return date;
+};
+
+/** Empty when either side is blank or the end day is on or after the start day. */
+export const accessWindowOrderError = (startDate, endDate) => {
+  const start = String(startDate || '');
+  const end = String(endDate || '');
+  if (start && end && end < start) {
+    return 'Access end date cannot be before the start date.';
+  }
+  return '';
+};
 
 /**
  * Roles a manager may set on an existing user from the client.
