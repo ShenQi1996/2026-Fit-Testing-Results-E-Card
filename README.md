@@ -112,6 +112,8 @@ vercel.json                      # SPA rewrites to index.html
 
 Vercel build: `npm run build`, output `dist/`. See [`vercel.json`](./vercel.json) for SPA rewrites.
 
+The Firebase web config is read from `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, and `FIREBASE_APP_ID`. The build fails if any are missing. Names are listed in [`.env.example`](./.env.example). Production and staging use different Firebase projects — see [STAGING.md](./STAGING.md).
+
 Add the production hostname to Firebase **Authorized domains** before testing Google sign-in. Per-deployment `*.vercel.app` URLs are not authorized.
 
 ---
