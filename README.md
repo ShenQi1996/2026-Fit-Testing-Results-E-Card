@@ -34,43 +34,31 @@ This app documents a qualitative fit-test result. It does **not** establish medi
 
 ## Running locally
 
-**Prerequisites:** Node 24 is required.
+> **Warning:** Without `.env.local` the app defaults to production and works on live data, including real, permanent deletes.
 
-1. Use Node 24, check out `staging`, and install dependencies.
+1. Prerequisite: Node 24.
+2. `npm install`.
+3. Copy [`.env.example`](./.env.example) to `.env.local`. `.env.local` is gitignored.
+4. Make sure `.env.local` has the line `APP_ENV=staging` exactly (uppercase `APP_ENV`, lowercase `staging`, nothing after it) and fill in `FIREBASE_API_KEY` with the staging key.
+5. `npm start`. Do not run `npm start dev`. Webpack treats `dev` as an extra entry and fails. Open [http://localhost:3000](http://localhost:3000).
+6. Before doing anything else, confirm the **STAGING** banner appears at the top of the app.
 
-   ```bash
-   nvm install 24
-   nvm use 24
-   git checkout staging
-   npm install
-   ```
+Optional seed: set `GOOGLE_APPLICATION_CREDENTIALS` to the staging service account JSON (kept outside the repo), run `npm run seed:staging -- --dry-run` first, then `npm run seed:staging`. For the four test logins, set `SEED_PASSWORD` and add `--with-auth`. The script refuses to run against production.
 
-2. Copy [`.env.example`](./.env.example) to `.env.local` and fill in `FIREBASE_API_KEY` with the staging web app key (from the staging Firebase console or the Vercel staging env). `APP_ENV=staging` is already set in the example. `.env.local` is gitignored.
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/staging-service-account.json
+npm run seed:staging -- --dry-run
+npm run seed:staging
+```
 
-3. Run `npm start` for the dev server, or `npm run build` for a production-style bundle. Do not run `npm start dev`. Webpack treats `dev` as an extra entry and fails.
+```bash
+export SEED_PASSWORD='your-password'
+npm run seed:staging -- --with-auth
+```
 
-   `npm start` opens [http://localhost:3000](http://localhost:3000). Staff app: [http://localhost:3000/staff_login](http://localhost:3000/staff_login). `npm run build` writes `dist/`. `npm run build:dev` writes a development bundle and does not start a server.
+Until the super-admin roles PR is on staging, sign in as `test-person-02@example.com` (admin) for user management.
 
-4. In staging mode the **STAGING** banner shows, data goes to the `fit-test-result-e-card-staging` project, and email only sends to a single `@example.com` address.
-
-5. The build refuses to start in staging mode if any `FIREBASE_*` value is missing or matches production.
-
-6. Optional seed: set `GOOGLE_APPLICATION_CREDENTIALS` to the staging service account JSON (kept outside the repo), run `npm run seed:staging -- --dry-run` first, then `npm run seed:staging`. For the four test logins, set `SEED_PASSWORD` and add `--with-auth`. The script refuses to run against production.
-
-   ```bash
-   export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/staging-service-account.json
-   npm run seed:staging -- --dry-run
-   npm run seed:staging
-   ```
-
-   ```bash
-   export SEED_PASSWORD='your-password'
-   npm run seed:staging -- --with-auth
-   ```
-
-7. Until the super-admin roles PR is on staging, sign in as `test-person-02@example.com` (admin) for user management.
-
-8. `npm test` and `npm run lint`.
+`npm test` and `npm run lint`.
 
 Details are in [STAGING.md](./STAGING.md).
 
