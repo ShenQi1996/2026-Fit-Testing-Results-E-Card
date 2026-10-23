@@ -88,5 +88,13 @@ service cloud.firestore {
         isApproved() &&
         (isAdmin() || request.auth.uid == resource.data.userId);
     }
+
+    // One log per signed-in staff uid. Used to cap the two test accounts at 1 send / 24h.
+    match /emailSendLog/{userId} {
+      allow get: if isOwner(userId) && isApproved();
+      allow list: if false;
+      allow create, update: if isOwner(userId) && isApproved();
+      allow delete: if false;
+    }
   }
 }

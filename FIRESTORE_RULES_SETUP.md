@@ -21,6 +21,7 @@ Do not invent a shorter rule set. Older snippets in past docs omitted `fitTestVe
 | `fitTests` | Approved owner or admin | Approved owner or admin |
 | `fitTestLookups/{lookupKey}` | Public **get** of one doc if the key is known | Approved staff create/update; owner or admin delete |
 | `fitTestVerifications/{token}` | Public **get** of one doc if the token is known | Approved staff create/update; owner or admin delete |
+| `emailSendLog/{userId}` | Approved owner of that uid | Approved owner create/update; no delete or list |
 
 `list` is denied on the public collections so they cannot be dumped.
 
