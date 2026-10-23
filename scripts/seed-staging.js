@@ -413,26 +413,6 @@ const userDoc = (account) => {
 
 const profileDocs = () => ([
   {
-    path: `users/${TESTER_ID}/schoolProfiles/seed-school-01`,
-    data: {
-      schoolName: 'Example Training School',
-      isDefault: true,
-      orderIndex: 0,
-      createdAt: USER_ISO,
-      updatedAt: USER_ISO,
-    },
-  },
-  {
-    path: `users/${TESTER_ID}/schoolProfiles/seed-school-02`,
-    data: {
-      schoolName: 'Example Second School',
-      isDefault: false,
-      orderIndex: 1,
-      createdAt: USER_ISO,
-      updatedAt: USER_ISO,
-    },
-  },
-  {
     path: `users/${TESTER_ID}/solutionProfiles/seed-solution-01`,
     data: {
       solutionType: 'Bitrex',

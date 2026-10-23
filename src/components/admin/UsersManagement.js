@@ -11,7 +11,12 @@ import {
   updateUserApprovalStatus,
 } from '../../services/firebaseDb';
 import { createManagedAuthUser } from '../../services/firebaseAuth';
-import { SCHOOLS_OPTIONS } from '../../constants/fitTestOptions';
+import {
+  addMasterSchool,
+  listMasterSchools,
+  removeMasterSchool,
+  renameMasterSchool,
+} from '../../services/masterSchools';
 import {
   USER_ROLE_ADMIN,
   USER_ROLE_SUPERADMIN,
@@ -24,7 +29,7 @@ import {
   rolesAssignableBy,
   rolesCreatableBy,
 } from '../../utils/roles';
-import { filterUsersForActor, normalizeSchoolList, parseSchoolListInput } from '../../utils/schoolScope';
+import { filterUsersForActor, normalizeSchoolList } from '../../utils/schoolScope';
 import './UsersManagement.css';
 
 const EMPTY_CREATE_FORM = {
@@ -34,6 +39,21 @@ const EMPTY_CREATE_FORM = {
   role: 'tester',
   status: 'pending',
   school: '',
+  schools: [],
+};
+
+const readSelectedValues = (event) => {
+  const selected = event.target?.selectedOptions;
+  if (selected) {
+    return Array.from(selected).map((option) => option.value);
+  }
+  const value = event.target?.value;
+  return Array.isArray(value) ? value : [value].filter(Boolean);
+};
+
+const withAssignedNames = (masterNames, assignedNames) => {
+  const extras = normalizeSchoolList(assignedNames).filter((name) => !masterNames.includes(name));
+  return [...masterNames, ...extras];
 };
 
 const NO_SCHOOLS_CREATE_MESSAGE = 'You have no schools assigned, so you cannot add a tester. Ask a super admin to assign a school.';
@@ -135,6 +155,10 @@ const UsersManagement = () => {
   const [pendingError, setPendingError] = useState('');
   const [pendingSuccess, setPendingSuccess] = useState('');
   const [approvingId, setApprovingId] = useState(null);
+  const [masterSchools, setMasterSchools] = useState([]);
+  const [newSchoolName, setNewSchoolName] = useState('');
+  const [editingSchool, setEditingSchool] = useState(null);
+  const [schoolListError, setSchoolListError] = useState('');
 
   const isAdmin = isAdminOrAbove(user);
   const superAdmin = isSuperAdmin(user?.role);
@@ -162,7 +186,7 @@ const UsersManagement = () => {
           role: item.role || 'tester',
           status: item.status || 'pending',
           school: item.school || '',
-          schoolsText: Array.isArray(item.schools) ? item.schools.join(', ') : '',
+          schools: Array.isArray(item.schools) ? [...item.schools] : [],
           startDate: accessDateInputValue(item.startDate),
           endDate: accessDateInputValue(item.endDate),
         };
@@ -179,6 +203,24 @@ const UsersManagement = () => {
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  const refreshMasterSchools = useCallback(async () => {
+    if (!user?.uid || !superAdmin) {
+      setMasterSchools([]);
+      return;
+    }
+    try {
+      const names = await listMasterSchools();
+      setMasterSchools(names);
+      setSchoolListError('');
+    } catch (err) {
+      setSchoolListError(err.message || 'Failed to load schools.');
+    }
+  }, [user?.uid, superAdmin]);
+
+  useEffect(() => {
+    refreshMasterSchools();
+  }, [refreshMasterSchools]);
 
   const visibleUsers = useMemo(
     () => filterUsersForActor(user, users),
@@ -252,7 +294,7 @@ const UsersManagement = () => {
       };
       if (superAdmin && targetUserId !== user.uid) {
         if (tagRole === USER_ROLE_ADMIN || tagRole === USER_ROLE_SUPERADMIN) {
-          updates.schools = parseSchoolListInput(draft.schoolsText);
+          updates.schools = normalizeSchoolList(draft.schools);
         } else {
           updates.school = draft.school || '';
         }
@@ -276,7 +318,7 @@ const UsersManagement = () => {
           role: updated.role || 'tester',
           status: updated.status || 'pending',
           school: updated.school || '',
-          schoolsText: Array.isArray(updated.schools) ? updated.schools.join(', ') : '',
+          schools: Array.isArray(updated.schools) ? [...updated.schools] : [],
           startDate: accessDateInputValue(updated.startDate),
           endDate: accessDateInputValue(updated.endDate),
         },
@@ -357,6 +399,8 @@ const UsersManagement = () => {
     && creatingTester
     && actorSchools.length > 1
     && !actorSchools.includes(createForm.school);
+  const creatingAdmin = superAdmin && createRole === USER_ROLE_ADMIN;
+  const createAdminSchoolsMissing = creatingAdmin && normalizeSchoolList(createForm.schools).length === 0;
   const createBlocked = !superAdmin && creatingTester && actorSchools.length === 0;
 
   const handleCreate = async (event) => {
@@ -386,6 +430,13 @@ const UsersManagement = () => {
         status: createForm.status,
       };
       if (role === USER_ROLE_TESTER && school) payload.school = school;
+      if (role === USER_ROLE_ADMIN) {
+        const schools = normalizeSchoolList(createForm.schools);
+        if (!schools.length) {
+          throw new Error('Choose at least one school for this admin.');
+        }
+        payload.schools = schools;
+      }
       const created = await createManagedAuthUser(user.uid, payload);
       setUsers((prev) => [created, ...prev]);
       setEditDrafts((prev) => ({
@@ -396,7 +447,9 @@ const UsersManagement = () => {
           role: created.role || 'tester',
           status: created.status || 'pending',
           school: created.school || '',
-          schoolsText: Array.isArray(created.schools) ? created.schools.join(', ') : '',
+          schools: Array.isArray(created.schools) ? [...created.schools] : [],
+          startDate: accessDateInputValue(created.startDate),
+          endDate: accessDateInputValue(created.endDate),
         },
       }));
       setCreateForm(EMPTY_CREATE_FORM);
@@ -406,6 +459,50 @@ const UsersManagement = () => {
       setError(err.message || 'Failed to create user.');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleAddSchool = async () => {
+    if (!user?.uid) return;
+    setSchoolListError('');
+    const added = newSchoolName.trim();
+    try {
+      const names = await addMasterSchool(user.uid, added);
+      setMasterSchools(names);
+      setNewSchoolName('');
+      setSuccess(`Added school ${added}.`);
+    } catch (err) {
+      setSchoolListError(err.message || 'Failed to add school.');
+    }
+  };
+
+  const handleRenameSchool = async () => {
+    if (!user?.uid || !editingSchool) return;
+    setSchoolListError('');
+    try {
+      const names = await renameMasterSchool(user.uid, editingSchool.from, editingSchool.to);
+      setMasterSchools(names);
+      setEditingSchool(null);
+      setSuccess('School name updated. Existing user and fit-test records keep the old name.');
+    } catch (err) {
+      setSchoolListError(err.message || 'Failed to rename school.');
+    }
+  };
+
+  const handleRemoveSchool = async (name) => {
+    if (!user?.uid) return;
+    const confirmed = window.confirm(
+      `Remove ${name} from the school list?\n\nExisting user and fit-test records keep this name.`
+    );
+    if (!confirmed) return;
+    setSchoolListError('');
+    try {
+      const names = await removeMasterSchool(user.uid, name);
+      setMasterSchools(names);
+      if (editingSchool?.from === name) setEditingSchool(null);
+      setSuccess(`Removed ${name} from the school list. Existing records keep that name.`);
+    } catch (err) {
+      setSchoolListError(err.message || 'Failed to remove school.');
     }
   };
 
@@ -457,6 +554,54 @@ const UsersManagement = () => {
 
         {error && <div className="users-error">{error}</div>}
         {success && <div className="users-success">{success}</div>}
+
+        {superAdmin && (
+          <section className="users-schools-section" aria-label="Master schools">
+            <h3>Schools</h3>
+            <p className="users-hint">
+              Master list of school names. Renaming or removing a school does not change existing user or fit-test records.
+            </p>
+            {schoolListError && <div className="users-error">{schoolListError}</div>}
+            <ul>
+              {masterSchools.map((name) => (
+                <li key={name}>
+                  {editingSchool?.from === name ? (
+                    <>
+                      <input
+                        aria-label="Edit school name"
+                        value={editingSchool.to}
+                        onChange={(e) => setEditingSchool({ from: name, to: e.target.value })}
+                      />
+                      <button type="button" onClick={handleRenameSchool}>Save school</button>
+                    </>
+                  ) : (
+                    <>
+                      <span>{name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setEditingSchool({ from: name, to: name })}
+                      >
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => handleRemoveSchool(name)}>
+                        {`Remove ${name}`}
+                      </button>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <label>
+              New school name
+              <input
+                aria-label="New school name"
+                value={newSchoolName}
+                onChange={(e) => setNewSchoolName(e.target.value)}
+              />
+            </label>
+            <button type="button" onClick={handleAddSchool}>Add school</button>
+          </section>
+        )}
 
         {showCreateForm && (
           <form className="users-create-form" onSubmit={handleCreate}>
@@ -534,9 +679,9 @@ const UsersManagement = () => {
                     disabled={creating}
                   >
                     <option value="">Leave unset</option>
-                    {SCHOOLS_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
+                    {masterSchools.map((school) => (
+                      <option key={school} value={school}>
+                        {school}
                       </option>
                     ))}
                   </select>
@@ -569,6 +714,27 @@ const UsersManagement = () => {
                   </select>
                 </label>
               )}
+              {creatingAdmin && (
+                <label>
+                  Schools
+                  <select
+                    aria-label="Schools"
+                    multiple
+                    value={createForm.schools}
+                    onChange={(e) => setCreateForm((prev) => ({
+                      ...prev,
+                      schools: readSelectedValues(e),
+                    }))}
+                    disabled={creating}
+                  >
+                    {masterSchools.map((school) => (
+                      <option key={school} value={school}>
+                        {school}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
             {createBlocked && (
               <p className="users-error">{NO_SCHOOLS_CREATE_MESSAGE}</p>
@@ -576,7 +742,7 @@ const UsersManagement = () => {
             <button
               type="submit"
               className="users-primary-button"
-              disabled={creating || createBlocked || createSchoolMissing}
+              disabled={creating || createBlocked || createSchoolMissing || createAdminSchoolsMissing}
             >
               {creating ? 'Creating...' : 'Create User'}
             </button>
@@ -667,7 +833,14 @@ const UsersManagement = () => {
                   : assignableRoles.filter((role) => role !== USER_ROLE_SUPERADMIN);
               const schoolTagIsList = currentRole === 'admin' || roleIsSuperAdmin;
               const schoolTagLabel = schoolTagIsList ? 'Schools' : 'School';
-              const schoolTagValue = schoolTagIsList ? (draft.schoolsText || '') : (draft.school || '');
+              const assignedSchools = normalizeSchoolList(draft.schools);
+              const schoolTagValue = schoolTagIsList
+                ? assignedSchools.join(', ')
+                : (draft.school || '');
+              const schoolChoices = withAssignedNames(
+                masterSchools,
+                schoolTagIsList ? assignedSchools : [draft.school || ''],
+              );
               const canEditSchoolTags = superAdmin && !isSelf;
               return (
                 <article key={item.id} className="user-card">
@@ -745,17 +918,31 @@ const UsersManagement = () => {
                     <label>
                       {schoolTagLabel}
                       {canEditSchoolTags ? (
-                        <input
-                          type="text"
-                          aria-label={schoolTagLabel}
-                          value={schoolTagValue}
-                          onChange={(e) => handleDraftChange(
-                            item.id,
-                            schoolTagIsList ? 'schoolsText' : 'school',
-                            e.target.value,
-                          )}
-                          disabled={savingId === item.id}
-                        />
+                        schoolTagIsList ? (
+                          <select
+                            multiple
+                            aria-label="Schools"
+                            value={assignedSchools}
+                            onChange={(e) => handleDraftChange(item.id, 'schools', readSelectedValues(e))}
+                            disabled={savingId === item.id}
+                          >
+                            {schoolChoices.map((school) => (
+                              <option key={school} value={school}>{school}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <select
+                            aria-label="School"
+                            value={draft.school || ''}
+                            onChange={(e) => handleDraftChange(item.id, 'school', e.target.value)}
+                            disabled={savingId === item.id}
+                          >
+                            <option value="">Leave unset</option>
+                            {schoolChoices.map((school) => (
+                              <option key={school} value={school}>{school}</option>
+                            ))}
+                          </select>
+                        )
                       ) : (
                         <div className="user-school-readonly" aria-label={schoolTagLabel}>
                           {schoolTagValue.trim() || '—'}

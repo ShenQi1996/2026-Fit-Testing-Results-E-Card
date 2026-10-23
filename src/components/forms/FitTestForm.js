@@ -26,8 +26,9 @@ const FitTestForm = () => {
     setSolutionProfileAsDefault,
     isLoadingSolutionProfiles,
     schoolOptions,
-    selectedSchoolOption,
-    setSchoolProfileAsDefault,
+    schoolLocked,
+    schoolBlockedMessage,
+    schoolSubmitBlocked,
     isLoadingSchoolProfiles,
     hasStrokes,
     hasTesterStrokes,
@@ -35,9 +36,7 @@ const FitTestForm = () => {
     handleSolutionOptionChange,
     handleSchoolOptionChange,
     setSetSolutionProfileAsDefault,
-    setSetSchoolProfileAsDefault,
     isAddingNewSolutionProfile,
-    isAddingNewSchoolProfile,
     handleSubmit,
     handleSignatureStroke,
     handleSignatureClear,
@@ -68,11 +67,9 @@ const FitTestForm = () => {
       <RespiratoryProtectionProgramSection
         {...fieldProps}
         schoolOptions={schoolOptions}
-        selectedSchoolOption={selectedSchoolOption}
         onSchoolOptionChange={handleSchoolOptionChange}
-        setSchoolProfileAsDefault={setSchoolProfileAsDefault}
-        onSetSchoolProfileAsDefaultChange={setSetSchoolProfileAsDefault}
-        isAddingNewSchoolProfile={isAddingNewSchoolProfile}
+        schoolLocked={schoolLocked}
+        schoolBlockedMessage={schoolBlockedMessage}
         isLoadingSchoolProfiles={isLoadingSchoolProfiles}
       />
 
@@ -140,6 +137,7 @@ const FitTestForm = () => {
         <SubmitButton 
           isLoading={isLoading} 
           disabled={
+            schoolSubmitBlocked ||
             !formData.printedName?.trim() || 
             !hasStrokes || 
             !formData.studentClearanceConfirmed ||

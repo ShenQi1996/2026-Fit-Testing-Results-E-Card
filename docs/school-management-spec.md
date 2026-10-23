@@ -4,6 +4,11 @@ This is a spec only. It describes a later change. It does not change the app, th
 
 Grounding is the code on `staging` after the tester-school merge (`7b26154`). The only school name compiled into the app today is `Helene College of Nursing`, the single entry in `SCHOOLS_OPTIONS` in `src/constants/fitTestOptions.js`. Test locations such as Harlem and Brooklyn are `testLocation` values, not schools. Per-user saved form presets in `users/{uid}/schoolProfiles` (`schoolName`) are also not this list.
 
+Implementation of this spec is in progress on this branch. Two later decisions sit on top of the sections below:
+
+- Membership is checked with one `get` of `schoolDirectory/names` (`names` is a list of the `schools` document ids). The client updates that mirror in the same batch as each add, rename, or delete. `exists` on every name would exceed Firestore's 10-`get` limit, and scoped lists still chunk at 30.
+- The fit-test form and Edit Account no longer use `SCHOOLS_OPTIONS` or per-user `schoolProfiles`. A tester sees only their `school`. An admin sees their `schools` array. A super admin sees the master list. The only add/edit/remove controls are the Schools section on Manage Users. Edit Account links there. Existing `schoolProfiles` documents are not deleted or migrated.
+
 Sam's decisions, now part of this spec:
 
 1. Admins keep a `schools` array (several schools per admin). Testers keep a single `school` string. An admin cannot change their own `schools`. Only a super admin assigns them.
@@ -134,7 +139,7 @@ Decision 2 and decision 3 together:
 
 - Publishing `firestore.rules` or writing the production project.
 - School-scoping which fit tests a user can see. Membership checks on `schoolsList` writes are in section 7. List filters on `fitTests` are not.
-- The per-user `schoolProfiles` presets on Edit Account. Those remain saved form defaults, not the master list.
+- Deleting or migrating existing `users/{uid}/schoolProfiles` documents. The app stops reading and writing them. The rules for that subcollection stay so old documents are left in place.
 - `scripts/backfill-schools.js` and the staging notes in `STAGING.md`. That script only writes `Helene College of Nursing` onto testers. It is a separate tool.
 - Admin access start and end dates.
 - Changing test locations, booking links, or the super-admin role guards.
@@ -195,6 +200,6 @@ No test may call production Firebase.
 2. **Resolved.** Rules reject any school name that is not an id in the master `schools` collection, including a tester's `school` and every element of an admin's `schools`. The UI is not the only check.
 3. **Resolved.** Renaming or removing a school does not rewrite user documents or fit-test documents. They keep the old name. Reads of those documents stay allowed. An update that does not change `school` or `schools` stays allowed. An update that changes either field must use names that are still on the master list. Section 7 is that rule.
 4. On remove, the master-list document is deleted (section 7). Hiding it and keeping the document is not required, because decision 3 already keeps the old string on user and fit-test documents. No open choice unless Sam would rather hide the row than delete it.
-5. Is replacing `SCHOOLS_OPTIONS` on the fit-test form part of the same change? Testers currently need those options, which is why approved testers are included in the master-list read rule. Decision 2 means "Other / Add new school" cannot persist a name the super admin has not added. Saved `schoolProfiles` stay separate either way.
+5. **Resolved by the build.** The fit-test "School / client" dropdown follows the signed-in user: a tester is locked to their `school`, an admin chooses from their `schools` array (one name is pre-selected), and a super admin chooses from the master list. There is no free-text school field and no hardcoded `SCHOOLS_OPTIONS` on that form. `SCHOOLS_OPTIONS` remains only for the separate backfill script. Approved users can still read the master list. `schoolProfiles` are not the source.
 6. **Resolved.** Keep the existing 30-value chunking. Scoped visibility stays `role == tester` and `school in` the admin's `schools`. `listScopedTesters` still splits a longer array into chunks of 30.
 7. **Resolved.** A written school name must equal a master-list document id exactly, after trim. Comparison is the string Firestore stores, so `Helene College of Nursing` and any other spelling are different schools. Decision 2 is what rejects the typo.

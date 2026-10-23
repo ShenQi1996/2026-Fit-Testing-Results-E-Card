@@ -14,6 +14,7 @@ import { db } from '../config/firebase';
 
 const USERS_COLLECTION = 'users';
 export const SOLUTION_PROFILES_SUBCOLLECTION = 'solutionProfiles';
+// schoolProfiles stays in Firestore. The app no longer reads or writes it.
 export const SCHOOL_PROFILES_SUBCOLLECTION = 'schoolProfiles';
 
 const sortProfiles = (profiles) => {

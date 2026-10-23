@@ -25,7 +25,16 @@ let testEnv;
 const seed = async (writes) => {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
-    for (const [path, data] of writes) {
+    const defaults = [
+      ['schoolDirectory/names', { names: [HELENE, SECOND] }],
+      [`schools/${HELENE}`, { name: HELENE }],
+      [`schools/${SECOND}`, { name: SECOND }],
+    ];
+    const byPath = new Map();
+    for (const entry of [...defaults, ...writes]) {
+      byPath.set(entry[0], entry[1]);
+    }
+    for (const [path, data] of byPath) {
       await setDoc(doc(db, path), data);
     }
   });
@@ -719,5 +728,119 @@ test('a scoped admin must tag a new tester with one of their schools', async () 
     role: 'tester',
     status: 'pending',
     email: 'super-tester@example.com',
+  }));
+});
+
+test('only a super admin can write the master school list', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/admin-1', scopedAdmin()],
+    ['users/tester-1', testerAt(HELENE, { status: 'approved' })],
+    ['users/pending-1', { role: 'tester', status: 'pending', email: 'pending@example.com' }],
+  ]);
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const pendingDb = testEnv.authenticatedContext('pending-1').firestore();
+  const guestDb = testEnv.unauthenticatedContext().firestore();
+  const created = 'Created Training School';
+  const renamed = 'Renamed Training School';
+
+  await assertSucceeds(setDoc(doc(superDb, 'schools', created), { name: created }));
+  await assertSucceeds(setDoc(doc(superDb, 'schools', renamed), { name: renamed }));
+  await assertSucceeds(deleteDoc(doc(superDb, 'schools', created)));
+  await assertFails(setDoc(doc(superDb, 'schools', 'mismatch'), { name: 'other spelling' }));
+  await assertSucceeds(setDoc(doc(superDb, 'schoolDirectory', 'names'), { names: [HELENE, renamed] }));
+  await assertFails(deleteDoc(doc(superDb, 'schoolDirectory', 'names')));
+  await assertFails(setDoc(doc(superDb, 'schoolDirectory', 'other'), { names: [HELENE] }));
+
+  await assertSucceeds(getDoc(doc(adminDb, 'schools', HELENE)));
+  await assertSucceeds(getDoc(doc(testerDb, 'schools', HELENE)));
+  await assertFails(setDoc(doc(adminDb, 'schools', created), { name: created }));
+  await assertFails(updateDoc(doc(adminDb, 'schools', HELENE), { name: HELENE }));
+  await assertFails(deleteDoc(doc(adminDb, 'schools', HELENE)));
+  await assertFails(setDoc(doc(testerDb, 'schools', created), { name: created }));
+  await assertFails(deleteDoc(doc(testerDb, 'schools', SECOND)));
+  await assertFails(getDoc(doc(pendingDb, 'schools', HELENE)));
+  await assertFails(getDoc(doc(guestDb, 'schools', HELENE)));
+  await assertFails(setDoc(doc(guestDb, 'schools', created), { name: created }));
+});
+
+test('school tags must be current master-list names', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/admin-1', scopedAdmin([HELENE, SECOND])],
+    ['users/admin-one', scopedAdmin([HELENE], 'one@example.com')],
+    ['users/tester-1', testerAt(HELENE)],
+  ]);
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+
+  await assertFails(updateDoc(doc(superDb, 'users/tester-1'), { school: '' }));
+  await assertFails(updateDoc(doc(superDb, 'users/tester-1'), { school: 'Helene College of Nursin' }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/tester-1'), { school: SECOND }));
+  await assertFails(updateDoc(doc(superDb, 'users/admin-1'), { schools: [] }));
+  await assertFails(updateDoc(doc(superDb, 'users/admin-1'), { schools: [HELENE, 'Not A School'] }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/admin-1'), { schools: [HELENE] }));
+  await assertFails(setDoc(doc(superDb, 'users/super-1'), {
+    role: 'superadmin',
+    status: 'approved',
+    email: 'sam@example.com',
+    schools: [HELENE],
+  }));
+
+  await assertSucceeds(updateDoc(doc(adminDb, 'users/admin-1'), { name: 'Still Ada' }));
+  await assertFails(updateDoc(doc(adminDb, 'users/admin-1'), { schools: [SECOND] }));
+
+  await seed([
+    ['users/admin-1', scopedAdmin([HELENE, SECOND])],
+    ['users/admin-one', scopedAdmin([HELENE], 'one@example.com')],
+    ['schoolDirectory/names', { names: [HELENE] }],
+  ]);
+  const removedDb = testEnv.authenticatedContext('admin-1').firestore();
+  await assertFails(setDoc(doc(removedDb, 'users/tester-removed'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'removed@example.com',
+    school: SECOND,
+  }));
+  await assertSucceeds(setDoc(doc(testEnv.authenticatedContext('admin-one').firestore(), 'users/tester-kept'), {
+    role: 'tester',
+    status: 'pending',
+    email: 'kept@example.com',
+    school: HELENE,
+  }));
+});
+
+test('renamed or removed school names stay readable until the field changes', async () => {
+  const oldName = 'Old Training School';
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/tester-1', testerAt(oldName, { status: 'approved', name: 'Tess' })],
+    ['users/admin-1', scopedAdmin([oldName])],
+    ['fitTests/old-1', { userId: 'tester-1', schoolsList: oldName }],
+    ['schoolDirectory/names', { names: [HELENE] }],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertSucceeds(getDoc(doc(testerDb, 'users/tester-1')));
+  await assertSucceeds(getDoc(doc(adminDb, 'fitTests/old-1')));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/tester-1'), { name: 'Tess Updated' }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/old-1'), { result: 'Pass' }));
+  await assertFails(updateDoc(doc(superDb, 'users/tester-1'), { school: 'Another Missing School' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/old-1'), { schoolsList: 'Another Missing School' }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/new-1'), {
+    userId: 'tester-1',
+    schoolsList: HELENE,
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/new-2'), {
+    userId: 'tester-1',
+    schoolsList: 'Not On The List',
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/blank-1'), {
+    userId: 'tester-1',
+    schoolsList: '',
   }));
 });

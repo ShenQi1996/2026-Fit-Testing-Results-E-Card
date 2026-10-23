@@ -1,6 +1,6 @@
 import { getTodayDate } from '../utils/dateUtils';
 import { createVerificationToken } from '../utils/verificationToken';
-import { SCHOOLS_OPTIONS, TESTING_AGENT_OPTIONS } from './fitTestOptions';
+import { TESTING_AGENT_OPTIONS } from './fitTestOptions';
 
 export const INITIAL_FORM_DATA = {
   recipientEmail: '',
@@ -18,7 +18,7 @@ export const INITIAL_FORM_DATA = {
   fitTester: '',
   printedName: '',
   schoolsOnFile: true,
-  schoolsList: SCHOOLS_OPTIONS[0]?.value || '',
+  schoolsList: '',
   programAdministratorName: '',
   programAdministratorContact: '',
   facialHairInterfering: false,

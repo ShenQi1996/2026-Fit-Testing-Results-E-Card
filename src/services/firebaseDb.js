@@ -929,6 +929,7 @@ export const ensureUserProfile = async (userInfo) => {
 const emptyAccessProfile = () => ({
   role: 'tester',
   status: USER_STATUS_PENDING,
+  school: '',
   schools: [],
   startDate: null,
   endDate: null,
@@ -947,6 +948,7 @@ export const getUserAccessProfile = async (userId) => {
     return {
       role: data.role || 'tester',
       status: normalizeUserStatus(data.status),
+      school: typeof data.school === 'string' ? data.school : '',
       schools: normalizeSchoolList(data.schools),
       startDate: toIso(data.startDate),
       endDate: toIso(data.endDate),
@@ -1241,6 +1243,17 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
         }
         profile.school = school;
       }
+    }
+
+    if (role === USER_ROLE_ADMIN) {
+      const requestedSchools = normalizeSchoolList(userData.schools);
+      if (!isSuperAdmin(actorRole)) {
+        throw permissionError('Only a super admin can assign schools to an admin.');
+      }
+      if (requestedSchools.length === 0) {
+        throw new Error('Choose at least one school for this admin.');
+      }
+      profile.schools = requestedSchools;
     }
 
     if (status === USER_STATUS_APPROVED || status === USER_STATUS_REJECTED) {

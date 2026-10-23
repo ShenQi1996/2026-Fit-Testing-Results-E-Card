@@ -337,7 +337,7 @@ test('seeded fit tests use Example Training School, which this backfill will not
     .filter((entry) => entry.path.includes('/schoolProfiles/'))
     .map((entry) => entry.data.schoolName)
     .sort();
-  expect(profileSchools).toEqual(['Example Second School', 'Example Training School']);
+  expect(profileSchools).toEqual([]);
 });
 
 test('the report lists school values, planned updates, and skips, and dry run writes nothing', () => {
