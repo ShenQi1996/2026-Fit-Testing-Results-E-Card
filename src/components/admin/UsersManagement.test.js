@@ -923,3 +923,21 @@ test('the Admin role badge uses opaque colors with readable contrast', () => {
     .sort((left, right) => right - left);
   expect((lighter + 0.05) / (darker + 0.05)).toBeGreaterThanOrEqual(4.5);
 });
+
+test('narrow screens let a school row grow and keep the add input and button at 44px', () => {
+  const css = readFileSync(join(__dirname, 'UsersManagement.css'), 'utf8');
+  const narrow = css.match(/@media \(max-width: 768px\)\s*\{([\s\S]*?)\n\}/);
+  expect(narrow).not.toBeNull();
+  const row = narrow[1].match(/\.users-schools-section \.solution-profile-item\s*\{([^}]+)\}/);
+  expect(row).not.toBeNull();
+  expect(row[1]).toMatch(/(?<![\w-])height:\s*auto/);
+  expect(row[1]).toMatch(/min-height:\s*44px/);
+  expect(row[1]).not.toMatch(/(?<![\w-])height:\s*44px/);
+  expect(narrow[1]).not.toMatch(/\.users-search/);
+  expect(narrow[1]).not.toMatch(/\.solution-add-button/);
+
+  const fixed = [...css.matchAll(
+    /\.users-schools-section > \.users-search,\s*\.users-schools-section \.solution-add-button\s*\{([^}]+)\}/g,
+  )].find((match) => /height:\s*44px/.test(match[1]));
+  expect(fixed).toBeTruthy();
+});

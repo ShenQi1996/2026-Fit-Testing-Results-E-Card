@@ -264,6 +264,8 @@
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
+    height: auto;
+    min-height: 44px;
   }
 }
 
