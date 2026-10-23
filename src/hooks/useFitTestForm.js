@@ -406,11 +406,15 @@ export const useFitTestForm = () => {
         await sendFitTestCard(formDataWithSignature);
       } catch (emailError) {
         console.error('Error sending email:', emailError);
+        const stagingBlocked = typeof emailError?.message === 'string'
+          && emailError.message.startsWith('Staging does not email');
         setStatus({
           type: 'warning',
-          message: user?.uid
-            ? 'Record saved, but the e-card email failed. You can resend it from Results.'
-            : 'Failed to send e-card. Please try again later.',
+          message: stagingBlocked
+            ? emailError.message
+            : user?.uid
+              ? 'Record saved, but the e-card email failed. You can resend it from Results.'
+              : 'Failed to send e-card. Please try again later.',
         });
         setIsLoading(false);
         return;

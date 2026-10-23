@@ -387,6 +387,7 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
       throw new Error('Password must be at least 6 characters.');
     }
 
+    // Same firebaseConfig as the primary app: production fallback, or staging env when APP_ENV=staging.
     secondaryApp = initializeApp(firebaseConfig, `admin-create-${Date.now()}`);
     const secondaryAuth = getAuth(secondaryApp);
     const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);

@@ -4,4 +4,7 @@ dist/
 *.log
 .env
 .env.local
+# Firebase Admin keys for scripts/seed-staging.js. Never commit these.
+*serviceAccount*.json
+*-firebase-adminsdk-*.json
 
