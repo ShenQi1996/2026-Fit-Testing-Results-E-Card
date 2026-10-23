@@ -122,11 +122,14 @@ service cloud.firestore {
 
     match /users/{userId} {
       // Single-document reads are school-scoped for a plain admin.
-      // List stays open to any approved admin: a collection query cannot be
-      // proved against the actor's schools document. The users page filters.
+      // A scoped admin may list only testers whose school is one of theirs.
+      // Firestore `in` queries accept at most 30 values. A super admin is not filtered.
       allow get: if isOwner(userId) || isSuperAdmin()
         || (isScopedAdmin() && userInScope(resource.data));
-      allow list: if isAdmin();
+      allow list: if isSuperAdmin()
+        || (isScopedAdmin()
+            && resource.data.role == 'tester'
+            && resource.data.school in actorSchools());
       // No client create may set role to superadmin.
       // Owners may create only their own pending tester profile.
       // Admins may create a tester profile for someone else.

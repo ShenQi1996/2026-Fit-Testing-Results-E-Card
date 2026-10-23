@@ -10,8 +10,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 
 const RULES = fs.readFileSync('firestore.rules', 'utf8');
@@ -436,8 +438,7 @@ test('a scoped admin cannot read or update a tester from another school', async 
   ]);
   const db = testEnv.authenticatedContext('admin-1').firestore();
 
-  // Collection list is not school-scoped; the users page filters it.
-  await assertSucceeds(getDocs(collection(db, 'users')));
+  await assertFails(getDocs(collection(db, 'users')));
   await assertFails(getDoc(doc(db, 'users/tester-1')));
   await assertFails(updateDoc(doc(db, 'users/tester-1'), { status: 'approved' }));
   await assertFails(getDoc(doc(db, 'users/tester-blank')));
@@ -535,4 +536,32 @@ test('only a super admin can set or change school tags', async () => {
     email: 'third@example.com',
     schools: [HELENE],
   }));
+});
+
+test('scoped admin lists are limited to testers in their schools', async () => {
+  await seed([
+    ['users/admin-1', scopedAdmin([HELENE, SECOND])],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/tester-1', testerAt(HELENE)],
+    ['users/tester-2', testerAt(SECOND)],
+    ['users/tester-other', testerAt('C')],
+  ]);
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+  const adminUsers = collection(adminDb, 'users');
+
+  await assertFails(getDocs(adminUsers));
+  await assertFails(getDocs(query(adminUsers, where('school', '==', 'C'))));
+  await assertFails(getDocs(query(adminUsers, where('role', '==', 'superadmin'))));
+  await assertFails(getDocs(query(
+    adminUsers,
+    where('role', '==', 'tester'),
+    where('school', 'in', [HELENE, 'C']),
+  )));
+  await assertSucceeds(getDocs(query(
+    adminUsers,
+    where('role', '==', 'tester'),
+    where('school', 'in', [HELENE, SECOND]),
+  )));
+  await assertSucceeds(getDocs(collection(superDb, 'users')));
 });
