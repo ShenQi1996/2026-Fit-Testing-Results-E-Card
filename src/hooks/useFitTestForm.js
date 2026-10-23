@@ -3,6 +3,12 @@ import { useAuth } from '../context/AuthContext';
 import { calculateExpirationDate } from '../utils/dateUtils';
 import { validateFitTestForm } from '../utils/validators';
 import { sendFitTestCard } from '../services/emailService';
+import { getLastStaffSendAt, recordStaffSend } from '../services/emailSendLog';
+import {
+  evaluateStaffSendLimit,
+  formatStaffSendLimitMessage,
+  isRateLimitedSender,
+} from '../utils/emailSendLimit';
 import {
   saveFitTest,
   getUserSolutionProfiles,
@@ -292,6 +298,31 @@ export const useFitTestForm = () => {
     setStatus({ type: '', message: '' });
 
     try {
+      if (user?.uid && isRateLimitedSender(user.email)) {
+        let lastSentAt;
+        try {
+          lastSentAt = await getLastStaffSendAt(user.uid);
+        } catch (limitError) {
+          console.error('Error checking staff send limit:', limitError);
+          setStatus({
+            type: 'error',
+            message: 'We could not check this account\'s daily send limit. Please try again in a moment.',
+          });
+          return;
+        }
+        const decision = evaluateStaffSendLimit({
+          senderEmail: user.email,
+          lastSentAt,
+        });
+        if (!decision.allowed) {
+          setStatus({
+            type: 'error',
+            message: formatStaffSendLimitMessage(decision.retryAt),
+          });
+          return;
+        }
+      }
+
       let latestSolutionProfiles = solutionProfilesState.profiles;
       let latestSchoolProfiles = schoolProfilesState.profiles;
 
@@ -383,6 +414,14 @@ export const useFitTestForm = () => {
         });
         setIsLoading(false);
         return;
+      }
+
+      if (user?.uid && isRateLimitedSender(user.email)) {
+        try {
+          await recordStaffSend(user.uid, user.email);
+        } catch (logError) {
+          console.error('Error recording staff send limit:', logError);
+        }
       }
 
       setStatus({ type: 'success', message: 'Fit Testing Results E-card sent successfully!' });
