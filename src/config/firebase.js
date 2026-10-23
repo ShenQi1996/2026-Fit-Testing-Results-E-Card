@@ -1,28 +1,26 @@
-// Firebase Configuration
-// Replace these values with your Firebase project credentials
-// Get them from: https://console.firebase.google.com/
+/* global process */
+// Firebase web app. Production builds leave APP_ENV unset and keep the production project.
+// Staging builds (APP_ENV=staging) read FIREBASE_* inlined by webpack EnvironmentPlugin.
+// Each process.env.NAME access must be a direct member expression so EnvironmentPlugin
+// can replace it. firebaseAuth.js creates its secondary app from this same object.
 
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { resolveFirebaseConfig } from './readFirebaseConfig';
 
-// Your web app's Firebase configuration
-// TODO: Replace with your Firebase project config
-export const firebaseConfig = {
-  apiKey: "AIzaSyDb-yI2sKaNHNUWLVAL6begbfYajW0dXIQ",
-  authDomain: "fit-test-result-e-card-2026.firebaseapp.com",
-  projectId: "fit-test-result-e-card-2026",
-  storageBucket: "fit-test-result-e-card-2026.firebasestorage.app",
-  messagingSenderId: "150291492122",
-  appId: "1:150291492122:web:1d0c66527cba20ae5210a3"
-};
+export const firebaseConfig = resolveFirebaseConfig(process.env.APP_ENV, {
+  FIREBASE_API_KEY: process.env.FIREBASE_API_KEY,
+  FIREBASE_AUTH_DOMAIN: process.env.FIREBASE_AUTH_DOMAIN,
+  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+  FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET,
+  FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
+  FIREBASE_APP_ID: process.env.FIREBASE_APP_ID,
+});
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase services
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
 export default app;
-

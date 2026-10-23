@@ -12,6 +12,7 @@ import ResendCardPage from './components/lookup/ResendCardPage';
 import VerifyCardPage from './components/lookup/VerifyCardPage';
 import HomePage from './components/common/HomePage';
 import LoadingAnimation from './components/common/LoadingAnimation';
+import StagingBanner from './components/common/StagingBanner';
 import { purgeExpiredFitTests } from './services/firebaseDb';
 import { resolveAppRoute } from './utils/appRoute';
 import { isAdminOrAbove } from './utils/roles';
@@ -151,6 +152,7 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <StagingBanner />
         <AppContent />
       </AuthProvider>
     </ThemeProvider>
