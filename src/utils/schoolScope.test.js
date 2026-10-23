@@ -64,6 +64,13 @@ test('a scoped admin sees only users in their schools, and a super admin sees ev
   )).toEqual([]);
 });
 
+test('an admin outside the access window sees no one', () => {
+  expect(filterUsersForActor(
+    { uid: 'admin-helene', role: 'admin', schools: [HELENE], endDate: '2020-01-01T00:00:00.000Z' },
+    USERS,
+  )).toEqual([]);
+});
+
 test('a scoped admin still sees their own profile when it has no schools', () => {
   const users = [admin('admin-1', [])];
   expect(filterUsersForActor(

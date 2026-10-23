@@ -108,6 +108,32 @@ test('a regular admin can approve a tester', async () => {
   }));
 });
 
+test('a regular admin cannot write access dates, and a super admin can set and clear them', async () => {
+  await updateManagedUser('admin-1', 'tester-1', {
+    status: 'approved',
+    startDate: '2026-01-01',
+    endDate: '2026-02-01',
+  });
+  expect(updateDoc.mock.calls[0][1]).not.toHaveProperty('startDate');
+  expect(updateDoc.mock.calls[0][1]).not.toHaveProperty('endDate');
+
+  updateDoc.mockClear();
+  users['admin-2'] = {
+    ...users['admin-2'],
+    startDate: { toDate: () => new Date(2026, 5, 1, 0, 0, 0, 0) },
+  };
+  await updateManagedUser('super-1', 'admin-2', { startDate: '', endDate: '2026-12-31' });
+  expect(updateDoc.mock.calls[0][1].startDate).toEqual({ kind: 'deleteField' });
+  expect(updateDoc.mock.calls[0][1].endDate).toEqual(expect.objectContaining({ kind: 'timestamp' }));
+
+  updateDoc.mockClear();
+  await expect(updateManagedUser('super-1', 'admin-2', {
+    startDate: '2026-12-31',
+    endDate: '2026-01-01',
+  })).rejects.toThrow(/before the start date/i);
+  expect(updateDoc).not.toHaveBeenCalled();
+});
+
 test('a super admin can grant admin', async () => {
   await updateManagedUser('super-1', 'tester-1', { role: 'admin' });
   expect(updateDoc).toHaveBeenCalledTimes(1);

@@ -14,6 +14,7 @@ import {
   where,
   orderBy,
   Timestamp,
+  deleteField,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -36,8 +37,12 @@ import {
 } from '../utils/verificationToken';
 import {
   USER_ROLES,
+  USER_ROLE_ADMIN,
   USER_ROLE_SUPERADMIN,
   USER_ROLE_TESTER,
+  accessBoundaryDate,
+  accessDateInputValue,
+  accessWindowOrderError,
   canModifyManagedUser,
   isAdminOrAbove,
   isSuperAdmin,
@@ -252,7 +257,7 @@ export const normalizeUserStatus = (status) => (
 
 const assertAdmin = async (userId) => {
   const access = await getUserAccessProfile(userId);
-  if (access.status !== USER_STATUS_APPROVED || !isAdminOrAbove(access.role)) {
+  if (access.status !== USER_STATUS_APPROVED || !isAdminOrAbove(access)) {
     throw permissionError('Only admin users can manage users.');
   }
   return access.role;
@@ -334,6 +339,8 @@ const serializeUserDoc = (docSnap) => {
     approvedBy: data.approvedBy || null,
     school: typeof data.school === 'string' ? data.school : '',
     schools: normalizeSchoolList(data.schools),
+    startDate: toIso(data.startDate),
+    endDate: toIso(data.endDate),
   };
 };
 
@@ -466,9 +473,9 @@ export const purgeExpiredFitTests = async (userId) => {
   if (!userId) return 0;
 
   try {
-    const role = await getUserRole(userId);
+    const access = await getUserAccessProfile(userId);
     const testsQuery =
-      isAdminOrAbove(role)
+      isAdminOrAbove(access)
         ? collection(db, FIT_TESTS_COLLECTION)
         : query(collection(db, FIT_TESTS_COLLECTION), where('userId', '==', userId));
 
@@ -747,8 +754,8 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
       throw new Error('User ID is required to update fit test records.');
     }
     
-    const userRole = await getUserRole(userId);
-    if (!isAdminOrAbove(userRole)) {
+    const access = await getUserAccessProfile(userId);
+    if (!isAdminOrAbove(access)) {
       const error = new Error('Only admin users can edit test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -814,8 +821,8 @@ export const deleteFitTest = async (fitTestId, userId) => {
       throw new Error('User ID is required to delete fit test records.');
     }
     
-    const userRole = await getUserRole(userId);
-    if (!isAdminOrAbove(userRole)) {
+    const access = await getUserAccessProfile(userId);
+    if (!isAdminOrAbove(access)) {
       const error = new Error('Only admin users can delete test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -919,28 +926,34 @@ export const ensureUserProfile = async (userInfo) => {
  * @param {string} userId - User ID
  * @returns {Promise<{role: string, status: string}>}
  */
+const emptyAccessProfile = () => ({
+  role: 'tester',
+  status: USER_STATUS_PENDING,
+  schools: [],
+  startDate: null,
+  endDate: null,
+});
+
 export const getUserAccessProfile = async (userId) => {
   try {
-    if (!userId) {
-      return { role: 'tester', status: USER_STATUS_PENDING, schools: [] };
-    }
+    if (!userId) return emptyAccessProfile();
 
     const userDocRef = doc(db, USERS_COLLECTION, userId);
     const userDocSnap = await getDoc(userDocRef);
 
-    if (!userDocSnap.exists()) {
-      return { role: 'tester', status: USER_STATUS_PENDING, schools: [] };
-    }
+    if (!userDocSnap.exists()) return emptyAccessProfile();
 
     const data = userDocSnap.data() || {};
     return {
       role: data.role || 'tester',
       status: normalizeUserStatus(data.status),
       schools: normalizeSchoolList(data.schools),
+      startDate: toIso(data.startDate),
+      endDate: toIso(data.endDate),
     };
   } catch (error) {
     console.error('Error getting user access profile:', error);
-    return { role: 'tester', status: USER_STATUS_PENDING, schools: [] };
+    return emptyAccessProfile();
   }
 };
 
@@ -1092,6 +1105,32 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
         const sameSchools = nextSchools.length === currentSchools.length
           && nextSchools.every((school, index) => school === currentSchools[index]);
         if (!sameSchools) payload.schools = nextSchools;
+      }
+      if (nextRole === USER_ROLE_ADMIN) {
+        const currentStart = accessDateInputValue(current.startDate);
+        const currentEnd = accessDateInputValue(current.endDate);
+        const nextStart = updates.startDate !== undefined ? String(updates.startDate || '') : currentStart;
+        const nextEnd = updates.endDate !== undefined ? String(updates.endDate || '') : currentEnd;
+        const orderError = accessWindowOrderError(nextStart, nextEnd);
+        if (orderError) throw new Error(orderError);
+        if (updates.startDate !== undefined && nextStart !== currentStart) {
+          if (!nextStart) {
+            payload.startDate = deleteField();
+          } else {
+            const start = accessBoundaryDate(nextStart, 'start');
+            if (!start) throw new Error('Access start date is invalid.');
+            payload.startDate = Timestamp.fromDate(start);
+          }
+        }
+        if (updates.endDate !== undefined && nextEnd !== currentEnd) {
+          if (!nextEnd) {
+            payload.endDate = deleteField();
+          } else {
+            const end = accessBoundaryDate(nextEnd, 'end');
+            if (!end) throw new Error('Access end date is invalid.');
+            payload.endDate = Timestamp.fromDate(end);
+          }
+        }
       }
     }
 

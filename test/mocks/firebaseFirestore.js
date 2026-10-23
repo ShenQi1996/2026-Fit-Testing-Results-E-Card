@@ -11,7 +11,11 @@ exports.deleteDoc = jest.fn(async () => {});
 exports.query = jest.fn((...args) => ({ kind: 'query', args }));
 exports.where = jest.fn((field, op, value) => ({ kind: 'where', field, op, value }));
 exports.orderBy = jest.fn((field, direction) => ({ kind: 'orderBy', field, direction }));
-exports.Timestamp = { now: () => ({ toDate: () => new Date(0) }) };
+exports.Timestamp = {
+  now: () => ({ toDate: () => new Date(0) }),
+  fromDate: (date) => ({ toDate: () => date, kind: 'timestamp', date }),
+};
+exports.deleteField = () => ({ kind: 'deleteField' });
 exports.writeBatch = () => ({
   delete: noop,
   update: noop,

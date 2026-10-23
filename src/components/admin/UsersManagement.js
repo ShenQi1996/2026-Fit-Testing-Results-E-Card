@@ -12,7 +12,10 @@ import {
 } from '../../services/firebaseDb';
 import { createManagedAuthUser } from '../../services/firebaseAuth';
 import {
+  USER_ROLE_ADMIN,
   USER_ROLE_SUPERADMIN,
+  accessDateInputValue,
+  accessWindowOrderError,
   canModifyManagedUser,
   isAdminOrAbove,
   isSuperAdmin,
@@ -128,7 +131,7 @@ const UsersManagement = () => {
   const [pendingSuccess, setPendingSuccess] = useState('');
   const [approvingId, setApprovingId] = useState(null);
 
-  const isAdmin = isAdminOrAbove(user?.role);
+  const isAdmin = isAdminOrAbove(user);
   const superAdmin = isSuperAdmin(user?.role);
   const assignableRoles = rolesAssignableBy(user?.role);
   const creatableRoles = rolesCreatableBy(user?.role);
@@ -155,6 +158,8 @@ const UsersManagement = () => {
           status: item.status || 'pending',
           school: item.school || '',
           schoolsText: Array.isArray(item.schools) ? item.schools.join(', ') : '',
+          startDate: accessDateInputValue(item.startDate),
+          endDate: accessDateInputValue(item.endDate),
         };
       });
       setEditDrafts(drafts);
@@ -241,10 +246,19 @@ const UsersManagement = () => {
         status: draft.status,
       };
       if (superAdmin && targetUserId !== user.uid) {
-        if (tagRole === 'admin' || tagRole === USER_ROLE_SUPERADMIN) {
+        if (tagRole === USER_ROLE_ADMIN || tagRole === USER_ROLE_SUPERADMIN) {
           updates.schools = parseSchoolListInput(draft.schoolsText);
         } else {
           updates.school = draft.school || '';
+        }
+        if (tagRole === USER_ROLE_ADMIN) {
+          const orderError = accessWindowOrderError(draft.startDate, draft.endDate);
+          if (orderError) {
+            setError(orderError);
+            return;
+          }
+          updates.startDate = draft.startDate || '';
+          updates.endDate = draft.endDate || '';
         }
       }
       const updated = await updateManagedUser(user.uid, targetUserId, updates);
@@ -258,6 +272,8 @@ const UsersManagement = () => {
           status: updated.status || 'pending',
           school: updated.school || '',
           schoolsText: Array.isArray(updated.schools) ? updated.schools.join(', ') : '',
+          startDate: accessDateInputValue(updated.startDate),
+          endDate: accessDateInputValue(updated.endDate),
         },
       }));
       setSuccess(`Saved updates for ${updated.email || updated.name || 'user'}.`);
@@ -664,6 +680,30 @@ const UsersManagement = () => {
                         </div>
                       )}
                     </label>
+                    {superAdmin && !isSelf && currentRole === USER_ROLE_ADMIN && (
+                      <>
+                        <label>
+                          Access start
+                          <input
+                            type="date"
+                            aria-label="Access start"
+                            value={draft.startDate || ''}
+                            onChange={(e) => handleDraftChange(item.id, 'startDate', e.target.value)}
+                            disabled={savingId === item.id}
+                          />
+                        </label>
+                        <label>
+                          Access end
+                          <input
+                            type="date"
+                            aria-label="Access end"
+                            value={draft.endDate || ''}
+                            onChange={(e) => handleDraftChange(item.id, 'endDate', e.target.value)}
+                            disabled={savingId === item.id}
+                          />
+                        </label>
+                      </>
+                    )}
                   </div>
 
                   <div className="user-meta">

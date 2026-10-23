@@ -15,7 +15,7 @@ import LoadingAnimation from './components/common/LoadingAnimation';
 import StagingBanner from './components/common/StagingBanner';
 import { purgeExpiredFitTests } from './services/firebaseDb';
 import { resolveAppRoute } from './utils/appRoute';
-import { isAdminOrAbove } from './utils/roles';
+import { isAccessWindowOpen, isAdminOrAbove } from './utils/roles';
 import './styles/App.css';
 
 const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }) => (
@@ -33,13 +33,18 @@ const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }
       />
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>}
       <div className="main-content">
+        {user?.role === 'admin' && !isAccessWindowOpen(user) && (
+          <div className="container">
+            <p role="status">Your admin access has expired or has not started.</p>
+          </div>
+        )}
         {currentPage === 'editAccount' ? (
           <div className="container">
             <EditAccount onBack={() => onNavigate('form')} />
           </div>
         ) : currentPage === 'results' ? (
           <FitTestResults />
-        ) : currentPage === 'users' && isAdminOrAbove(user?.role) ? (
+        ) : currentPage === 'users' && isAdminOrAbove(user) ? (
           <div className="container">
             <UsersManagement />
           </div>
@@ -70,7 +75,7 @@ const AppContent = () => {
   }, [isAuthenticated, isPublicPage, setForceLight]);
 
   const handleNavigate = (page) => {
-    if (page === 'users' && !isAdminOrAbove(user?.role)) {
+    if (page === 'users' && !isAdminOrAbove(user)) {
       setCurrentPage('form');
       setSidebarOpen(false);
       return;
@@ -80,10 +85,10 @@ const AppContent = () => {
   };
 
   useEffect(() => {
-    if (currentPage === 'users' && !isAdminOrAbove(user?.role)) {
+    if (currentPage === 'users' && !isAdminOrAbove(user)) {
       setCurrentPage('form');
     }
-  }, [currentPage, user?.role]);
+  }, [currentPage, user]);
 
   useEffect(() => {
     if (!isAuthenticated || !user?.uid) return undefined;

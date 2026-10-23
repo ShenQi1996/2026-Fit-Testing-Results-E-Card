@@ -60,6 +60,8 @@ const toAppUser = (user, accessProfile) => ({
   role: accessProfile.role,
   status: accessProfile.status,
   schools: accessProfile.schools || [],
+  startDate: accessProfile.startDate || null,
+  endDate: accessProfile.endDate || null,
 });
 
 const signOutQuietly = async () => {
@@ -377,7 +379,7 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
   let secondaryApp = null;
   try {
     const adminAccess = await getUserAccessProfile(adminUserId);
-    if (adminAccess.status !== 'approved' || !isAdminOrAbove(adminAccess.role)) {
+    if (adminAccess.status !== 'approved' || !isAdminOrAbove(adminAccess)) {
       const error = new Error('Only admin users can create users.');
       error.code = 'PERMISSION_DENIED';
       throw error;

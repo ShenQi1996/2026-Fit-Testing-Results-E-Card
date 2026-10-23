@@ -9,6 +9,7 @@ import {
   updateUserApprovalStatus,
 } from '../../services/firebaseDb';
 import UsersManagement from './UsersManagement';
+import { accessDateInputValue } from '../../utils/roles';
 
 jest.mock('../../context/AuthContext', () => ({
   useAuth: jest.fn(),
@@ -398,4 +399,90 @@ test('approve and reject on the pending tab call updateUserApprovalStatus', asyn
   expect(superAdmin.root.findByProps({ className: 'users-success' }).children).toEqual([
     'User rejected successfully.',
   ]);
+});
+
+const accessDateInputs = (node) => node.findAll(
+  (child) => child.type === 'input'
+    && (child.props['aria-label'] === 'Access start' || child.props['aria-label'] === 'Access end'),
+);
+
+const superAdminUser = {
+  uid: 'super-1',
+  role: 'superadmin',
+  email: 'sam@example.com',
+};
+
+test('access date fields appear only when a super admin edits an admin', async () => {
+  const superRenderer = await renderPage(superAdminUser);
+  expect(accessDateInputs(cardFor(superRenderer, 'admin-2'))).toHaveLength(2);
+  expect(accessDateInputs(cardFor(superRenderer, 'admin-helene'))).toHaveLength(2);
+  expect(accessDateInputs(cardFor(superRenderer, 'tester-1'))).toHaveLength(0);
+  expect(accessDateInputs(cardFor(superRenderer, 'super-1'))).toHaveLength(0);
+
+  const adminRenderer = await renderPage(scopedAdmin);
+  expect(accessDateInputs(adminRenderer.root)).toHaveLength(0);
+});
+
+test('an access end date before the start date is rejected', async () => {
+  const renderer = await renderPage(superAdminUser);
+  const card = cardFor(renderer, 'admin-2');
+  const start = card.findByProps({ 'aria-label': 'Access start' });
+  const end = card.findByProps({ 'aria-label': 'Access end' });
+  await act(async () => {
+    start.props.onChange({ target: { value: '2026-10-10' } });
+    end.props.onChange({ target: { value: '2026-10-01' } });
+  });
+  const save = cardFor(renderer, 'admin-2').findAllByType('button')
+    .find((button) => button.children.includes('Save'));
+  await act(async () => {
+    save.props.onClick();
+  });
+
+  expect(renderer.root.findByProps({ className: 'users-error' }).children).toEqual([
+    'Access end date cannot be before the start date.',
+  ]);
+  expect(updateManagedUser).not.toHaveBeenCalled();
+});
+
+test('a super admin can clear an admin access window', async () => {
+  const admin = USERS.find((item) => item.id === 'admin-2');
+  const previous = { startDate: admin.startDate, endDate: admin.endDate };
+  admin.startDate = '2026-06-01T12:00:00.000Z';
+  admin.endDate = '2026-12-31T12:00:00.000Z';
+  updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
+    id,
+    role: 'admin',
+    ...draft,
+    startDate: null,
+    endDate: null,
+  }));
+  try {
+    const renderer = await renderPage(superAdminUser);
+    const card = cardFor(renderer, 'admin-2');
+    expect(card.findByProps({ 'aria-label': 'Access start' }).props.value)
+      .toBe(accessDateInputValue(admin.startDate));
+    expect(card.findByProps({ 'aria-label': 'Access end' }).props.value)
+      .toBe(accessDateInputValue(admin.endDate));
+    await act(async () => {
+      card.findByProps({ 'aria-label': 'Access start' }).props.onChange({ target: { value: '' } });
+      card.findByProps({ 'aria-label': 'Access end' }).props.onChange({ target: { value: '' } });
+    });
+    const save = cardFor(renderer, 'admin-2').findAllByType('button')
+      .find((button) => button.children.includes('Save'));
+    await act(async () => {
+      save.props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(updateManagedUser).toHaveBeenCalledWith(
+      'super-1',
+      'admin-2',
+      expect.objectContaining({ startDate: '', endDate: '' }),
+    );
+  } finally {
+    admin.startDate = previous.startDate;
+    admin.endDate = previous.endDate;
+  }
 });
