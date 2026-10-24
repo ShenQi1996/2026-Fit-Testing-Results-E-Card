@@ -63,6 +63,9 @@ test('account settings does not render pending approvals', async () => {
   const text = treeText(renderer);
 
   expect(text).toContain('Edit Account');
+  expect(text).toContain('Program administrator name');
+  expect(renderer.root.findByProps({ id: 'programAdministratorName' }).props.required).toBeUndefined();
+  expect(renderer.root.findByProps({ id: 'programAdministratorContact' }).props.required).toBeUndefined();
   expect(text).toContain('Update Account');
   expect(text).toContain('You have admin privileges');
   expect(text).not.toContain('Pending User Approvals');

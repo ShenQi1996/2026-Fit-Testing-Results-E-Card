@@ -280,10 +280,27 @@ service cloud.firestore {
         : true;
     }
 
+    // Optional strings. A missing key is fine. A non-string is not.
+    function programAdminShapeOk(data) {
+      return (!data.keys().hasAny(['programAdministratorName'])
+          || data.programAdministratorName is string)
+        && (!data.keys().hasAny(['programAdministratorContact'])
+          || data.programAdministratorContact is string);
+    }
+
     // Staff fields a scoped admin may touch. School tags are not in this list.
+    // Program administrator name and contact are optional profile fields.
     function scopedAdminFieldUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(['role', 'status', 'approvedBy', 'approvedAt', 'updatedAt']);
+        .hasOnly([
+          'role',
+          'status',
+          'approvedBy',
+          'approvedAt',
+          'updatedAt',
+          'programAdministratorName',
+          'programAdministratorContact'
+        ]);
     }
 
     match /users/{userId} {
@@ -305,6 +322,7 @@ service cloud.firestore {
       // Only a super admin may set startDate or endDate, and not on their own doc.
       allow create: if schoolTagsOkOnCreate(userId) &&
         accessDatesOkOnCreate(userId) &&
+        programAdminShapeOk(request.resource.data) &&
         request.resource.data.get('role', null) != 'superadmin'
         && (
           (isOwner(userId)
@@ -329,6 +347,7 @@ service cloud.firestore {
       // inside their list (role stays admin), plus approval bookkeeping.
       allow update: if schoolTagsOkOnUpdate(userId) &&
         accessDatesOkOnUpdate(userId) &&
+        programAdminShapeOk(request.resource.data) &&
         (request.resource.data.get('role', null) != 'superadmin'
           || request.resource.data.get('role', null) == resource.data.get('role', null))
         && (
@@ -374,11 +393,13 @@ service cloud.firestore {
       allow create: if isSuperAdmin()
         && request.resource.data.name is string
         && request.resource.data.name == schoolName
-        && request.resource.data.name.size() > 0;
+        && request.resource.data.name.size() > 0
+        && programAdminShapeOk(request.resource.data);
       allow update: if isSuperAdmin()
         && request.resource.data.name is string
         && request.resource.data.name == schoolName
-        && request.resource.data.name == resource.data.name;
+        && request.resource.data.name == resource.data.name
+        && programAdminShapeOk(request.resource.data);
       allow delete: if isSuperAdmin();
     }
 
@@ -386,7 +407,9 @@ service cloud.firestore {
       allow read: if isSignedIn() && isApproved();
       allow create, update: if isSuperAdmin()
         && docId == 'names'
-        && request.resource.data.names is list;
+        && request.resource.data.names is list
+        && (!request.resource.data.keys().hasAny(['programs'])
+          || request.resource.data.programs is list);
       allow delete: if false;
     }
 

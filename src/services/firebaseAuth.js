@@ -63,6 +63,8 @@ const toAppUser = (user, accessProfile) => ({
   schools: accessProfile.schools || [],
   startDate: accessProfile.startDate || null,
   endDate: accessProfile.endDate || null,
+  programAdministratorName: accessProfile.programAdministratorName || '',
+  programAdministratorContact: accessProfile.programAdministratorContact || '',
 });
 
 const signOutQuietly = async () => {
@@ -434,6 +436,12 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
     }
     if (Array.isArray(userData.schools) && userData.schools.length) {
       profileInput.schools = userData.schools;
+    }
+    if (typeof userData.programAdministratorName === 'string') {
+      profileInput.programAdministratorName = userData.programAdministratorName;
+    }
+    if (typeof userData.programAdministratorContact === 'string') {
+      profileInput.programAdministratorContact = userData.programAdministratorContact;
     }
     const profile = await createManagedUserProfile(adminUserId, createdUser.uid, profileInput);
 

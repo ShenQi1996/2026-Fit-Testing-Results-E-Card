@@ -13,7 +13,7 @@ import {
 import { createManagedAuthUser } from '../../services/firebaseAuth';
 import {
   addMasterSchool,
-  listMasterSchools,
+  listMasterSchoolRecords,
   removeMasterSchool,
   renameMasterSchool,
 } from '../../services/masterSchools';
@@ -41,13 +41,28 @@ jest.mock('../../services/firebaseAuth', () => ({
 
 jest.mock('../../services/masterSchools', () => ({
   listMasterSchools: jest.fn(() => Promise.resolve(['Helene College of Nursing'])),
+  listMasterSchoolRecords: jest.fn(() => Promise.resolve([{
+    name: 'Helene College of Nursing',
+    programAdministratorName: '',
+    programAdministratorContact: '',
+  }])),
   addMasterSchool: jest.fn(),
   renameMasterSchool: jest.fn(),
+  updateMasterSchoolProgram: jest.fn(),
   removeMasterSchool: jest.fn(),
 }));
 
 const HELENE = 'Helene College of Nursing';
 const SECOND = 'Example Second School';
+const recordsFor = (names) => names.map((name) => ({
+  name,
+  programAdministratorName: '',
+  programAdministratorContact: '',
+}));
+const EMPTY_PROGRAM = {
+  programAdministratorName: '',
+  programAdministratorContact: '',
+};
 
 const USERS = [
   {
@@ -700,7 +715,7 @@ test('the schools section is only shown to a super admin', async () => {
   await act(async () => {
     await Promise.resolve();
   });
-  expect(addMasterSchool).toHaveBeenCalledWith('super-1', 'North Campus');
+  expect(addMasterSchool).toHaveBeenCalledWith('super-1', 'North Campus', EMPTY_PROGRAM);
 
   await act(async () => {
     renderer.root.findByProps({ 'aria-label': 'Master schools' })
@@ -716,11 +731,11 @@ test('the schools section is only shown to a super admin', async () => {
   await act(async () => {
     renderer.root.findAllByType('button').find((button) => button.props['aria-label'] === 'Save school name').props.onClick();
   });
-  expect(renameMasterSchool).toHaveBeenCalledWith('super-1', HELENE, 'North Campus');
+  expect(renameMasterSchool).toHaveBeenCalledWith('super-1', HELENE, 'North Campus', EMPTY_PROGRAM);
 });
 
 test('a super admin card shows All and saves schools on another super admin', async () => {
-  listMasterSchools.mockResolvedValue([HELENE, SECOND]);
+  listMasterSchoolRecords.mockResolvedValue(recordsFor([HELENE, SECOND]));
   updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
     id,
     role: 'superadmin',
@@ -802,7 +817,7 @@ test('a super admin card shows All and saves schools on another super admin', as
 });
 
 test('a super admin checks schools when creating an admin', async () => {
-  listMasterSchools.mockResolvedValue([HELENE, SECOND]);
+  listMasterSchoolRecords.mockResolvedValue(recordsFor([HELENE, SECOND]));
   createManagedAuthUser.mockResolvedValue({
     id: 'new-admin',
     email: 'new-admin@example.com',
@@ -848,7 +863,7 @@ test('a super admin checks schools when creating an admin', async () => {
 });
 
 test('a super admin edits another admin with school checkboxes', async () => {
-  listMasterSchools.mockResolvedValue([HELENE]);
+  listMasterSchoolRecords.mockResolvedValue(recordsFor([HELENE]));
   updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
     id,
     role: 'admin',

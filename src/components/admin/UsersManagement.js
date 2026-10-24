@@ -13,9 +13,10 @@ import {
 import { createManagedAuthUser } from '../../services/firebaseAuth';
 import {
   addMasterSchool,
-  listMasterSchools,
+  listMasterSchoolRecords,
   removeMasterSchool,
   renameMasterSchool,
+  updateMasterSchoolProgram,
 } from '../../services/masterSchools';
 import {
   USER_ROLE_ADMIN,
@@ -31,6 +32,7 @@ import {
   rolesCreatableBy,
 } from '../../utils/roles';
 import { filterUsersForActor, normalizeSchoolList } from '../../utils/schoolScope';
+import { readProgramAdmin } from '../../utils/programAdmin';
 import './UsersManagement.css';
 
 const EMPTY_CREATE_FORM = {
@@ -41,6 +43,8 @@ const EMPTY_CREATE_FORM = {
   status: 'pending',
   school: '',
   schools: [],
+  programAdministratorName: '',
+  programAdministratorContact: '',
 };
 
 const toggleSchoolName = (selected, school, checked) => {
@@ -208,7 +212,10 @@ const UsersManagement = () => {
   const [pendingSuccess, setPendingSuccess] = useState('');
   const [approvingId, setApprovingId] = useState(null);
   const [masterSchools, setMasterSchools] = useState([]);
+  const [masterSchoolRecords, setMasterSchoolRecords] = useState([]);
   const [newSchoolName, setNewSchoolName] = useState('');
+  const [newProgramName, setNewProgramName] = useState('');
+  const [newProgramContact, setNewProgramContact] = useState('');
   const [editingSchool, setEditingSchool] = useState(null);
   const [schoolListError, setSchoolListError] = useState('');
   const [editFieldErrors, setEditFieldErrors] = useState({});
@@ -244,6 +251,7 @@ const UsersManagement = () => {
           schools: Array.isArray(item.schools) ? [...item.schools] : [],
           startDate: accessDateInputValue(item.startDate),
           endDate: accessDateInputValue(item.endDate),
+          ...readProgramAdmin(item),
         };
       });
       setEditDrafts(drafts);
@@ -265,8 +273,9 @@ const UsersManagement = () => {
       return;
     }
     try {
-      const names = await listMasterSchools();
-      setMasterSchools(names);
+      const records = await listMasterSchoolRecords();
+      setMasterSchoolRecords(records);
+      setMasterSchools(records.map((record) => record.name));
       setSchoolListError('');
     } catch (err) {
       setSchoolListError(err.message || 'Failed to load schools.');
@@ -402,6 +411,8 @@ const UsersManagement = () => {
           updates.endDate = draft.endDate || '';
         }
       }
+      updates.programAdministratorName = draft.programAdministratorName || '';
+      updates.programAdministratorContact = draft.programAdministratorContact || '';
       const updated = await updateManagedUser(user.uid, targetUserId, updates);
       setUsers((prev) => prev.map((item) => (item.id === targetUserId ? updated : item)));
       setEditDrafts((prev) => ({
@@ -415,6 +426,7 @@ const UsersManagement = () => {
           schools: Array.isArray(updated.schools) ? [...updated.schools] : [],
           startDate: accessDateInputValue(updated.startDate),
           endDate: accessDateInputValue(updated.endDate),
+          ...readProgramAdmin(updated),
         },
       }));
       setSuccess(`Saved updates for ${updated.email || updated.name || 'user'}.`);
@@ -548,6 +560,8 @@ const UsersManagement = () => {
       if (role === USER_ROLE_ADMIN) {
         payload.schools = normalizeSchoolList(createForm.schools);
       }
+      payload.programAdministratorName = createForm.programAdministratorName || '';
+      payload.programAdministratorContact = createForm.programAdministratorContact || '';
       const created = await createManagedAuthUser(user.uid, payload);
       setUsers((prev) => [created, ...prev]);
       setEditDrafts((prev) => ({
@@ -561,6 +575,7 @@ const UsersManagement = () => {
           schools: Array.isArray(created.schools) ? [...created.schools] : [],
           startDate: accessDateInputValue(created.startDate),
           endDate: accessDateInputValue(created.endDate),
+          ...readProgramAdmin(created),
         },
       }));
       setCreateForm(EMPTY_CREATE_FORM);
@@ -578,9 +593,14 @@ const UsersManagement = () => {
     setSchoolListError('');
     const added = newSchoolName.trim();
     try {
-      const names = await addMasterSchool(user.uid, added);
-      setMasterSchools(names);
+      await addMasterSchool(user.uid, added, {
+        programAdministratorName: newProgramName,
+        programAdministratorContact: newProgramContact,
+      });
       setNewSchoolName('');
+      setNewProgramName('');
+      setNewProgramContact('');
+      await refreshMasterSchools();
       setSuccess(`Added school ${added}.`);
     } catch (err) {
       setSchoolListError(err.message || 'Failed to add school.');
@@ -590,13 +610,25 @@ const UsersManagement = () => {
   const handleRenameSchool = async () => {
     if (!user?.uid || !editingSchool) return;
     setSchoolListError('');
+    const program = {
+      programAdministratorName: editingSchool.programAdministratorName || '',
+      programAdministratorContact: editingSchool.programAdministratorContact || '',
+    };
     try {
-      const names = await renameMasterSchool(user.uid, editingSchool.from, editingSchool.to);
-      setMasterSchools(names);
+      const nextName = (editingSchool.to || '').trim();
+      const renamed = nextName !== editingSchool.from;
+      if (renamed) {
+        await renameMasterSchool(user.uid, editingSchool.from, editingSchool.to, program);
+      } else {
+        await updateMasterSchoolProgram(user.uid, editingSchool.from, program);
+      }
       setEditingSchool(null);
-      setSuccess('School name updated. Existing user and fit-test records keep the old name.');
+      await refreshMasterSchools();
+      setSuccess(renamed
+        ? 'School name updated. Existing user and fit-test records keep the old name.'
+        : 'Saved the program administrator fields for this school.');
     } catch (err) {
-      setSchoolListError(err.message || 'Failed to rename school.');
+      setSchoolListError(err.message || 'Failed to update school.');
     }
   };
 
@@ -608,9 +640,9 @@ const UsersManagement = () => {
     if (!confirmed) return;
     setSchoolListError('');
     try {
-      const names = await removeMasterSchool(user.uid, name);
-      setMasterSchools(names);
+      await removeMasterSchool(user.uid, name);
       if (editingSchool?.from === name) setEditingSchool(null);
+      await refreshMasterSchools();
       setSuccess(`Removed ${name} from the school list. Existing records keep that name.`);
     } catch (err) {
       setSchoolListError(err.message || 'Failed to remove school.');
@@ -670,60 +702,111 @@ const UsersManagement = () => {
           <section className="form-section users-schools-section" aria-label="Master schools">
             <h3 className="section-title">Schools</h3>
             <p className="section-description">
-              Master list of school names. Renaming or removing a school does not change existing user or fit-test records.
+              Master list of school names. Program administrator name and contact are optional.
+              Sending an e-card copies them from the selected school. Renaming or removing a school does not change existing user or fit-test records.
             </p>
             {schoolListError && <div className="users-error">{schoolListError}</div>}
             <div className="solution-profile-list">
-              {masterSchools.map((name) => (
-                <div key={name} className="solution-profile-item">
-                  {editingSchool?.from === name ? (
-                    <input
-                      className="users-search"
-                      aria-label="Edit school name"
-                      value={editingSchool.to}
-                      onChange={(e) => setEditingSchool({ from: name, to: e.target.value })}
-                    />
-                  ) : (
-                    <div className="solution-profile-details">
-                      <strong>{name}</strong>
-                    </div>
-                  )}
-                  <div className="solution-profile-actions">
-                    {editingSchool?.from === name ? (
-                      <button type="button" aria-label="Save school name" onClick={handleRenameSchool}>
-                        Save
-                      </button>
+              {masterSchoolRecords.map((record) => {
+                const name = record.name;
+                const editing = editingSchool?.from === name;
+                return (
+                  <div
+                    key={name}
+                    className={`solution-profile-item${editing ? ' school-edit-open' : ''}`}
+                  >
+                    {editing ? (
+                      <div className="school-edit-fields">
+                        <input
+                          className="users-search"
+                          aria-label="Edit school name"
+                          value={editingSchool.to}
+                          onChange={(e) => setEditingSchool((prev) => ({ ...prev, to: e.target.value }))}
+                        />
+                        <input
+                          className="users-search"
+                          aria-label="Program administrator name"
+                          placeholder="Program administrator name (optional)"
+                          value={editingSchool.programAdministratorName || ''}
+                          onChange={(e) => setEditingSchool((prev) => ({
+                            ...prev,
+                            programAdministratorName: e.target.value,
+                          }))}
+                        />
+                        <input
+                          className="users-search"
+                          aria-label="Program administrator contact"
+                          placeholder="Program administrator contact (optional)"
+                          value={editingSchool.programAdministratorContact || ''}
+                          onChange={(e) => setEditingSchool((prev) => ({
+                            ...prev,
+                            programAdministratorContact: e.target.value,
+                          }))}
+                        />
+                      </div>
                     ) : (
-                      <>
-                        <button
-                          type="button"
-                          aria-label={`Edit ${name}`}
-                          title="Edit"
-                          onClick={() => setEditingSchool({ from: name, to: name })}
-                        >
-                          ✎
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Remove ${name}`}
-                          title="Remove"
-                          onClick={() => handleRemoveSchool(name)}
-                        >
-                          🗑️
-                        </button>
-                      </>
+                      <div className="solution-profile-details">
+                        <strong>{name}</strong>
+                      </div>
                     )}
+                    <div className="solution-profile-actions">
+                      {editing ? (
+                        <button type="button" aria-label="Save school name" onClick={handleRenameSchool}>
+                          Save
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            aria-label={`Edit ${name}`}
+                            title="Edit"
+                            onClick={() => setEditingSchool({
+                              from: name,
+                              to: name,
+                              programAdministratorName: record.programAdministratorName || '',
+                              programAdministratorContact: record.programAdministratorContact || '',
+                            })}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${name}`}
+                            title="Remove"
+                            onClick={() => handleRemoveSchool(name)}
+                          >
+                            🗑️
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-            <input
-              className="users-search"
-              aria-label="New school name"
-              placeholder="New school name"
-              value={newSchoolName}
-              onChange={(e) => setNewSchoolName(e.target.value)}
-            />
+            <div className="school-add-fields">
+              <input
+                className="users-search"
+                aria-label="New school name"
+                placeholder="New school name"
+                value={newSchoolName}
+                onChange={(e) => setNewSchoolName(e.target.value)}
+              />
+              <input
+                className="users-search"
+                aria-label="New program administrator name"
+                placeholder="Program administrator name (optional)"
+                value={newProgramName}
+                onChange={(e) => setNewProgramName(e.target.value)}
+              />
+              <input
+                className="users-search"
+                aria-label="New program administrator contact"
+                placeholder="Program administrator contact (optional)"
+                value={newProgramContact}
+                onChange={(e) => setNewProgramContact(e.target.value)}
+              />
+            </div>
             <button type="button" className="solution-add-button" onClick={handleAddSchool}>
               + Add School
             </button>
@@ -772,6 +855,34 @@ const UsersManagement = () => {
                   disabled={creating}
                 />
                 <FieldMessage message={createFieldErrors.name} />
+              </label>
+              <label>
+                Program administrator name
+                <input
+                  type="text"
+                  aria-label="Create program administrator name"
+                  placeholder="Optional"
+                  value={createForm.programAdministratorName}
+                  onChange={(e) => setCreateForm((prev) => ({
+                    ...prev,
+                    programAdministratorName: e.target.value,
+                  }))}
+                  disabled={creating}
+                />
+              </label>
+              <label>
+                Program administrator contact
+                <input
+                  type="text"
+                  aria-label="Create program administrator contact"
+                  placeholder="Optional"
+                  value={createForm.programAdministratorContact}
+                  onChange={(e) => setCreateForm((prev) => ({
+                    ...prev,
+                    programAdministratorContact: e.target.value,
+                  }))}
+                  disabled={creating}
+                />
               </label>
               <label>
                 Role
@@ -1020,6 +1131,28 @@ const UsersManagement = () => {
                         disabled={profileLocked || savingId === item.id}
                       />
                       <FieldMessage message={cardErrors.email} />
+                    </label>
+                    <label>
+                      Program administrator name
+                      <input
+                        type="text"
+                        aria-label="Program administrator name"
+                        placeholder="Optional"
+                        value={draft.programAdministratorName || ''}
+                        onChange={(e) => handleDraftChange(item.id, 'programAdministratorName', e.target.value)}
+                        disabled={locked || savingId === item.id}
+                      />
+                    </label>
+                    <label>
+                      Program administrator contact
+                      <input
+                        type="text"
+                        aria-label="Program administrator contact"
+                        placeholder="Optional"
+                        value={draft.programAdministratorContact || ''}
+                        onChange={(e) => handleDraftChange(item.id, 'programAdministratorContact', e.target.value)}
+                        disabled={locked || savingId === item.id}
+                      />
                     </label>
                     <label>
                       Role
