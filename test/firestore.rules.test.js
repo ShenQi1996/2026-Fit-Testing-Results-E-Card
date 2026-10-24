@@ -10,6 +10,7 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getCountFromServer,
   getDoc,
   getDocs,
   query,
@@ -899,4 +900,28 @@ test('renamed or removed school names stay readable until the field changes', as
     userId: 'tester-1',
     schoolsList: '',
   }));
+});
+
+test('fitTests count queries follow the same read rules as document reads', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin()],
+    ['fitTests/own-1', { userId: 'tester-1' }],
+    ['fitTests/other-1', { userId: 'admin-1' }],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+
+  await assertSucceeds(getCountFromServer(query(
+    collection(testerDb, 'fitTests'),
+    where('userId', '==', 'tester-1'),
+  )));
+  await assertFails(getCountFromServer(query(
+    collection(testerDb, 'fitTests'),
+    where('userId', '==', 'admin-1'),
+  )));
+  await assertSucceeds(getCountFromServer(query(
+    collection(adminDb, 'fitTests'),
+    where('userId', '==', 'tester-1'),
+  )));
 });

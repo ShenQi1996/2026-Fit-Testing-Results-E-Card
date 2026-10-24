@@ -1,23 +1,33 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { getUserFitTests } from '../../services/firebaseDb';
+import { countFitTestsForUser } from '../../services/firebaseDb';
+import { subscribeFitTestActivity } from '../../utils/fitTestActivity';
 import { isAdminOrAbove } from '../../utils/roles';
 import './Sidebar.css';
+
+export const SIDEBAR_COUNT_CACHE_MS = 30 * 1000;
 
 const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
   const { user } = useAuth();
   const isAdmin = isAdminOrAbove(user);
   const [testCount, setTestCount] = useState(null);
+  const countCache = useRef({ uid: '', at: 0 });
 
-  const loadTestCount = useCallback(async () => {
+  const loadTestCount = useCallback(async (force = false) => {
     if (!user?.uid) {
       setTestCount(null);
+      countCache.current = { uid: '', at: 0 };
       return;
     }
 
+    const cached = countCache.current.uid === user.uid
+      && Date.now() - countCache.current.at < SIDEBAR_COUNT_CACHE_MS;
+    if (!force && cached) return;
+
     try {
-      const tests = await getUserFitTests(user.uid);
-      setTestCount(Array.isArray(tests) ? tests.length : 0);
+      const count = await countFitTestsForUser(user.uid);
+      countCache.current = { uid: user.uid, at: Date.now() };
+      setTestCount(count);
     } catch (error) {
       console.error('Error loading test results count:', error);
       // Keep previous count if refresh fails.
@@ -25,8 +35,12 @@ const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
   }, [user?.uid]);
 
   useEffect(() => {
-    loadTestCount();
-  }, [loadTestCount, currentPage]);
+    loadTestCount(false);
+  }, [currentPage, loadTestCount]);
+
+  useEffect(() => subscribeFitTestActivity(() => {
+    loadTestCount(true);
+  }), [loadTestCount]);
 
   const testResultsLabel =
     testCount === null ? 'Test results' : `Test results (${testCount})`;

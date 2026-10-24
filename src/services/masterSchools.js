@@ -15,6 +15,24 @@ const SCHOOLS_COLLECTION = 'schools';
 const DIRECTORY_COLLECTION = 'schoolDirectory';
 const DIRECTORY_ID = 'names';
 
+let sessionRecords = null;
+
+const sortedRecords = (records) => [...records]
+  .filter((record) => typeof record?.name === 'string' && record.name.trim())
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+const namesOf = (records) => records.map((record) => record.name);
+
+const rememberRecords = (records) => {
+  sessionRecords = sortedRecords(records);
+  return [...sessionRecords];
+};
+
+/** Test helper. The app cache lives for the browser session. */
+export const clearMasterSchoolsCache = () => {
+  sessionRecords = null;
+};
+
 const permissionError = (message) => {
   const error = new Error(message);
   error.code = 'PERMISSION_DENIED';
@@ -41,25 +59,48 @@ export const cleanSchoolName = (name) => {
 
 const recordFromSnap = (docSnap) => ({
   name: docSnap.id,
-  ...readProgramAdmin(docSnap.data()),
+  ...readProgramAdmin(typeof docSnap.data === 'function' ? docSnap.data() : null),
 });
 
-const sortedRecords = (records) => [...records].sort((a, b) => a.name.localeCompare(b.name));
+const recordsFromDirectory = (data) => {
+  if (Array.isArray(data?.programs)) {
+    return data.programs.map((entry) => ({
+      name: typeof entry?.name === 'string' ? entry.name : '',
+      ...readProgramAdmin(entry),
+    }));
+  }
+  if (Array.isArray(data?.names)) {
+    return data.names.map((name) => ({
+      name,
+      ...readProgramAdmin(null),
+    }));
+  }
+  return null;
+};
 
-/** School name plus the optional program administrator fields stored on that school. */
+/**
+ * School name plus the optional program administrator fields.
+ * One directory document per session. The schools collection is read only
+ * when that document has neither programs nor names.
+ */
 export const listMasterSchoolRecords = async () => {
+  if (sessionRecords) return [...sessionRecords];
+
+  const directorySnap = await getDoc(doc(db, DIRECTORY_COLLECTION, DIRECTORY_ID));
+  const fromDirectory = directorySnap.exists()
+    ? recordsFromDirectory(directorySnap.data())
+    : null;
+  if (fromDirectory) return rememberRecords(fromDirectory);
+
   const snapshot = await getDocs(collection(db, SCHOOLS_COLLECTION));
   const records = [];
   snapshot.forEach((docSnap) => {
     records.push(recordFromSnap(docSnap));
   });
-  return sortedRecords(records);
+  return rememberRecords(records);
 };
 
-export const listMasterSchools = async () => {
-  const records = await listMasterSchoolRecords();
-  return records.map((record) => record.name);
-};
+export const listMasterSchools = async () => namesOf(await listMasterSchoolRecords());
 
 /** One school. A missing document still returns the name with blank program fields. */
 export const getMasterSchoolRecord = async (name) => {
@@ -75,7 +116,7 @@ export const getMasterSchoolRecord = async (name) => {
 const writeDirectory = (batch, records) => {
   const sorted = sortedRecords(records);
   batch.set(doc(db, DIRECTORY_COLLECTION, DIRECTORY_ID), {
-    names: sorted.map((record) => record.name),
+    names: namesOf(sorted),
     programs: sorted.map((record) => ({
       name: record.name,
       programAdministratorName: record.programAdministratorName || '',
@@ -85,8 +126,6 @@ const writeDirectory = (batch, records) => {
   });
 };
 
-const namesOf = (records) => sortedRecords(records).map((record) => record.name);
-
 export const addMasterSchool = async (userId, name, program) => {
   await assertSuperAdminWriter(userId);
   const schoolName = cleanSchoolName(name);
@@ -95,7 +134,7 @@ export const addMasterSchool = async (userId, name, program) => {
     throw new Error('That school is already on the list.');
   }
   const fields = readProgramAdmin(program);
-  const next = sortedRecords([...existing, { name: schoolName, ...fields }]);
+  const next = rememberRecords([...existing, { name: schoolName, ...fields }]);
   const batch = writeBatch(db);
   const now = Timestamp.now();
   batch.set(doc(db, SCHOOLS_COLLECTION, schoolName), {
@@ -123,7 +162,7 @@ export const renameMasterSchool = async (userId, currentName, nextName, program)
     throw new Error('That school is already on the list.');
   }
   const fields = program === undefined ? readProgramAdmin(current) : readProgramAdmin(program);
-  const next = sortedRecords(existing.map((record) => (
+  const next = rememberRecords(existing.map((record) => (
     record.name === from ? { name: to, ...fields } : record
   )));
   const batch = writeBatch(db);
@@ -148,9 +187,9 @@ export const updateMasterSchoolProgram = async (userId, name, program) => {
     throw new Error('That school is not on the list.');
   }
   const fields = readProgramAdmin(program);
-  const next = existing.map((record) => (
+  const next = rememberRecords(existing.map((record) => (
     record.name === schoolName ? { name: schoolName, ...fields } : record
-  ));
+  )));
   const batch = writeBatch(db);
   batch.update(doc(db, SCHOOLS_COLLECTION, schoolName), {
     ...fields,
@@ -168,7 +207,7 @@ export const removeMasterSchool = async (userId, name) => {
   if (!existing.some((record) => record.name === schoolName)) {
     throw new Error('That school is not on the list.');
   }
-  const next = existing.filter((record) => record.name !== schoolName);
+  const next = rememberRecords(existing.filter((record) => record.name !== schoolName));
   const batch = writeBatch(db);
   batch.delete(doc(db, SCHOOLS_COLLECTION, schoolName));
   writeDirectory(batch, next);

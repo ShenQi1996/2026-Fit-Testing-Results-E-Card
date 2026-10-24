@@ -11,6 +11,8 @@ exports.deleteDoc = jest.fn(async () => {});
 exports.query = jest.fn((...args) => ({ kind: 'query', args }));
 exports.where = jest.fn((field, op, value) => ({ kind: 'where', field, op, value }));
 exports.orderBy = jest.fn((field, direction) => ({ kind: 'orderBy', field, direction }));
+exports.limit = jest.fn((count) => ({ kind: 'limit', count }));
+exports.getCountFromServer = jest.fn(async () => ({ data: () => ({ count: 0 }) }));
 exports.Timestamp = {
   now: () => ({ toDate: () => new Date(0) }),
   fromDate: (date) => ({ toDate: () => date, kind: 'timestamp', date }),

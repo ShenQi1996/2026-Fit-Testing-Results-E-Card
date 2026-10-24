@@ -139,7 +139,7 @@ const FitTestResults = () => {
             <div className="results-header-copy">
               <h2 className="results-title">Fit Test Results</h2>
               <p className="results-retention-note">
-                Records are kept for 3 years from the test date, then removed automatically.
+                Records older than 3 years from the test date are hidden from this list.
               </p>
             </div>
             <div className="results-header-actions">

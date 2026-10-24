@@ -232,10 +232,11 @@ const UsersManagement = () => {
     setLoading(true);
     setError('');
     try {
-      const [allUsers, counts] = await Promise.all([
-        getAllUsers(user.uid),
-        getFitTestCountsByUser(user.uid),
-      ]);
+      const allUsers = await getAllUsers(user.uid);
+      const counts = await getFitTestCountsByUser(
+        user.uid,
+        allUsers.map((item) => item.id),
+      );
       setUsers(allUsers);
       setTestCounts(counts || {});
 
