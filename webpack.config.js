@@ -7,9 +7,6 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 const { assertStagingFirebaseEnv } = require('./src/config/stagingFirebaseGuard');
 
-const isProduction = process.env.NODE_ENV === 'production';
-const isDevelopment = process.env.NODE_ENV === 'development';
-
 const FIREBASE_ENV_KEYS = [
     'FIREBASE_API_KEY',
     'FIREBASE_AUTH_DOMAIN',
@@ -42,52 +39,63 @@ const loadEnvLocal = () => {
     });
 };
 
-loadEnvLocal();
+// webpack --mode does not set NODE_ENV before this file loads. The guard has
+// to read argv.mode when webpack calls the exported function.
+const webpackMode = (argv = {}) => (
+    argv.mode === 'development' || argv.mode === 'production' || argv.mode === 'none'
+        ? argv.mode
+        : 'production'
+);
 
-// Trim before EnvironmentPlugin inlines the values. A trailing newline must not
-// miss the staging check and fall back to the production project.
-if (process.env.APP_ENV !== undefined) {
-    process.env.APP_ENV = String(process.env.APP_ENV).trim();
-}
-FIREBASE_ENV_KEYS.forEach((key) => {
-    if (process.env[key] !== undefined) {
-        process.env[key] = String(process.env[key]).trim();
+const applyFirebaseEnv = (mode) => {
+    loadEnvLocal();
+
+    // Trim before EnvironmentPlugin inlines the values. A trailing newline must not
+    // miss the staging check and fall back to the production project.
+    if (process.env.APP_ENV !== undefined) {
+        process.env.APP_ENV = String(process.env.APP_ENV).trim();
     }
-});
+    FIREBASE_ENV_KEYS.forEach((key) => {
+        if (process.env[key] !== undefined) {
+            process.env[key] = String(process.env[key]).trim();
+        }
+    });
 
-// webpack serve / NODE_ENV=development talks to the staging project. Missing
-// staging keys fail the build. They must not silently select production.
-if (isDevelopment) {
-    const devAppEnv = String(process.env.APP_ENV || '').trim();
-    if (devAppEnv && devAppEnv !== 'staging') {
-        throw new Error(
-            `Development builds use the staging Firebase project fit-test-result-e-card-staging. `
-            + `APP_ENV is ${JSON.stringify(devAppEnv)}, not "staging". `
-            + 'Refusing to use the production Firebase project.'
+    const isDevelopment = mode === 'development';
+    // npm start and npm run build:dev pass --mode=development. Missing staging
+    // keys fail the build. They must not silently select production.
+    if (isDevelopment) {
+        const devAppEnv = String(process.env.APP_ENV || '').trim();
+        if (devAppEnv && devAppEnv !== 'staging') {
+            throw new Error(
+                `Development builds use the staging Firebase project fit-test-result-e-card-staging. `
+                + `APP_ENV is ${JSON.stringify(devAppEnv)}, not "staging". `
+                + 'Refusing to use the production Firebase project.'
+            );
+        }
+        process.env.APP_ENV = 'staging';
+    }
+
+    const appEnv = String(process.env.APP_ENV || '').trim();
+    if (!isDevelopment && appEnv && appEnv !== 'staging') {
+        console.warn(
+            `APP_ENV is ${JSON.stringify(appEnv)}, which is not exactly "staging". `
+            + 'This build uses the production Firebase config.'
         );
     }
-    process.env.APP_ENV = 'staging';
-}
 
-const appEnv = String(process.env.APP_ENV || '').trim();
-if (!isDevelopment && appEnv && appEnv !== 'staging') {
-    console.warn(
-        `APP_ENV is ${JSON.stringify(appEnv)}, which is not exactly "staging". `
-        + 'This build uses the production Firebase config.'
-    );
-}
-
-const firebaseEnv = {
-    FIREBASE_API_KEY: process.env.FIREBASE_API_KEY,
-    FIREBASE_AUTH_DOMAIN: process.env.FIREBASE_AUTH_DOMAIN,
-    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
-    FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET,
-    FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
-    FIREBASE_APP_ID: process.env.FIREBASE_APP_ID,
+    const firebaseEnv = {
+        FIREBASE_API_KEY: process.env.FIREBASE_API_KEY,
+        FIREBASE_AUTH_DOMAIN: process.env.FIREBASE_AUTH_DOMAIN,
+        FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+        FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET,
+        FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
+        FIREBASE_APP_ID: process.env.FIREBASE_APP_ID,
+    };
+    if (appEnv === 'staging' || isDevelopment) {
+        assertStagingFirebaseEnv(firebaseEnv);
+    }
 };
-if (appEnv === 'staging') {
-    assertStagingFirebaseEnv(firebaseEnv);
-}
 
 const environmentDefaults = { APP_ENV: '' };
 FIREBASE_ENV_KEYS.forEach((key) => {
@@ -96,7 +104,7 @@ FIREBASE_ENV_KEYS.forEach((key) => {
 
 const stylesHandler = MiniCssExtractPlugin.loader;
 
-const config = {
+const buildConfig = () => ({
     entry: './src/index.js',
     output: {
         path: path.resolve(__dirname, 'dist'),
@@ -154,13 +162,13 @@ const config = {
             },
         ],
     },
-};
+});
 
-module.exports = () => {
-    if (isProduction) {
-        config.mode = 'production';
-    } else {
-        config.mode = 'development';
-    }
-    return config;
+module.exports = (env, argv) => {
+    const mode = webpackMode(argv);
+    applyFirebaseEnv(mode);
+    return {
+        ...buildConfig(),
+        mode: mode === 'none' ? 'none' : mode,
+    };
 };

@@ -1,6 +1,7 @@
 /* global process */
-// Firebase web app. Production builds leave APP_ENV unset and keep the production project.
-// Development builds and APP_ENV=staging read FIREBASE_* inlined by webpack EnvironmentPlugin.
+// Firebase web app. Production builds (`webpack --mode=production`, APP_ENV unset)
+// keep the production project. `--mode=development` and APP_ENV=staging read
+// FIREBASE_* inlined by webpack EnvironmentPlugin.
 // A development build with missing staging keys fails instead of using production.
 // Each process.env.NAME access must be a direct member expression so EnvironmentPlugin
 // can replace it. firebaseAuth.js creates its secondary app from this same object.

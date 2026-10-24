@@ -2,7 +2,7 @@
 
 `main` is production. `staging` is the long-lived branch Sam QAs before a release. This pull request targets `staging`. It does not merge anything into `main`.
 
-Production Vercel does not set `APP_ENV` or any `FIREBASE_*` variable. Those production builds keep the Firebase web config already compiled for `fit-test-result-e-card-2026`. A development build (`npm start`) defaults to `APP_ENV=staging` and must supply every `FIREBASE_*` value. It fails if one is missing instead of using production. It also fails when any trimmed `FIREBASE_*` value contains `fit-test-result-e-card-2026` in any case, or when the API key, app id, or messaging sender id matches production. On a production build, any other `APP_ENV`, including `Staging`, keeps the production Firebase config and prints a build warning. A development build rejects that value.
+Production Vercel does not set `APP_ENV` or any `FIREBASE_*` variable. Those production builds keep the Firebase web config already compiled for `fit-test-result-e-card-2026`. `npm start` and `npm run build:dev` pass webpack `--mode=development`. That mode defaults to `APP_ENV=staging` and must supply every `FIREBASE_*` value. webpack does not set `NODE_ENV` before loading the config, so the guard reads `--mode`. It fails if a value is missing instead of using production. It also fails when any trimmed `FIREBASE_*` value contains `fit-test-result-e-card-2026` in any case, or when the API key, app id, or messaging sender id matches production. On a production build (`--mode=production`), any other `APP_ENV`, including `Staging`, keeps the production Firebase config and prints a build warning. `--mode=development` rejects that value.
 
 ## Flow
 

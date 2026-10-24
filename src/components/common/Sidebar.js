@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { countFitTestsForUser } from '../../services/firebaseDb';
+import { subscribeFitTestActivity } from '../../utils/fitTestActivity';
 import { isAdminOrAbove } from '../../utils/roles';
 import './Sidebar.css';
 
@@ -26,7 +27,11 @@ const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
 
   useEffect(() => {
     loadTestCount();
-  }, [loadTestCount]);
+  }, [currentPage, loadTestCount]);
+
+  useEffect(() => subscribeFitTestActivity(() => {
+    loadTestCount();
+  }), [loadTestCount]);
 
   const testResultsLabel =
     testCount === null ? 'Test results' : `Test results (${testCount})`;

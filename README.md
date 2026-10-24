@@ -34,12 +34,12 @@ This app documents a qualitative fit-test result. It does **not** establish medi
 
 ## Running locally
 
-> **Warning:** `npm start` refuses to boot without staging Firebase keys. It does not fall back to production. A production build (`npm run build`) with `APP_ENV` unset still uses live data.
+> **Warning:** `npm start` (`webpack serve --mode=development`) refuses to boot without staging Firebase keys. It does not fall back to production. A production build (`npm run build`, `--mode=production`) with `APP_ENV` unset still uses live data.
 
 1. Prerequisite: Node 24.
 2. `npm install`.
 3. Copy [`.env.example`](./.env.example) to `.env.local`. `.env.local` is gitignored.
-4. Fill in `FIREBASE_API_KEY` with the staging key. `APP_ENV=staging` is already set in the example. The dev server sets it to `staging` when it is missing.
+4. Fill in `FIREBASE_API_KEY` with the staging key. `APP_ENV=staging` is already set in the example. `--mode=development` sets it to `staging` when it is missing.
 5. `npm start`. Do not run `npm start dev`. Webpack treats `dev` as an extra entry and fails. Open [http://localhost:3000](http://localhost:3000). If a staging key is missing, webpack exits and names the missing variable.
 6. Before doing anything else, confirm the **STAGING** banner appears at the top of the app.
 
@@ -68,7 +68,7 @@ Details are in [STAGING.md](./STAGING.md).
 
 Production Vercel sets no `APP_ENV` or `FIREBASE_*` variables. The staging web API key is stored only in Vercel and is not in git. Those production builds keep the Firebase web config already compiled for `fit-test-result-e-card-2026`. `main` is production. `staging` is the long-lived branch Sam QAs before a release. The production release is Sam merging `staging` into `main`. After that merge, production still has none of these environment variables, so it keeps today's Firebase project.
 
-A development build fails if any `FIREBASE_*` value is missing or matches production. A production build with `APP_ENV=staging` does the same. Any other `APP_ENV` value on a production build (for example `Staging`) prints a warning and keeps the production config. A development build rejects that value instead of using production.
+`npm start` and `npm run build:dev` fail if any `FIREBASE_*` value is missing or matches production. webpack does not set `NODE_ENV` before it loads `webpack.config.js`, so that guard uses `--mode=development`. A production build with `APP_ENV=staging` does the same key check. Any other `APP_ENV` value on a production build (for example `Staging`) prints a warning and keeps the production config. `--mode=development` rejects that value instead of using production.
 
 Production EmailJS sending is unchanged. The production service id, template id, and public key stay compiled in the app, and sending when `APP_ENV` is unset is the same as today.
 

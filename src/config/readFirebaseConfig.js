@@ -1,9 +1,10 @@
 // Resolves the Firebase web config for a webpack build.
-// Production builds (NODE_ENV=production, APP_ENV unset) keep the baked-in
-// production project. That is how production Vercel builds.
-// APP_ENV=staging, and every NODE_ENV=development build, must supply every
-// FIREBASE_* value and must not target production. A dev build never falls
-// back to the production project.
+// Production builds (`webpack --mode=production`, APP_ENV unset) keep the
+// baked-in production project. That is how production Vercel builds.
+// webpack does not set NODE_ENV before loading webpack.config.js, so the
+// dev-server guard reads argv.mode. The bundle still receives NODE_ENV from
+// that mode. APP_ENV=staging, and mode development, must supply every
+// FIREBASE_* value and must not target production.
 
 import { PROD_FIREBASE_CONFIG } from './prodFirebaseConfig';
 import { FIREBASE_ENV_KEYS, assertStagingFirebaseEnv } from './stagingFirebaseGuard';

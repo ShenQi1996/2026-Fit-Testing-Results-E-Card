@@ -126,13 +126,17 @@ export const getFitTestRetentionDate = (record) => {
  * @param {Date} [now]
  * @returns {boolean}
  */
+/** Start of the local day `FIT_TEST_RETENTION_YEARS` before `now`. */
+export const getFitTestRetentionCutoff = (now = new Date()) => {
+  const cutoff = startOfLocalDay(now);
+  cutoff.setFullYear(cutoff.getFullYear() - FIT_TEST_RETENTION_YEARS);
+  return cutoff;
+};
+
 export const isFitTestPastRetention = (record, now = new Date()) => {
   const recordDate = getFitTestRetentionDate(record);
   if (!recordDate) return false;
-
-  const cutoff = startOfLocalDay(now);
-  cutoff.setFullYear(cutoff.getFullYear() - FIT_TEST_RETENTION_YEARS);
-  return recordDate < cutoff;
+  return recordDate < getFitTestRetentionCutoff(now);
 };
 
 /**

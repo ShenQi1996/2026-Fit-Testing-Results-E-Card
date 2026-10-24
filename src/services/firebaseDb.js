@@ -14,7 +14,6 @@ import {
   where,
   orderBy,
   limit,
-  getCountFromServer,
   Timestamp,
   deleteField,
   writeBatch,
@@ -22,11 +21,13 @@ import {
 import { db } from '../config/firebase';
 import {
   calculateExpirationDate,
-  FIT_TEST_RETENTION_YEARS,
+  getFitTestRetentionCutoff,
+  getFitTestRetentionDate,
   isExpirationDatePast,
   isFitTestPastRetention,
   parseDateString,
 } from '../utils/dateUtils';
+import { notifyFitTestActivity } from '../utils/fitTestActivity';
 import {
   buildLookupKey,
   normalizeClientName,
@@ -328,22 +329,70 @@ export const saveFitTest = async (userId, fitTestData) => {
       ...fitTestData,
       verificationToken,
     };
+    const createdAt = Timestamp.now();
+    const retentionDate = retentionDateValue({ ...recordToSave, createdAt });
     const docRef = await addDoc(collection(db, FIT_TESTS_COLLECTION), {
       userId,
       ...recordToSave,
       lookupKey: lookupKey || null,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      createdAt,
+      updatedAt: createdAt,
+      ...(retentionDate ? { retentionDate } : {}),
     });
     if (lookupKey) {
       await upsertFitTestLookup(lookupKey, recordToSave, docRef.id, userId);
     }
     await upsertFitTestVerification(verificationToken, recordToSave, docRef.id, userId);
+    notifyFitTestActivity();
     return docRef.id;
   } catch (error) {
     console.error('Error saving fit test:', error);
     throw new Error('Failed to save fit test record. Please try again.');
   }
+};
+
+/** Timestamp for the same day isFitTestPastRetention uses. Null when undated. */
+const retentionDateValue = (record) => {
+  const date = getFitTestRetentionDate(record);
+  return date ? Timestamp.fromDate(date) : null;
+};
+
+const isIndexError = (error) => (
+  error?.code === 'failed-precondition'
+  || error?.message?.toLowerCase().includes('index')
+  || error?.message?.toLowerCase().includes('query requires an index')
+);
+
+const fitTestQuery = (...constraints) => query(collection(db, FIT_TESTS_COLLECTION), ...constraints);
+
+const readFitTestQuery = async (constraints) => {
+  const snapshot = await getDocs(fitTestQuery(...constraints));
+  return snapshot.docs;
+};
+
+/** A missing composite index should not block the unordered fallback. */
+const readFitTestQueryOrEmpty = async (constraints) => {
+  try {
+    return await readFitTestQuery(constraints);
+  } catch (error) {
+    if (!isIndexError(error)) throw error;
+    console.error('Fit test purge query needs an index:', error);
+    return [];
+  }
+};
+
+const mergeFitTestDocs = (groups) => {
+  const byId = new Map();
+  groups.flat().forEach((docSnap) => {
+    if (docSnap?.id && !byId.has(docSnap.id)) byId.set(docSnap.id, docSnap);
+  });
+  return [...byId.values()];
+};
+
+const byRetentionDate = (a, b) => {
+  const aTime = getFitTestRetentionDate(a.data?.() || {})?.getTime() ?? Number.POSITIVE_INFINITY;
+  const bTime = getFitTestRetentionDate(b.data?.() || {})?.getTime() ?? Number.POSITIVE_INFINITY;
+  return aTime - bTime;
 };
 
 const deleteExpiredFitTestDocuments = async (docs = []) => {
@@ -457,12 +506,61 @@ const writePurgeStamp = (storage, nowMs) => {
 };
 
 /**
- * Delete fit tests older than 3 years.
- * Testers only clean their own records; admins clean records whose createdAt
- * is already past the retention cutoff. expirationDate is an MM/DD/YYYY string,
- * so the range query uses the createdAt timestamp, then isFitTestPastRetention
- * confirms the delete. At most FIT_TEST_PURGE_LIMIT docs are read, and a
- * browser runs this at most once per 24 hours.
+ * Docs this purge may delete. Retention follows issue date (then createdAt),
+ * the same rule as isFitTestPastRetention. createdAt alone misses a card that
+ * was saved recently with an old issue date.
+ * Super admins walk oldest retentionDate values, then the newest saves.
+ * Scoped admins only read their schools. Testers only read their own cards.
+ * Each query is capped at FIT_TEST_PURGE_LIMIT.
+ */
+const collectPurgeDocs = async (userId, access, cutoff) => {
+  const cutoffTs = Timestamp.fromDate(cutoff);
+  const page = limit(FIT_TEST_PURGE_LIMIT);
+  const oldestStamped = [
+    where('retentionDate', '<', cutoffTs),
+    orderBy('retentionDate', 'asc'),
+    page,
+  ];
+
+  if (isSuperAdmin(access.role)) {
+    const [stamped, recentSaves] = await Promise.all([
+      readFitTestQueryOrEmpty(oldestStamped),
+      readFitTestQueryOrEmpty([orderBy('createdAt', 'desc'), page]),
+    ]);
+    return mergeFitTestDocs([stamped, recentSaves]).sort(byRetentionDate);
+  }
+
+  if (isAdminOrAbove(access)) {
+    const schools = normalizeSchoolList(access.schools);
+    if (schools.length === 0) return [];
+    const groups = [];
+    for (const chunk of chunkValues(schools, FIRESTORE_IN_LIMIT)) {
+      if (groups.flat().length >= FIT_TEST_PURGE_LIMIT) break;
+      const stamped = await readFitTestQueryOrEmpty([
+        where('schoolsList', 'in', chunk),
+        ...oldestStamped,
+      ]);
+      const inSchool = await readFitTestQuery([
+        where('schoolsList', 'in', chunk),
+        page,
+      ]);
+      groups.push(stamped, inSchool);
+    }
+    return mergeFitTestDocs(groups).sort(byRetentionDate).slice(0, FIT_TEST_PURGE_LIMIT);
+  }
+
+  const [stamped, ownRecords] = await Promise.all([
+    readFitTestQueryOrEmpty([where('userId', '==', userId), ...oldestStamped]),
+    readFitTestQuery([where('userId', '==', userId), page]),
+  ]);
+  return mergeFitTestDocs([stamped, ownRecords]).sort(byRetentionDate);
+};
+
+/**
+ * Delete fit tests older than 3 years from the issue date.
+ * At most FIT_TEST_PURGE_LIMIT docs are read per query, and a browser runs
+ * this at most once per 24 hours. A failed run still records the stamp so
+ * the next page load does not retry immediately.
  * @param {string} userId
  * @param {{ now?: Date, storage?: Storage|null }} [options]
  * @returns {Promise<number>} Number of records removed
@@ -480,18 +578,14 @@ export const purgeExpiredFitTests = async (userId, options = {}) => {
 
   try {
     const access = await getUserAccessProfile(userId);
-    const cutoff = new Date(now.getTime());
-    cutoff.setFullYear(cutoff.getFullYear() - FIT_TEST_RETENTION_YEARS);
-    const constraints = isAdminOrAbove(access)
-      ? [where('createdAt', '<', Timestamp.fromDate(cutoff)), limit(FIT_TEST_PURGE_LIMIT)]
-      : [where('userId', '==', userId), limit(FIT_TEST_PURGE_LIMIT)];
-    const querySnapshot = await getDocs(query(collection(db, FIT_TESTS_COLLECTION), ...constraints));
-    const removed = await deleteExpiredFitTestDocuments(querySnapshot.docs);
-    writePurgeStamp(storage, nowMs);
-    return removed;
+    const docs = await collectPurgeDocs(userId, access, getFitTestRetentionCutoff(now));
+    return await deleteExpiredFitTestDocuments(docs);
   } catch (error) {
     console.error('Error purging expired fit tests:', error);
     return 0;
+  } finally {
+    writePurgeStamp(storage, nowMs);
+    notifyFitTestActivity();
   }
 };
 
@@ -500,8 +594,9 @@ export const purgeExpiredFitTests = async (userId, options = {}) => {
  * @param {string} userId - User ID
  * @returns {Promise<Array>} Array of fit test records
  */
-export const getUserFitTests = async (userId) => {
+export const getUserFitTests = async (userId, options = {}) => {
   try {
+    const now = options.now instanceof Date ? options.now : new Date();
     const q = query(
       collection(db, FIT_TESTS_COLLECTION),
       where('userId', '==', userId),
@@ -509,26 +604,16 @@ export const getUserFitTests = async (userId) => {
     );
     
     const querySnapshot = await getDocs(q);
-    try {
-      await deleteExpiredFitTestDocuments(querySnapshot.docs);
-    } catch (cleanupError) {
-      console.error('Error purging expired fit tests:', cleanupError);
-    }
 
     return querySnapshot.docs
-      .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}))
+      .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now))
       .map(mapFitTestDoc);
   } catch (error) {
     console.error('Error fetching fit tests:', error);
     
     // Check if this is a Firebase index error
     // Firebase index errors can have code 'failed-precondition' or message containing 'index'
-    const isIndexError = 
-      error.code === 'failed-precondition' || 
-      error.message?.toLowerCase().includes('index') ||
-      error.message?.toLowerCase().includes('query requires an index');
-    
-    if (isIndexError) {
+    if (isIndexError(error)) {
       // Extract the index creation URL from the error if available
       // Firebase usually includes a URL in the error message
       const indexUrlMatch = error.message?.match(/https:\/\/[^\s\)]+/);
@@ -545,27 +630,34 @@ export const getUserFitTests = async (userId) => {
 };
 
 /**
- * Count of one user's fit tests. Uses an aggregation query, not a document read.
+ * Count of one user's fit tests still inside the retention window.
+ * issueDate is MM/DD/YYYY, so a range query on it is not chronological, and
+ * undated records stay in the results list. This applies the same
+ * isFitTestPastRetention rule to that user's documents. A retentionDate
+ * range would drop both undated cards and every card saved before the field
+ * existed.
  * @param {string} userId
+ * @param {{ now?: Date }} [options]
  * @returns {Promise<number>}
  */
-export const countFitTestsForUser = async (userId) => {
+export const countFitTestsForUser = async (userId, options = {}) => {
   if (!userId) return 0;
-  const snapshot = await getCountFromServer(query(
+  const now = options.now instanceof Date ? options.now : new Date();
+  const snapshot = await getDocs(query(
     collection(db, FIT_TESTS_COLLECTION),
     where('userId', '==', userId),
   ));
-  return snapshot.data().count;
+  return snapshot.docs.filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now)).length;
 };
 
 /**
  * Admin-only: count fit test results for the given user ids.
- * Does not read or purge the fitTests collection.
+ * Does not purge the fitTests collection.
  * @param {string} adminUserId
  * @param {string[]} [userIds]
  * @returns {Promise<Record<string, number>>}
  */
-export const getFitTestCountsByUser = async (adminUserId, userIds = []) => {
+export const getFitTestCountsByUser = async (adminUserId, userIds = [], options = {}) => {
   try {
     await assertAdmin(adminUserId);
 
@@ -576,7 +668,7 @@ export const getFitTestCountsByUser = async (adminUserId, userIds = []) => {
     const batchSize = 10;
     for (let index = 0; index < ids.length; index += batchSize) {
       const batch = ids.slice(index, index + batchSize);
-      const batchCounts = await Promise.all(batch.map((id) => countFitTestsForUser(id)));
+      const batchCounts = await Promise.all(batch.map((id) => countFitTestsForUser(id, options)));
       batch.forEach((id, batchIndex) => {
         if (batchCounts[batchIndex] > 0) counts[id] = batchCounts[batchIndex];
       });
@@ -786,11 +878,13 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const verificationToken = resolveVerificationToken(nextRecord);
     nextRecord.verificationToken = verificationToken;
 
+    const retentionDate = retentionDateValue(nextRecord);
     await updateDoc(docRef, {
       ...updates,
       lookupKey: nextKey || null,
       verificationToken,
       updatedAt: Timestamp.now(),
+      ...(retentionDate ? { retentionDate } : {}),
     });
 
     // Release lookups this record no longer owns, including any older key format.
@@ -814,6 +908,7 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
       fitTestId,
       existing.userId || userId
     );
+    notifyFitTestActivity();
   } catch (error) {
     console.error('Error updating fit test:', error);
     // Re-throw permission denied errors
@@ -857,6 +952,7 @@ export const deleteFitTest = async (fitTestId, userId) => {
 
     await deleteFitTestVerification(existing.verificationToken);
     await repointLookupToLatestRemaining(lookupKey, fitTestId, existing.userId || userId);
+    notifyFitTestActivity();
   } catch (error) {
     console.error('Error deleting fit test:', error);
     // Re-throw permission denied errors
