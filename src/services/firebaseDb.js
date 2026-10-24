@@ -20,10 +20,12 @@ import {
 import { db } from '../config/firebase';
 import {
   calculateExpirationDate,
+  getFitTestRetentionDate,
   isExpirationDatePast,
   isFitTestPastRetention,
   parseDateString,
 } from '../utils/dateUtils';
+import { notifyFitTestActivity } from '../utils/fitTestActivity';
 import {
   buildLookupKey,
   normalizeClientName,
@@ -48,8 +50,6 @@ import {
   isSuperAdmin,
 } from '../utils/roles';
 import { normalizeSchoolList } from '../utils/schoolScope';
-
-const FIRESTORE_BATCH_LIMIT = 400;
 
 const FIT_TESTS_COLLECTION = 'fitTests';
 const FIT_TEST_LOOKUPS_COLLECTION = 'fitTestLookups';
@@ -201,39 +201,6 @@ const deleteFitTestLookupIfCurrent = async (lookupKey, fitTestId) => {
 const resolveLookupKey = async (record = {}) =>
   buildLookupKey(record.clientName, record.dob, record.recipientEmail);
 
-const syncLookupsForFitTests = async (tests = []) => {
-  const sorted = [...tests].sort(compareFitTestRecency);
-  const seenKeys = new Set();
-
-  for (const test of sorted) {
-    try {
-      const lookupKey = await resolveLookupKey(test);
-      const verificationToken = resolveVerificationToken(test);
-      const recordUpdates = {};
-
-      if (lookupKey && test.lookupKey !== lookupKey) {
-        // Drops any key from an older format still stored on the record.
-        recordUpdates.lookupKey = lookupKey;
-      }
-      if (test.verificationToken !== verificationToken) {
-        recordUpdates.verificationToken = verificationToken;
-        test.verificationToken = verificationToken;
-      }
-      if (Object.keys(recordUpdates).length > 0) {
-        await updateDoc(doc(db, FIT_TESTS_COLLECTION, test.id), recordUpdates);
-      }
-
-      if (lookupKey && !seenKeys.has(lookupKey)) {
-        seenKeys.add(lookupKey);
-        await upsertFitTestLookup(lookupKey, test, test.id, test.userId);
-      }
-      await upsertFitTestVerification(verificationToken, test, test.id, test.userId);
-    } catch (error) {
-      console.error('Error syncing fit test lookup:', error);
-    }
-  }
-};
-
 export const USER_STATUS_PENDING = 'pending';
 export const USER_STATUS_APPROVED = 'approved';
 export const USER_STATUS_REJECTED = 'rejected';
@@ -289,12 +256,25 @@ const listScopedTesters = async (schools, extraConstraints = []) => {
   const scopedSchools = normalizeSchoolList(schools);
   if (scopedSchools.length === 0) return [];
   const snapshots = await Promise.all(
-    chunkValues(scopedSchools, FIRESTORE_IN_LIMIT).map((chunk) => getDocs(query(
-      collection(db, USERS_COLLECTION),
-      ...extraConstraints,
-      where('role', '==', USER_ROLE_TESTER),
-      where('school', 'in', chunk),
-    )))
+    chunkValues(scopedSchools, FIRESTORE_IN_LIMIT).map(async (chunk) => {
+      try {
+        return await getDocs(query(
+          collection(db, USERS_COLLECTION),
+          ...extraConstraints,
+          where('role', '==', USER_ROLE_TESTER),
+          where('school', 'in', chunk),
+        ));
+      } catch (error) {
+        // A missing composite index must not look like an empty school.
+        if (isIndexError(error)) {
+          console.error(
+            'Firestore users query needs a composite index on role and school. Deploy firestore.indexes.json.',
+            error,
+          );
+        }
+        throw error;
+      }
+    })
   );
   return docsById(snapshots);
 };
@@ -358,17 +338,21 @@ export const saveFitTest = async (userId, fitTestData) => {
       ...fitTestData,
       verificationToken,
     };
+    const createdAt = Timestamp.now();
+    const retentionDate = retentionDateValue({ ...recordToSave, createdAt });
     const docRef = await addDoc(collection(db, FIT_TESTS_COLLECTION), {
       userId,
       ...recordToSave,
       lookupKey: lookupKey || null,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      createdAt,
+      updatedAt: createdAt,
+      ...(retentionDate ? { retentionDate } : {}),
     });
     if (lookupKey) {
       await upsertFitTestLookup(lookupKey, recordToSave, docRef.id, userId);
     }
     await upsertFitTestVerification(verificationToken, recordToSave, docRef.id, userId);
+    notifyFitTestActivity();
     return docRef.id;
   } catch (error) {
     console.error('Error saving fit test:', error);
@@ -376,51 +360,17 @@ export const saveFitTest = async (userId, fitTestData) => {
   }
 };
 
-const deleteExpiredFitTestDocuments = async (docs = []) => {
-  const expiredDocs = docs.filter((docSnap) => isFitTestPastRetention(docSnap.data() || {}));
-  if (expiredDocs.length === 0) {
-    return 0;
-  }
-
-  for (let i = 0; i < expiredDocs.length; i += FIRESTORE_BATCH_LIMIT) {
-    const chunk = expiredDocs.slice(i, i + FIRESTORE_BATCH_LIMIT);
-    const lookupRefsToDelete = [];
-
-    await Promise.all(chunk.map(async (docSnap) => {
-      try {
-        const data = docSnap.data() || {};
-        // Include any stored key so lookups from an older key format also go.
-        const keys = new Set([await resolveLookupKey(data), data.lookupKey].filter(Boolean));
-
-        for (const key of keys) {
-          const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, key);
-          const lookupSnap = await getDoc(lookupRef);
-          if (lookupSnap.exists() && lookupSnap.data()?.fitTestId === docSnap.id) {
-            lookupRefsToDelete.push(lookupRef);
-          }
-        }
-
-        const verificationToken = normalizeVerificationToken(data.verificationToken);
-        if (isValidVerificationToken(verificationToken)) {
-          lookupRefsToDelete.push(doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken));
-        }
-      } catch (error) {
-        console.error('Error resolving expired fit test lookup:', error);
-      }
-    }));
-
-    const batch = writeBatch(db);
-    chunk.forEach((docSnap) => {
-      batch.delete(docSnap.ref);
-    });
-    lookupRefsToDelete.forEach((lookupRef) => {
-      batch.delete(lookupRef);
-    });
-    await batch.commit();
-  }
-
-  return expiredDocs.length;
+/** Timestamp for the same day isFitTestPastRetention uses. Null when undated. */
+const retentionDateValue = (record) => {
+  const date = getFitTestRetentionDate(record);
+  return date ? Timestamp.fromDate(date) : null;
 };
+
+const isIndexError = (error) => (
+  error?.code === 'failed-precondition'
+  || error?.message?.toLowerCase().includes('index')
+  || error?.message?.toLowerCase().includes('query requires an index')
+);
 
 const mapFitTestDoc = (docSnap) => {
   const data = docSnap.data() || {};
@@ -463,37 +413,19 @@ const repointLookupToLatestRemaining = async (lookupKey, removedFitTestId, fallb
   }
 };
 
-/**
- * Delete fit tests older than 3 years.
- * Testers only clean their own records; admins clean all records.
- * @param {string} userId
- * @returns {Promise<number>} Number of records removed
- */
-export const purgeExpiredFitTests = async (userId) => {
-  if (!userId) return 0;
-
-  try {
-    const access = await getUserAccessProfile(userId);
-    const testsQuery =
-      isAdminOrAbove(access)
-        ? collection(db, FIT_TESTS_COLLECTION)
-        : query(collection(db, FIT_TESTS_COLLECTION), where('userId', '==', userId));
-
-    const querySnapshot = await getDocs(testsQuery);
-    return await deleteExpiredFitTestDocuments(querySnapshot.docs);
-  } catch (error) {
-    console.error('Error purging expired fit tests:', error);
-    return 0;
-  }
-};
+// Expired-record deletion is disabled. Lists and counts hide records past the
+// retention window with isFitTestPastRetention. Nothing in the app deletes a
+// fit test because of its age.
 
 /**
- * Get all fit test records for a user
+ * Get all fit test records for a user. Does not delete expired records.
+ * A missing userId + createdAt index is reported; it is not an empty list.
  * @param {string} userId - User ID
  * @returns {Promise<Array>} Array of fit test records
  */
-export const getUserFitTests = async (userId) => {
+export const getUserFitTests = async (userId, options = {}) => {
   try {
+    const now = options.now instanceof Date ? options.now : new Date();
     const q = query(
       collection(db, FIT_TESTS_COLLECTION),
       where('userId', '==', userId),
@@ -501,35 +433,19 @@ export const getUserFitTests = async (userId) => {
     );
     
     const querySnapshot = await getDocs(q);
-    try {
-      await deleteExpiredFitTestDocuments(querySnapshot.docs);
-    } catch (cleanupError) {
-      console.error('Error purging expired fit tests:', cleanupError);
-    }
 
-    const tests = querySnapshot.docs
-      .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}))
+    return querySnapshot.docs
+      .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now))
       .map(mapFitTestDoc);
-
-    syncLookupsForFitTests(tests).catch((syncError) => {
-      console.error('Error syncing fit test lookups:', syncError);
-    });
-
-    return tests;
   } catch (error) {
     console.error('Error fetching fit tests:', error);
-    
-    // Check if this is a Firebase index error
-    // Firebase index errors can have code 'failed-precondition' or message containing 'index'
-    const isIndexError = 
-      error.code === 'failed-precondition' || 
-      error.message?.toLowerCase().includes('index') ||
-      error.message?.toLowerCase().includes('query requires an index');
-    
-    if (isIndexError) {
-      // Extract the index creation URL from the error if available
-      // Firebase usually includes a URL in the error message
-      const indexUrlMatch = error.message?.match(/https:\/\/[^\s\)]+/);
+
+    if (isIndexError(error)) {
+      console.error(
+        'Firestore fitTests query needs a composite index on userId and createdAt. Deploy firestore.indexes.json.',
+        error,
+      );
+      const indexUrlMatch = error.message?.match(/https:\/\/[^\s)]+/);
       const indexUrl = indexUrlMatch ? indexUrlMatch[0] : null;
       
       const indexError = new Error('FIREBASE_INDEX_REQUIRED');
@@ -543,28 +459,60 @@ export const getUserFitTests = async (userId) => {
 };
 
 /**
- * Admin-only: count fit test results grouped by owning userId
+ * Count of one user's fit tests still inside the retention window.
+ * issueDate is MM/DD/YYYY, so a range query on it is not chronological, and
+ * undated records stay in the results list. This applies the same
+ * isFitTestPastRetention rule to that user's documents. A retentionDate
+ * range would drop both undated cards and every card saved before the field
+ * existed.
+ * @param {string} userId
+ * @param {{ now?: Date }} [options]
+ * @returns {Promise<number>}
+ */
+export const countFitTestsForUser = async (userId, options = {}) => {
+  if (!userId) return 0;
+  const now = options.now instanceof Date ? options.now : new Date();
+  let snapshot;
+  try {
+    snapshot = await getDocs(query(
+      collection(db, FIT_TESTS_COLLECTION),
+      where('userId', '==', userId),
+    ));
+  } catch (error) {
+    if (isIndexError(error)) {
+      console.error(
+        'Firestore fitTests count needs an index on userId. Deploy firestore.indexes.json.',
+        error,
+      );
+    }
+    throw error;
+  }
+  return snapshot.docs.filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now)).length;
+};
+
+/**
+ * Admin-only: count fit test results for the given user ids.
+ * Does not delete fit test records.
  * @param {string} adminUserId
+ * @param {string[]} [userIds]
  * @returns {Promise<Record<string, number>>}
  */
-export const getFitTestCountsByUser = async (adminUserId) => {
+export const getFitTestCountsByUser = async (adminUserId, userIds = [], options = {}) => {
   try {
     await assertAdmin(adminUserId);
 
-    const querySnapshot = await getDocs(collection(db, FIT_TESTS_COLLECTION));
-    try {
-      await deleteExpiredFitTestDocuments(querySnapshot.docs);
-    } catch (cleanupError) {
-      console.error('Error purging expired fit tests:', cleanupError);
-    }
-
+    const ids = [...new Set(
+      (Array.isArray(userIds) ? userIds : []).filter((id) => typeof id === 'string' && id)
+    )];
     const counts = {};
-    querySnapshot.docs.forEach((docSnap) => {
-      if (isFitTestPastRetention(docSnap.data() || {})) return;
-      const ownerId = docSnap.data()?.userId;
-      if (!ownerId) return;
-      counts[ownerId] = (counts[ownerId] || 0) + 1;
-    });
+    const batchSize = 10;
+    for (let index = 0; index < ids.length; index += batchSize) {
+      const batch = ids.slice(index, index + batchSize);
+      const batchCounts = await Promise.all(batch.map((id) => countFitTestsForUser(id, options)));
+      batch.forEach((id, batchIndex) => {
+        if (batchCounts[batchIndex] > 0) counts[id] = batchCounts[batchIndex];
+      });
+    }
 
     return counts;
   } catch (error) {
@@ -770,11 +718,13 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const verificationToken = resolveVerificationToken(nextRecord);
     nextRecord.verificationToken = verificationToken;
 
+    const retentionDate = retentionDateValue(nextRecord);
     await updateDoc(docRef, {
       ...updates,
       lookupKey: nextKey || null,
       verificationToken,
       updatedAt: Timestamp.now(),
+      ...(retentionDate ? { retentionDate } : {}),
     });
 
     // Release lookups this record no longer owns, including any older key format.
@@ -798,6 +748,7 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
       fitTestId,
       existing.userId || userId
     );
+    notifyFitTestActivity();
   } catch (error) {
     console.error('Error updating fit test:', error);
     // Re-throw permission denied errors
@@ -841,6 +792,7 @@ export const deleteFitTest = async (fitTestId, userId) => {
 
     await deleteFitTestVerification(existing.verificationToken);
     await repointLookupToLatestRemaining(lookupKey, fitTestId, existing.userId || userId);
+    notifyFitTestActivity();
   } catch (error) {
     console.error('Error deleting fit test:', error);
     // Re-throw permission denied errors
