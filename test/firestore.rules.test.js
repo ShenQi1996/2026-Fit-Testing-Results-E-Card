@@ -764,6 +764,62 @@ test('only a super admin can write the master school list', async () => {
   await assertFails(getDoc(doc(pendingDb, 'schools', HELENE)));
   await assertFails(getDoc(doc(guestDb, 'schools', HELENE)));
   await assertFails(setDoc(doc(guestDb, 'schools', created), { name: created }));
+
+  await assertSucceeds(setDoc(doc(superDb, 'schools', 'Helen Fong'), {
+    name: 'Helen Fong',
+    programAdministratorName: 'Ada Admin',
+    programAdministratorContact: 'ada@example.com',
+  }));
+  await assertSucceeds(updateDoc(doc(superDb, 'schools', HELENE), {
+    programAdministratorName: '',
+    programAdministratorContact: '',
+  }));
+  await assertFails(updateDoc(doc(superDb, 'schools', HELENE), {
+    programAdministratorName: 12,
+  }));
+  await assertSucceeds(setDoc(doc(superDb, 'schoolDirectory', 'names'), {
+    names: [HELENE, 'Helen Fong'],
+    programs: [{
+      name: 'Helen Fong',
+      programAdministratorName: '',
+      programAdministratorContact: '',
+    }],
+  }));
+  await assertFails(setDoc(doc(superDb, 'schoolDirectory', 'names'), {
+    names: [HELENE],
+    programs: 'Helen Fong',
+  }));
+});
+
+test('program administrator fields are optional strings on a user', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/admin-1', scopedAdmin()],
+    ['users/tester-1', testerAt(HELENE, { status: 'approved', name: 'Tess' })],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertSucceeds(updateDoc(doc(testerDb, 'users/tester-1'), {
+    programAdministratorName: 'Tess Tester',
+    programAdministratorContact: '',
+  }));
+  await assertFails(updateDoc(doc(testerDb, 'users/tester-1'), {
+    programAdministratorContact: 4,
+  }));
+  await assertSucceeds(updateDoc(doc(adminDb, 'users/tester-1'), {
+    programAdministratorName: 'School Office',
+    programAdministratorContact: 'office@example.com',
+  }));
+  await assertFails(updateDoc(doc(adminDb, 'users/tester-1'), {
+    programAdministratorName: 'Nope',
+    email: 'other@example.com',
+  }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/tester-1'), {
+    programAdministratorName: '',
+    programAdministratorContact: '',
+  }));
 });
 
 test('school tags must be current master-list names', async () => {

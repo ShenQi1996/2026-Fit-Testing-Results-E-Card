@@ -24,6 +24,7 @@ import {
   isFitTestPastRetention,
   parseDateString,
 } from '../utils/dateUtils';
+import { readProgramAdmin } from '../utils/programAdmin';
 import {
   buildLookupKey,
   normalizeClientName,
@@ -341,6 +342,7 @@ const serializeUserDoc = (docSnap) => {
     schools: normalizeSchoolList(data.schools),
     startDate: toIso(data.startDate),
     endDate: toIso(data.endDate),
+    ...readProgramAdmin(data),
   };
 };
 
@@ -933,7 +935,19 @@ const emptyAccessProfile = () => ({
   schools: [],
   startDate: null,
   endDate: null,
+  ...readProgramAdmin(null),
 });
+
+/** The signed-in user sets their own optional program administrator fallback. */
+export const updateOwnProgramAdministrator = async (userId, fields = {}) => {
+  if (!userId) throw new Error('No user logged in');
+  const program = readProgramAdmin(fields);
+  await updateDoc(doc(db, USERS_COLLECTION, userId), {
+    ...program,
+    updatedAt: Timestamp.now(),
+  });
+  return program;
+};
 
 export const getUserAccessProfile = async (userId) => {
   try {
@@ -952,6 +966,7 @@ export const getUserAccessProfile = async (userId) => {
       schools: normalizeSchoolList(data.schools),
       startDate: toIso(data.startDate),
       endDate: toIso(data.endDate),
+      ...readProgramAdmin(data),
     };
   } catch (error) {
     console.error('Error getting user access profile:', error);
@@ -1136,6 +1151,13 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
       }
     }
 
+    if (typeof updates.programAdministratorName === 'string') {
+      payload.programAdministratorName = updates.programAdministratorName.trim();
+    }
+    if (typeof updates.programAdministratorContact === 'string') {
+      payload.programAdministratorContact = updates.programAdministratorContact.trim();
+    }
+
     await updateDoc(targetRef, payload);
     const refreshed = await getDoc(targetRef);
     return serializeUserDoc(refreshed);
@@ -1254,6 +1276,14 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
         throw new Error('Choose at least one school for this admin.');
       }
       profile.schools = requestedSchools;
+    }
+
+    const program = readProgramAdmin(userData);
+    if (program.programAdministratorName) {
+      profile.programAdministratorName = program.programAdministratorName;
+    }
+    if (program.programAdministratorContact) {
+      profile.programAdministratorContact = program.programAdministratorContact;
     }
 
     if (status === USER_STATUS_APPROVED || status === USER_STATUS_REJECTED) {
