@@ -765,8 +765,8 @@ test('only a super admin can write the master school list', async () => {
   await assertFails(getDoc(doc(guestDb, 'schools', HELENE)));
   await assertFails(setDoc(doc(guestDb, 'schools', created), { name: created }));
 
-  await assertSucceeds(setDoc(doc(superDb, 'schools', 'Helen Fong'), {
-    name: 'Helen Fong',
+  await assertSucceeds(setDoc(doc(superDb, 'schools', 'Example Program School'), {
+    name: 'Example Program School',
     programAdministratorName: 'Ada Admin',
     programAdministratorContact: 'ada@example.com',
   }));
@@ -778,16 +778,16 @@ test('only a super admin can write the master school list', async () => {
     programAdministratorName: 12,
   }));
   await assertSucceeds(setDoc(doc(superDb, 'schoolDirectory', 'names'), {
-    names: [HELENE, 'Helen Fong'],
+    names: [HELENE, 'Example Program School'],
     programs: [{
-      name: 'Helen Fong',
+      name: 'Example Program School',
       programAdministratorName: '',
       programAdministratorContact: '',
     }],
   }));
   await assertFails(setDoc(doc(superDb, 'schoolDirectory', 'names'), {
     names: [HELENE],
-    programs: 'Helen Fong',
+    programs: 'not-a-list',
   }));
 });
 

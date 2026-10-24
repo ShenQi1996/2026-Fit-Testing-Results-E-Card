@@ -27,16 +27,16 @@ test('addMasterSchool writes the school and the directory through the normal pat
     },
   });
 
-  await expect(addMasterSchool('super-1', 'Helen Fong', {
+  await expect(addMasterSchool('super-1', 'Example Program School', {
     programAdministratorName: '  ',
     programAdministratorContact: '',
-  })).resolves.toEqual(['Helen Fong', 'Helene College of Nursing']);
+  })).resolves.toEqual(['Example Program School', 'Helene College of Nursing']);
 
   const batch = writeBatch.mock.results[0].value;
   expect(batch.set).toHaveBeenCalledWith(
     expect.anything(),
     expect.objectContaining({
-      name: 'Helen Fong',
+      name: 'Example Program School',
       programAdministratorName: '',
       programAdministratorContact: '',
     }),
@@ -44,10 +44,10 @@ test('addMasterSchool writes the school and the directory through the normal pat
   expect(batch.set).toHaveBeenCalledWith(
     expect.anything(),
     expect.objectContaining({
-      names: ['Helen Fong', 'Helene College of Nursing'],
+      names: ['Example Program School', 'Helene College of Nursing'],
       programs: [
         {
-          name: 'Helen Fong',
+          name: 'Example Program School',
           programAdministratorName: '',
           programAdministratorContact: '',
         },
@@ -65,8 +65,8 @@ test('addMasterSchool writes the school and the directory through the normal pat
 test('getMasterSchoolRecord returns blank program fields when the school doc is missing', async () => {
   getDoc.mockResolvedValue({ exists: () => false, data: () => null, id: 'missing' });
 
-  await expect(getMasterSchoolRecord('Helen Fong')).resolves.toEqual({
-    name: 'Helen Fong',
+  await expect(getMasterSchoolRecord('Example Program School')).resolves.toEqual({
+    name: 'Example Program School',
     programAdministratorName: '',
     programAdministratorContact: '',
   });

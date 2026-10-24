@@ -2,7 +2,7 @@ import { programAdminForSchool, readProgramAdmin } from './programAdmin';
 
 test('a selected school supplies program administrator fields', () => {
   expect(programAdminForSchool({
-    name: 'Helen Fong',
+    name: 'Example Program School',
     programAdministratorName: 'Ada Admin',
     programAdministratorContact: 'ada@example.com',
   }, {
