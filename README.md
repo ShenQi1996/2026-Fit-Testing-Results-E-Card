@@ -34,13 +34,13 @@ This app documents a qualitative fit-test result. It does **not** establish medi
 
 ## Running locally
 
-> **Warning:** Without `.env.local` the app defaults to production and works on live data, including real, permanent deletes.
+> **Warning:** `npm start` refuses to boot without staging Firebase keys. It does not fall back to production. A production build (`npm run build`) with `APP_ENV` unset still uses live data.
 
 1. Prerequisite: Node 24.
 2. `npm install`.
 3. Copy [`.env.example`](./.env.example) to `.env.local`. `.env.local` is gitignored.
-4. Make sure `.env.local` has the line `APP_ENV=staging` exactly (uppercase `APP_ENV`, lowercase `staging`, nothing after it) and fill in `FIREBASE_API_KEY` with the staging key.
-5. `npm start`. Do not run `npm start dev`. Webpack treats `dev` as an extra entry and fails. Open [http://localhost:3000](http://localhost:3000).
+4. Fill in `FIREBASE_API_KEY` with the staging key. `APP_ENV=staging` is already set in the example. The dev server sets it to `staging` when it is missing.
+5. `npm start`. Do not run `npm start dev`. Webpack treats `dev` as an extra entry and fails. Open [http://localhost:3000](http://localhost:3000). If a staging key is missing, webpack exits and names the missing variable.
 6. Before doing anything else, confirm the **STAGING** banner appears at the top of the app.
 
 Optional seed: set `GOOGLE_APPLICATION_CREDENTIALS` to the staging service account JSON (kept outside the repo), run `npm run seed:staging -- --dry-run` first, then `npm run seed:staging`. For the four test logins, set `SEED_PASSWORD` and add `--with-auth`. The script refuses to run against production.
@@ -64,11 +64,11 @@ Details are in [STAGING.md](./STAGING.md).
 
 ## Running in production
 
-Leave `APP_ENV` unset and do not create `.env.local`. The app uses the built-in production Firebase project `fit-test-result-e-card-2026` and shows no **STAGING** banner. That is live data, so be careful.
+`npm run build` with `APP_ENV` unset uses the built-in production Firebase project `fit-test-result-e-card-2026` and shows no **STAGING** banner. That is live data, so be careful. Do not use the dev server for that project.
 
-Production Vercel sets no `APP_ENV` or `FIREBASE_*` variables. The staging web API key is stored only in Vercel and is not in git. Those builds keep the Firebase web config already compiled for `fit-test-result-e-card-2026`. `main` is production. `staging` is the long-lived branch Sam QAs before a release. The production release is Sam merging `staging` into `main`. After that merge, production still has none of these environment variables, so it keeps today's Firebase project.
+Production Vercel sets no `APP_ENV` or `FIREBASE_*` variables. The staging web API key is stored only in Vercel and is not in git. Those production builds keep the Firebase web config already compiled for `fit-test-result-e-card-2026`. `main` is production. `staging` is the long-lived branch Sam QAs before a release. The production release is Sam merging `staging` into `main`. After that merge, production still has none of these environment variables, so it keeps today's Firebase project.
 
-The build refuses to start in staging mode if any `FIREBASE_*` value is missing or matches production. Any other `APP_ENV` value (for example `Staging`) prints a warning and keeps the production config.
+A development build fails if any `FIREBASE_*` value is missing or matches production. A production build with `APP_ENV=staging` does the same. Any other `APP_ENV` value on a production build (for example `Staging`) prints a warning and keeps the production config. A development build rejects that value instead of using production.
 
 Production EmailJS sending is unchanged. The production service id, template id, and public key stay compiled in the app, and sending when `APP_ENV` is unset is the same as today.
 

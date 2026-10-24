@@ -1,6 +1,7 @@
 /* global process */
 // Firebase web app. Production builds leave APP_ENV unset and keep the production project.
-// Staging builds (APP_ENV=staging) read FIREBASE_* inlined by webpack EnvironmentPlugin.
+// Development builds and APP_ENV=staging read FIREBASE_* inlined by webpack EnvironmentPlugin.
+// A development build with missing staging keys fails instead of using production.
 // Each process.env.NAME access must be a direct member expression so EnvironmentPlugin
 // can replace it. firebaseAuth.js creates its secondary app from this same object.
 
@@ -16,7 +17,7 @@ export const firebaseConfig = resolveFirebaseConfig(process.env.APP_ENV, {
   FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET,
   FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
   FIREBASE_APP_ID: process.env.FIREBASE_APP_ID,
-});
+}, process.env.NODE_ENV);
 
 const app = initializeApp(firebaseConfig);
 

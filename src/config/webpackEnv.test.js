@@ -109,6 +109,56 @@ test('webpack rejects production Firebase identifiers after trim and case foldin
   }
 });
 
+test('webpack development fails closed when staging keys are missing', () => {
+  const saved = snapshotEnv();
+  const savedNodeEnv = process.env.NODE_ENV;
+  try {
+    ENV_KEYS.forEach((key) => {
+      delete process.env[key];
+    });
+    process.env.NODE_ENV = 'development';
+    expect(loadWebpack).toThrow(/FIREBASE_API_KEY/);
+    expect(loadWebpack).toThrow(/production Firebase project/);
+  } finally {
+    process.env.NODE_ENV = savedNodeEnv;
+    restoreEnv(saved);
+  }
+});
+
+test('webpack development loads when staging keys are present', () => {
+  const saved = snapshotEnv();
+  const savedNodeEnv = process.env.NODE_ENV;
+  try {
+    Object.entries(stagingEnv).forEach(([key, value]) => {
+      process.env[key] = value;
+    });
+    delete process.env.APP_ENV;
+    process.env.NODE_ENV = 'development';
+    expect(loadWebpack).not.toThrow();
+  } finally {
+    process.env.NODE_ENV = savedNodeEnv;
+    restoreEnv(saved);
+  }
+});
+
+test('webpack allows a production build with APP_ENV unset', () => {
+  const saved = snapshotEnv();
+  const savedNodeEnv = process.env.NODE_ENV;
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    ENV_KEYS.forEach((key) => {
+      delete process.env[key];
+    });
+    process.env.NODE_ENV = 'production';
+    expect(loadWebpack).not.toThrow();
+    expect(warn).not.toHaveBeenCalled();
+  } finally {
+    warn.mockRestore();
+    process.env.NODE_ENV = savedNodeEnv;
+    restoreEnv(saved);
+  }
+});
+
 test('webpack allows a build with APP_ENV unset', () => {
   const saved = snapshotEnv();
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});

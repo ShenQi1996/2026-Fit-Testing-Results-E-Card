@@ -8,6 +8,7 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 const { assertStagingFirebaseEnv } = require('./src/config/stagingFirebaseGuard');
 
 const isProduction = process.env.NODE_ENV === 'production';
+const isDevelopment = process.env.NODE_ENV === 'development';
 
 const FIREBASE_ENV_KEYS = [
     'FIREBASE_API_KEY',
@@ -54,22 +55,38 @@ FIREBASE_ENV_KEYS.forEach((key) => {
     }
 });
 
+// webpack serve / NODE_ENV=development talks to the staging project. Missing
+// staging keys fail the build. They must not silently select production.
+if (isDevelopment) {
+    const devAppEnv = String(process.env.APP_ENV || '').trim();
+    if (devAppEnv && devAppEnv !== 'staging') {
+        throw new Error(
+            `Development builds use the staging Firebase project fit-test-result-e-card-staging. `
+            + `APP_ENV is ${JSON.stringify(devAppEnv)}, not "staging". `
+            + 'Refusing to use the production Firebase project.'
+        );
+    }
+    process.env.APP_ENV = 'staging';
+}
+
 const appEnv = String(process.env.APP_ENV || '').trim();
-if (appEnv && appEnv !== 'staging') {
+if (!isDevelopment && appEnv && appEnv !== 'staging') {
     console.warn(
         `APP_ENV is ${JSON.stringify(appEnv)}, which is not exactly "staging". `
         + 'This build uses the production Firebase config.'
     );
 }
+
+const firebaseEnv = {
+    FIREBASE_API_KEY: process.env.FIREBASE_API_KEY,
+    FIREBASE_AUTH_DOMAIN: process.env.FIREBASE_AUTH_DOMAIN,
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+    FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET,
+    FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
+    FIREBASE_APP_ID: process.env.FIREBASE_APP_ID,
+};
 if (appEnv === 'staging') {
-    assertStagingFirebaseEnv({
-        FIREBASE_API_KEY: process.env.FIREBASE_API_KEY,
-        FIREBASE_AUTH_DOMAIN: process.env.FIREBASE_AUTH_DOMAIN,
-        FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
-        FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET,
-        FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
-        FIREBASE_APP_ID: process.env.FIREBASE_APP_ID,
-    });
+    assertStagingFirebaseEnv(firebaseEnv);
 }
 
 const environmentDefaults = { APP_ENV: '' };

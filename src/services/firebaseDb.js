@@ -13,6 +13,8 @@ import {
   query,
   where,
   orderBy,
+  limit,
+  getCountFromServer,
   Timestamp,
   deleteField,
   writeBatch,
@@ -20,6 +22,7 @@ import {
 import { db } from '../config/firebase';
 import {
   calculateExpirationDate,
+  FIT_TEST_RETENTION_YEARS,
   isExpirationDatePast,
   isFitTestPastRetention,
   parseDateString,
@@ -200,39 +203,6 @@ const deleteFitTestLookupIfCurrent = async (lookupKey, fitTestId) => {
 /** Always recomputed from the record so key-format changes propagate on next write. */
 const resolveLookupKey = async (record = {}) =>
   buildLookupKey(record.clientName, record.dob, record.recipientEmail);
-
-const syncLookupsForFitTests = async (tests = []) => {
-  const sorted = [...tests].sort(compareFitTestRecency);
-  const seenKeys = new Set();
-
-  for (const test of sorted) {
-    try {
-      const lookupKey = await resolveLookupKey(test);
-      const verificationToken = resolveVerificationToken(test);
-      const recordUpdates = {};
-
-      if (lookupKey && test.lookupKey !== lookupKey) {
-        // Drops any key from an older format still stored on the record.
-        recordUpdates.lookupKey = lookupKey;
-      }
-      if (test.verificationToken !== verificationToken) {
-        recordUpdates.verificationToken = verificationToken;
-        test.verificationToken = verificationToken;
-      }
-      if (Object.keys(recordUpdates).length > 0) {
-        await updateDoc(doc(db, FIT_TESTS_COLLECTION, test.id), recordUpdates);
-      }
-
-      if (lookupKey && !seenKeys.has(lookupKey)) {
-        seenKeys.add(lookupKey);
-        await upsertFitTestLookup(lookupKey, test, test.id, test.userId);
-      }
-      await upsertFitTestVerification(verificationToken, test, test.id, test.userId);
-    } catch (error) {
-      console.error('Error syncing fit test lookup:', error);
-    }
-  }
-};
 
 export const USER_STATUS_PENDING = 'pending';
 export const USER_STATUS_APPROVED = 'approved';
@@ -463,24 +433,62 @@ const repointLookupToLatestRemaining = async (lookupKey, removedFitTestId, fallb
   }
 };
 
+/** One browser runs retention cleanup at most this often. */
+export const FIT_TEST_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const FIT_TEST_PURGE_STORAGE_KEY = 'ecard.fitTestPurgeAt';
+/** Caps a single cleanup so it cannot read the whole fitTests collection. */
+export const FIT_TEST_PURGE_LIMIT = 40;
+
+const readPurgeStamp = (storage) => {
+  try {
+    const value = Number(storage?.getItem?.(FIT_TEST_PURGE_STORAGE_KEY));
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const writePurgeStamp = (storage, nowMs) => {
+  try {
+    storage?.setItem?.(FIT_TEST_PURGE_STORAGE_KEY, String(nowMs));
+  } catch {
+    // Private browsing can reject localStorage. The cleanup still ran.
+  }
+};
+
 /**
  * Delete fit tests older than 3 years.
- * Testers only clean their own records; admins clean all records.
+ * Testers only clean their own records; admins clean records whose createdAt
+ * is already past the retention cutoff. expirationDate is an MM/DD/YYYY string,
+ * so the range query uses the createdAt timestamp, then isFitTestPastRetention
+ * confirms the delete. At most FIT_TEST_PURGE_LIMIT docs are read, and a
+ * browser runs this at most once per 24 hours.
  * @param {string} userId
+ * @param {{ now?: Date, storage?: Storage|null }} [options]
  * @returns {Promise<number>} Number of records removed
  */
-export const purgeExpiredFitTests = async (userId) => {
+export const purgeExpiredFitTests = async (userId, options = {}) => {
   if (!userId) return 0;
+
+  const now = options.now instanceof Date ? options.now : new Date();
+  const storage = options.storage !== undefined
+    ? options.storage
+    : (typeof localStorage !== 'undefined' ? localStorage : null);
+  const nowMs = now.getTime();
+  const lastRun = readPurgeStamp(storage);
+  if (lastRun && nowMs - lastRun < FIT_TEST_PURGE_INTERVAL_MS) return 0;
 
   try {
     const access = await getUserAccessProfile(userId);
-    const testsQuery =
-      isAdminOrAbove(access)
-        ? collection(db, FIT_TESTS_COLLECTION)
-        : query(collection(db, FIT_TESTS_COLLECTION), where('userId', '==', userId));
-
-    const querySnapshot = await getDocs(testsQuery);
-    return await deleteExpiredFitTestDocuments(querySnapshot.docs);
+    const cutoff = new Date(now.getTime());
+    cutoff.setFullYear(cutoff.getFullYear() - FIT_TEST_RETENTION_YEARS);
+    const constraints = isAdminOrAbove(access)
+      ? [where('createdAt', '<', Timestamp.fromDate(cutoff)), limit(FIT_TEST_PURGE_LIMIT)]
+      : [where('userId', '==', userId), limit(FIT_TEST_PURGE_LIMIT)];
+    const querySnapshot = await getDocs(query(collection(db, FIT_TESTS_COLLECTION), ...constraints));
+    const removed = await deleteExpiredFitTestDocuments(querySnapshot.docs);
+    writePurgeStamp(storage, nowMs);
+    return removed;
   } catch (error) {
     console.error('Error purging expired fit tests:', error);
     return 0;
@@ -507,15 +515,9 @@ export const getUserFitTests = async (userId) => {
       console.error('Error purging expired fit tests:', cleanupError);
     }
 
-    const tests = querySnapshot.docs
+    return querySnapshot.docs
       .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}))
       .map(mapFitTestDoc);
-
-    syncLookupsForFitTests(tests).catch((syncError) => {
-      console.error('Error syncing fit test lookups:', syncError);
-    });
-
-    return tests;
   } catch (error) {
     console.error('Error fetching fit tests:', error);
     
@@ -543,28 +545,42 @@ export const getUserFitTests = async (userId) => {
 };
 
 /**
- * Admin-only: count fit test results grouped by owning userId
+ * Count of one user's fit tests. Uses an aggregation query, not a document read.
+ * @param {string} userId
+ * @returns {Promise<number>}
+ */
+export const countFitTestsForUser = async (userId) => {
+  if (!userId) return 0;
+  const snapshot = await getCountFromServer(query(
+    collection(db, FIT_TESTS_COLLECTION),
+    where('userId', '==', userId),
+  ));
+  return snapshot.data().count;
+};
+
+/**
+ * Admin-only: count fit test results for the given user ids.
+ * Does not read or purge the fitTests collection.
  * @param {string} adminUserId
+ * @param {string[]} [userIds]
  * @returns {Promise<Record<string, number>>}
  */
-export const getFitTestCountsByUser = async (adminUserId) => {
+export const getFitTestCountsByUser = async (adminUserId, userIds = []) => {
   try {
     await assertAdmin(adminUserId);
 
-    const querySnapshot = await getDocs(collection(db, FIT_TESTS_COLLECTION));
-    try {
-      await deleteExpiredFitTestDocuments(querySnapshot.docs);
-    } catch (cleanupError) {
-      console.error('Error purging expired fit tests:', cleanupError);
-    }
-
+    const ids = [...new Set(
+      (Array.isArray(userIds) ? userIds : []).filter((id) => typeof id === 'string' && id)
+    )];
     const counts = {};
-    querySnapshot.docs.forEach((docSnap) => {
-      if (isFitTestPastRetention(docSnap.data() || {})) return;
-      const ownerId = docSnap.data()?.userId;
-      if (!ownerId) return;
-      counts[ownerId] = (counts[ownerId] || 0) + 1;
-    });
+    const batchSize = 10;
+    for (let index = 0; index < ids.length; index += batchSize) {
+      const batch = ids.slice(index, index + batchSize);
+      const batchCounts = await Promise.all(batch.map((id) => countFitTestsForUser(id)));
+      batch.forEach((id, batchIndex) => {
+        if (batchCounts[batchIndex] > 0) counts[id] = batchCounts[batchIndex];
+      });
+    }
 
     return counts;
   } catch (error) {

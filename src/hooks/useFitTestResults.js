@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getUserFitTests, deleteFitTest, updateFitTest, ensureFitTestVerification } from '../services/firebaseDb';
 import { sendFitTestCard } from '../services/emailService';
@@ -33,12 +33,15 @@ export const useFitTestResults = () => {
   const [schoolFilter, setSchoolFilter] = useState(FILTER_ALL);
   const [locationFilter, setLocationFilter] = useState(FILTER_ALL);
 
-  const loadFitTests = async () => {
+  const userId = user?.uid;
+
+  const loadFitTests = useCallback(async () => {
+    if (!userId) return;
     try {
       setLoading(true);
       setError('');
       setIndexError(null);
-      const tests = await getUserFitTests(user.uid);
+      const tests = await getUserFitTests(userId);
       setFitTests(tests);
     } catch (err) {
       console.error('Error loading fit tests:', err);
@@ -56,16 +59,16 @@ export const useFitTestResults = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
 
   useEffect(() => {
-    if (user && user.uid) {
+    if (userId) {
       loadFitTests();
     } else {
       setLoading(false);
       setError('You must be logged in to view test results.');
     }
-  }, [user]);
+  }, [userId, loadFitTests]);
 
   const monthOptions = useMemo(() => {
     const map = new Map();

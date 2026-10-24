@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { getUserFitTests } from '../../services/firebaseDb';
+import { countFitTestsForUser } from '../../services/firebaseDb';
 import { isAdminOrAbove } from '../../utils/roles';
 import './Sidebar.css';
 
@@ -16,8 +16,8 @@ const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
     }
 
     try {
-      const tests = await getUserFitTests(user.uid);
-      setTestCount(Array.isArray(tests) ? tests.length : 0);
+      const count = await countFitTestsForUser(user.uid);
+      setTestCount(count);
     } catch (error) {
       console.error('Error loading test results count:', error);
       // Keep previous count if refresh fails.
@@ -26,7 +26,7 @@ const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
 
   useEffect(() => {
     loadTestCount();
-  }, [loadTestCount, currentPage]);
+  }, [loadTestCount]);
 
   const testResultsLabel =
     testCount === null ? 'Test results' : `Test results (${testCount})`;
