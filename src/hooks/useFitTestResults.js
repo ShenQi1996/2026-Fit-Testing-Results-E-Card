@@ -327,11 +327,17 @@ export const useFitTestResults = () => {
       if (!user || !user.uid) {
         throw new Error('User must be logged in to update records.');
       }
+      const previousIssueDate = fitTests.find((test) => test.id === testId)?.issueDate || '';
+      const issueDateChanged = previousIssueDate !== (editData.issueDate || '');
       await updateFitTest(testId, updates, user.uid);
 
-      setFitTests((prev) => prev.map((test) =>
-        test.id === testId ? { ...test, ...updates } : test
-      ));
+      if (issueDateChanged) {
+        await loadFitTests();
+      } else {
+        setFitTests((prev) => prev.map((test) =>
+          test.id === testId ? { ...test, ...updates } : test
+        ));
+      }
 
       setSuccessMessage('Record updated successfully!');
       setEditing(null);

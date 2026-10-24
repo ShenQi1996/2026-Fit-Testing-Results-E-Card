@@ -26,7 +26,7 @@ A logged-in session does **not** take over `/`, `/verify`, or `/resend`. Staff w
 - Test results: month/school/location filters, CSV export, PDF, resend, admin edit/delete
 - Admin approval for new testers; Users page for admins
 - Records saved to Firestore **before** email so the QR works as soon as the card arrives
-- Fit tests older than three years are purged for the signed-in tester
+- Fit tests older than three years stay in Firestore and are hidden from lists and counts
 
 Policies linked from the form: [next-leap-fit.vercel.app/legal](https://next-leap-fit.vercel.app/legal)
 

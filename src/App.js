@@ -13,7 +13,6 @@ import VerifyCardPage from './components/lookup/VerifyCardPage';
 import HomePage from './components/common/HomePage';
 import LoadingAnimation from './components/common/LoadingAnimation';
 import StagingBanner from './components/common/StagingBanner';
-import { purgeExpiredFitTests } from './services/firebaseDb';
 import { resolveAppRoute } from './utils/appRoute';
 import { isAccessWindowOpen, isAdminOrAbove } from './utils/roles';
 import './styles/App.css';
@@ -92,16 +91,6 @@ const AppContent = () => {
       setCurrentPage('form');
     }
   }, [currentPage, user]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !user?.uid) return undefined;
-
-    purgeExpiredFitTests(user.uid).catch((error) => {
-      console.error('Fit test retention cleanup failed:', error);
-    });
-
-    return undefined;
-  }, [isAuthenticated, user?.uid]);
 
   if (route.kind === 'verify') {
     return (

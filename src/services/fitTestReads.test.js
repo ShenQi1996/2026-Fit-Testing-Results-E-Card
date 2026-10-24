@@ -1,24 +1,9 @@
-import { getDoc, getDocs, limit, orderBy, where, writeBatch } from 'firebase/firestore';
+import { getDoc, getDocs, where, writeBatch } from 'firebase/firestore';
 import {
-  FIT_TEST_PURGE_INTERVAL_MS,
-  FIT_TEST_PURGE_LIMIT,
-  FIT_TEST_PURGE_STORAGE_KEY,
   countFitTestsForUser,
   getFitTestCountsByUser,
   getUserFitTests,
-  purgeExpiredFitTests,
 } from './firebaseDb';
-
-const memoryStorage = (initial = {}) => {
-  const values = { ...initial };
-  return {
-    getItem: (key) => (Object.prototype.hasOwnProperty.call(values, key) ? values[key] : null),
-    setItem: (key, value) => {
-      values[key] = String(value);
-    },
-    values,
-  };
-};
 
 const userDoc = (role, extra = {}) => ({
   exists: () => true,
@@ -53,98 +38,8 @@ beforeEach(() => {
   getDoc.mockReset();
   getDocs.mockReset();
   where.mockClear();
-  orderBy.mockClear();
-  limit.mockClear();
   writeBatch.mockClear();
   getDocs.mockResolvedValue({ docs: [] });
-});
-
-test('purgeExpiredFitTests skips Firestore when this browser ran it within 24 hours', async () => {
-  const storage = memoryStorage({
-    [FIT_TEST_PURGE_STORAGE_KEY]: String(Date.now() - 60 * 60 * 1000),
-  });
-
-  await expect(purgeExpiredFitTests('admin-1', { storage })).resolves.toBe(0);
-  expect(getDocs).not.toHaveBeenCalled();
-});
-
-test('a scoped admin purge stays inside that admin\'s schools and stores the run', async () => {
-  getDoc.mockResolvedValue(userDoc('admin'));
-  const storage = memoryStorage();
-
-  await expect(purgeExpiredFitTests('admin-1', { storage, now: NOW })).resolves.toBe(0);
-
-  expect(where).toHaveBeenCalledWith('schoolsList', 'in', ['Helene College of Nursing']);
-  expect(where).toHaveBeenCalledWith('retentionDate', '<', expect.objectContaining({ kind: 'timestamp' }));
-  expect(orderBy).toHaveBeenCalledWith('retentionDate', 'asc');
-  expect(limit).toHaveBeenCalledWith(FIT_TEST_PURGE_LIMIT);
-  expect(where).not.toHaveBeenCalledWith('createdAt', '<', expect.anything());
-  const stamp = Number(storage.values[FIT_TEST_PURGE_STORAGE_KEY]);
-  expect(stamp).toBe(NOW.getTime());
-
-  getDocs.mockClear();
-  await purgeExpiredFitTests('admin-1', { storage, now: new Date(NOW.getTime() + 1000) });
-  expect(getDocs).not.toHaveBeenCalled();
-  expect(FIT_TEST_PURGE_INTERVAL_MS).toBe(24 * 60 * 60 * 1000);
-});
-
-test('a scoped admin with no schools does not scan fit tests', async () => {
-  getDoc.mockResolvedValue(userDoc('admin', { schools: [] }));
-  const storage = memoryStorage();
-
-  await expect(purgeExpiredFitTests('admin-1', { storage, now: NOW })).resolves.toBe(0);
-
-  expect(getDocs).not.toHaveBeenCalled();
-  expect(Number(storage.values[FIT_TEST_PURGE_STORAGE_KEY])).toBe(NOW.getTime());
-});
-
-test('a super admin purge orders by retentionDate and does not use createdAt as the cutoff', async () => {
-  getDoc.mockResolvedValue(userDoc('superadmin'));
-  const storage = memoryStorage();
-
-  await purgeExpiredFitTests('super-1', { storage, now: NOW });
-
-  expect(orderBy).toHaveBeenCalledWith('retentionDate', 'asc');
-  expect(where).toHaveBeenCalledWith('retentionDate', '<', expect.objectContaining({ kind: 'timestamp' }));
-  expect(orderBy).toHaveBeenCalledWith('createdAt', 'desc');
-  expect(where).not.toHaveBeenCalledWith('schoolsList', 'in', expect.anything());
-  expect(where).not.toHaveBeenCalledWith('createdAt', '<', expect.anything());
-});
-
-test('a tester purge is limited to that user and orders by the retention field', async () => {
-  getDoc.mockResolvedValue(userDoc('tester'));
-  const storage = memoryStorage();
-
-  await purgeExpiredFitTests('tester-1', { storage, now: NOW });
-
-  expect(where).toHaveBeenCalledWith('userId', '==', 'tester-1');
-  expect(where).toHaveBeenCalledWith('retentionDate', '<', expect.objectContaining({ kind: 'timestamp' }));
-  expect(orderBy).toHaveBeenCalledWith('retentionDate', 'asc');
-  expect(limit).toHaveBeenCalledWith(FIT_TEST_PURGE_LIMIT);
-  expect(where).not.toHaveBeenCalledWith('createdAt', '<', expect.anything());
-  expect(where).not.toHaveBeenCalledWith('schoolsList', 'in', expect.anything());
-});
-
-test('a failed purge still records the last run so the next load does not retry', async () => {
-  getDoc.mockResolvedValue(userDoc('tester'));
-  getDocs.mockRejectedValue(new Error('offline'));
-  const storage = memoryStorage();
-
-  await expect(purgeExpiredFitTests('tester-1', { storage, now: NOW })).resolves.toBe(0);
-  expect(Number(storage.values[FIT_TEST_PURGE_STORAGE_KEY])).toBe(NOW.getTime());
-
-  getDocs.mockClear();
-  await purgeExpiredFitTests('tester-1', { storage, now: new Date(NOW.getTime() + 1000) });
-  expect(getDocs).not.toHaveBeenCalled();
-});
-
-test('purge deletes a 4-year-old issue date even when createdAt is recent', async () => {
-  getDoc.mockResolvedValue(userDoc('tester'));
-  getDocs.mockResolvedValue({ docs: reproDocs });
-  const storage = memoryStorage();
-
-  await expect(purgeExpiredFitTests('tester-1', { storage, now: NOW })).resolves.toBe(1);
-  expect(writeBatch).toHaveBeenCalled();
 });
 
 test('counts match the results list for 2 live records plus a 4-year-old issue date', async () => {
@@ -185,4 +80,18 @@ test('getUserFitTests does not write lookup or verification documents', async ()
 
   expect(records.map((record) => record.id)).toEqual(['ft-1']);
   expect(writeBatch).not.toHaveBeenCalled();
+});
+
+test('a missing composite index is surfaced instead of an empty results list', async () => {
+  const indexError = new Error(
+    'The query requires an index. You can create it here: https://console.firebase.google.com/example'
+  );
+  indexError.code = 'failed-precondition';
+  getDocs.mockRejectedValue(indexError);
+
+  await expect(getUserFitTests('tester-1', { now: NOW })).rejects.toMatchObject({
+    message: 'FIREBASE_INDEX_REQUIRED',
+    indexUrl: 'https://console.firebase.google.com/example',
+  });
+  await expect(countFitTestsForUser('tester-1', { now: NOW })).rejects.toBe(indexError);
 });

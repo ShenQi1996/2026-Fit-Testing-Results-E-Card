@@ -13,7 +13,6 @@ import {
   query,
   where,
   orderBy,
-  limit,
   Timestamp,
   deleteField,
   writeBatch,
@@ -21,7 +20,6 @@ import {
 import { db } from '../config/firebase';
 import {
   calculateExpirationDate,
-  getFitTestRetentionCutoff,
   getFitTestRetentionDate,
   isExpirationDatePast,
   isFitTestPastRetention,
@@ -52,8 +50,6 @@ import {
   isSuperAdmin,
 } from '../utils/roles';
 import { normalizeSchoolList } from '../utils/schoolScope';
-
-const FIRESTORE_BATCH_LIMIT = 400;
 
 const FIT_TESTS_COLLECTION = 'fitTests';
 const FIT_TEST_LOOKUPS_COLLECTION = 'fitTestLookups';
@@ -260,12 +256,25 @@ const listScopedTesters = async (schools, extraConstraints = []) => {
   const scopedSchools = normalizeSchoolList(schools);
   if (scopedSchools.length === 0) return [];
   const snapshots = await Promise.all(
-    chunkValues(scopedSchools, FIRESTORE_IN_LIMIT).map((chunk) => getDocs(query(
-      collection(db, USERS_COLLECTION),
-      ...extraConstraints,
-      where('role', '==', USER_ROLE_TESTER),
-      where('school', 'in', chunk),
-    )))
+    chunkValues(scopedSchools, FIRESTORE_IN_LIMIT).map(async (chunk) => {
+      try {
+        return await getDocs(query(
+          collection(db, USERS_COLLECTION),
+          ...extraConstraints,
+          where('role', '==', USER_ROLE_TESTER),
+          where('school', 'in', chunk),
+        ));
+      } catch (error) {
+        // A missing composite index must not look like an empty school.
+        if (isIndexError(error)) {
+          console.error(
+            'Firestore users query needs a composite index on role and school. Deploy firestore.indexes.json.',
+            error,
+          );
+        }
+        throw error;
+      }
+    })
   );
   return docsById(snapshots);
 };
@@ -363,84 +372,6 @@ const isIndexError = (error) => (
   || error?.message?.toLowerCase().includes('query requires an index')
 );
 
-const fitTestQuery = (...constraints) => query(collection(db, FIT_TESTS_COLLECTION), ...constraints);
-
-const readFitTestQuery = async (constraints) => {
-  const snapshot = await getDocs(fitTestQuery(...constraints));
-  return snapshot.docs;
-};
-
-/** A missing composite index should not block the unordered fallback. */
-const readFitTestQueryOrEmpty = async (constraints) => {
-  try {
-    return await readFitTestQuery(constraints);
-  } catch (error) {
-    if (!isIndexError(error)) throw error;
-    console.error('Fit test purge query needs an index:', error);
-    return [];
-  }
-};
-
-const mergeFitTestDocs = (groups) => {
-  const byId = new Map();
-  groups.flat().forEach((docSnap) => {
-    if (docSnap?.id && !byId.has(docSnap.id)) byId.set(docSnap.id, docSnap);
-  });
-  return [...byId.values()];
-};
-
-const byRetentionDate = (a, b) => {
-  const aTime = getFitTestRetentionDate(a.data?.() || {})?.getTime() ?? Number.POSITIVE_INFINITY;
-  const bTime = getFitTestRetentionDate(b.data?.() || {})?.getTime() ?? Number.POSITIVE_INFINITY;
-  return aTime - bTime;
-};
-
-const deleteExpiredFitTestDocuments = async (docs = []) => {
-  const expiredDocs = docs.filter((docSnap) => isFitTestPastRetention(docSnap.data() || {}));
-  if (expiredDocs.length === 0) {
-    return 0;
-  }
-
-  for (let i = 0; i < expiredDocs.length; i += FIRESTORE_BATCH_LIMIT) {
-    const chunk = expiredDocs.slice(i, i + FIRESTORE_BATCH_LIMIT);
-    const lookupRefsToDelete = [];
-
-    await Promise.all(chunk.map(async (docSnap) => {
-      try {
-        const data = docSnap.data() || {};
-        // Include any stored key so lookups from an older key format also go.
-        const keys = new Set([await resolveLookupKey(data), data.lookupKey].filter(Boolean));
-
-        for (const key of keys) {
-          const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, key);
-          const lookupSnap = await getDoc(lookupRef);
-          if (lookupSnap.exists() && lookupSnap.data()?.fitTestId === docSnap.id) {
-            lookupRefsToDelete.push(lookupRef);
-          }
-        }
-
-        const verificationToken = normalizeVerificationToken(data.verificationToken);
-        if (isValidVerificationToken(verificationToken)) {
-          lookupRefsToDelete.push(doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken));
-        }
-      } catch (error) {
-        console.error('Error resolving expired fit test lookup:', error);
-      }
-    }));
-
-    const batch = writeBatch(db);
-    chunk.forEach((docSnap) => {
-      batch.delete(docSnap.ref);
-    });
-    lookupRefsToDelete.forEach((lookupRef) => {
-      batch.delete(lookupRef);
-    });
-    await batch.commit();
-  }
-
-  return expiredDocs.length;
-};
-
 const mapFitTestDoc = (docSnap) => {
   const data = docSnap.data() || {};
   return {
@@ -482,115 +413,13 @@ const repointLookupToLatestRemaining = async (lookupKey, removedFitTestId, fallb
   }
 };
 
-/** One browser runs retention cleanup at most this often. */
-export const FIT_TEST_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
-export const FIT_TEST_PURGE_STORAGE_KEY = 'ecard.fitTestPurgeAt';
-/** Caps a single cleanup so it cannot read the whole fitTests collection. */
-export const FIT_TEST_PURGE_LIMIT = 40;
-
-const readPurgeStamp = (storage) => {
-  try {
-    const value = Number(storage?.getItem?.(FIT_TEST_PURGE_STORAGE_KEY));
-    return Number.isFinite(value) ? value : 0;
-  } catch {
-    return 0;
-  }
-};
-
-const writePurgeStamp = (storage, nowMs) => {
-  try {
-    storage?.setItem?.(FIT_TEST_PURGE_STORAGE_KEY, String(nowMs));
-  } catch {
-    // Private browsing can reject localStorage. The cleanup still ran.
-  }
-};
+// Expired-record deletion is disabled. Lists and counts hide records past the
+// retention window with isFitTestPastRetention. Nothing in the app deletes a
+// fit test because of its age.
 
 /**
- * Docs this purge may delete. Retention follows issue date (then createdAt),
- * the same rule as isFitTestPastRetention. createdAt alone misses a card that
- * was saved recently with an old issue date.
- * Super admins walk oldest retentionDate values, then the newest saves.
- * Scoped admins only read their schools. Testers only read their own cards.
- * Each query is capped at FIT_TEST_PURGE_LIMIT.
- */
-const collectPurgeDocs = async (userId, access, cutoff) => {
-  const cutoffTs = Timestamp.fromDate(cutoff);
-  const page = limit(FIT_TEST_PURGE_LIMIT);
-  const oldestStamped = [
-    where('retentionDate', '<', cutoffTs),
-    orderBy('retentionDate', 'asc'),
-    page,
-  ];
-
-  if (isSuperAdmin(access.role)) {
-    const [stamped, recentSaves] = await Promise.all([
-      readFitTestQueryOrEmpty(oldestStamped),
-      readFitTestQueryOrEmpty([orderBy('createdAt', 'desc'), page]),
-    ]);
-    return mergeFitTestDocs([stamped, recentSaves]).sort(byRetentionDate);
-  }
-
-  if (isAdminOrAbove(access)) {
-    const schools = normalizeSchoolList(access.schools);
-    if (schools.length === 0) return [];
-    const groups = [];
-    for (const chunk of chunkValues(schools, FIRESTORE_IN_LIMIT)) {
-      if (groups.flat().length >= FIT_TEST_PURGE_LIMIT) break;
-      const stamped = await readFitTestQueryOrEmpty([
-        where('schoolsList', 'in', chunk),
-        ...oldestStamped,
-      ]);
-      const inSchool = await readFitTestQuery([
-        where('schoolsList', 'in', chunk),
-        page,
-      ]);
-      groups.push(stamped, inSchool);
-    }
-    return mergeFitTestDocs(groups).sort(byRetentionDate).slice(0, FIT_TEST_PURGE_LIMIT);
-  }
-
-  const [stamped, ownRecords] = await Promise.all([
-    readFitTestQueryOrEmpty([where('userId', '==', userId), ...oldestStamped]),
-    readFitTestQuery([where('userId', '==', userId), page]),
-  ]);
-  return mergeFitTestDocs([stamped, ownRecords]).sort(byRetentionDate);
-};
-
-/**
- * Delete fit tests older than 3 years from the issue date.
- * At most FIT_TEST_PURGE_LIMIT docs are read per query, and a browser runs
- * this at most once per 24 hours. A failed run still records the stamp so
- * the next page load does not retry immediately.
- * @param {string} userId
- * @param {{ now?: Date, storage?: Storage|null }} [options]
- * @returns {Promise<number>} Number of records removed
- */
-export const purgeExpiredFitTests = async (userId, options = {}) => {
-  if (!userId) return 0;
-
-  const now = options.now instanceof Date ? options.now : new Date();
-  const storage = options.storage !== undefined
-    ? options.storage
-    : (typeof localStorage !== 'undefined' ? localStorage : null);
-  const nowMs = now.getTime();
-  const lastRun = readPurgeStamp(storage);
-  if (lastRun && nowMs - lastRun < FIT_TEST_PURGE_INTERVAL_MS) return 0;
-
-  try {
-    const access = await getUserAccessProfile(userId);
-    const docs = await collectPurgeDocs(userId, access, getFitTestRetentionCutoff(now));
-    return await deleteExpiredFitTestDocuments(docs);
-  } catch (error) {
-    console.error('Error purging expired fit tests:', error);
-    return 0;
-  } finally {
-    writePurgeStamp(storage, nowMs);
-    notifyFitTestActivity();
-  }
-};
-
-/**
- * Get all fit test records for a user
+ * Get all fit test records for a user. Does not delete expired records.
+ * A missing userId + createdAt index is reported; it is not an empty list.
  * @param {string} userId - User ID
  * @returns {Promise<Array>} Array of fit test records
  */
@@ -610,13 +439,13 @@ export const getUserFitTests = async (userId, options = {}) => {
       .map(mapFitTestDoc);
   } catch (error) {
     console.error('Error fetching fit tests:', error);
-    
-    // Check if this is a Firebase index error
-    // Firebase index errors can have code 'failed-precondition' or message containing 'index'
+
     if (isIndexError(error)) {
-      // Extract the index creation URL from the error if available
-      // Firebase usually includes a URL in the error message
-      const indexUrlMatch = error.message?.match(/https:\/\/[^\s\)]+/);
+      console.error(
+        'Firestore fitTests query needs a composite index on userId and createdAt. Deploy firestore.indexes.json.',
+        error,
+      );
+      const indexUrlMatch = error.message?.match(/https:\/\/[^\s)]+/);
       const indexUrl = indexUrlMatch ? indexUrlMatch[0] : null;
       
       const indexError = new Error('FIREBASE_INDEX_REQUIRED');
@@ -643,16 +472,27 @@ export const getUserFitTests = async (userId, options = {}) => {
 export const countFitTestsForUser = async (userId, options = {}) => {
   if (!userId) return 0;
   const now = options.now instanceof Date ? options.now : new Date();
-  const snapshot = await getDocs(query(
-    collection(db, FIT_TESTS_COLLECTION),
-    where('userId', '==', userId),
-  ));
+  let snapshot;
+  try {
+    snapshot = await getDocs(query(
+      collection(db, FIT_TESTS_COLLECTION),
+      where('userId', '==', userId),
+    ));
+  } catch (error) {
+    if (isIndexError(error)) {
+      console.error(
+        'Firestore fitTests count needs an index on userId. Deploy firestore.indexes.json.',
+        error,
+      );
+    }
+    throw error;
+  }
   return snapshot.docs.filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now)).length;
 };
 
 /**
  * Admin-only: count fit test results for the given user ids.
- * Does not purge the fitTests collection.
+ * Does not delete fit test records.
  * @param {string} adminUserId
  * @param {string[]} [userIds]
  * @returns {Promise<Record<string, number>>}

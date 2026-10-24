@@ -1,6 +1,6 @@
 const listeners = new Set();
 
-/** Sidebar recounts when a fit test is saved or the retention purge finishes. */
+/** Sidebar recounts when a fit test is saved, edited, or deleted. */
 export const subscribeFitTestActivity = (listener) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
