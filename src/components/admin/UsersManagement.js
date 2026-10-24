@@ -54,8 +54,14 @@ const SchoolCheckboxGroup = ({
   selected,
   onChange,
   disabled,
+  error,
 }) => (
-  <fieldset className="school-checkboxes" aria-label="Schools" disabled={disabled}>
+  <fieldset
+    className={`school-checkboxes${error ? ' field-invalid' : ''}`}
+    aria-label="Schools"
+    aria-invalid={error ? true : undefined}
+    disabled={disabled}
+  >
     <legend>Schools</legend>
     <div className="school-checkbox-list">
       {schools.map((school) => {
@@ -72,6 +78,7 @@ const SchoolCheckboxGroup = ({
         );
       })}
     </div>
+    <FieldMessage message={error} />
   </fieldset>
 );
 
@@ -81,6 +88,27 @@ const withAssignedNames = (masterNames, assignedNames) => {
 };
 
 const NO_SCHOOLS_CREATE_MESSAGE = 'You have no schools assigned, so you cannot add a tester. Ask a super admin to assign a school.';
+const SCHOOL_REQUIRED_MESSAGE = 'At least one school is required.';
+const FIELD_REQUIRED_MESSAGES = {
+  name: 'Name is required.',
+  email: 'Email is required.',
+  role: 'Role is required.',
+  password: 'Password is required.',
+  schools: SCHOOL_REQUIRED_MESSAGE,
+};
+
+const isBlank = (value) => !String(value ?? '').trim();
+
+const dropFieldError = (errors, field, fixed) => {
+  if (!errors?.[field] || !fixed) return errors;
+  const next = { ...errors };
+  delete next[field];
+  return next;
+};
+
+const FieldMessage = ({ message }) => (
+  message ? <span className="field-error" role="alert">{message}</span> : null
+);
 
 const formatDate = (iso) => {
   if (!iso) return '—';
@@ -183,6 +211,8 @@ const UsersManagement = () => {
   const [newSchoolName, setNewSchoolName] = useState('');
   const [editingSchool, setEditingSchool] = useState(null);
   const [schoolListError, setSchoolListError] = useState('');
+  const [editFieldErrors, setEditFieldErrors] = useState({});
+  const [createFieldErrors, setCreateFieldErrors] = useState({});
 
   const isAdmin = isAdminOrAbove(user);
   const superAdmin = isSuperAdmin(user?.role);
@@ -292,6 +322,17 @@ const UsersManagement = () => {
   ), [pendingUsers, user]);
 
   const handleDraftChange = (userId, field, value) => {
+    const fixed = field === 'schools'
+      ? normalizeSchoolList(value).length > 0
+      : !isBlank(value);
+    setEditFieldErrors((prev) => {
+      const nextFields = dropFieldError(prev[userId], field, fixed);
+      if (nextFields === prev[userId]) return prev;
+      const next = { ...prev };
+      if (!nextFields || Object.keys(nextFields).length === 0) delete next[userId];
+      else next[userId] = nextFields;
+      return next;
+    });
     setEditDrafts((prev) => ({
       ...prev,
       [userId]: {
@@ -303,13 +344,39 @@ const UsersManagement = () => {
 
   const handleSave = async (targetUserId) => {
     if (!user?.uid) return;
+    const draft = editDrafts[targetUserId] || {};
+    const target = users.find((item) => item.id === targetUserId);
+    const tagRole = draft.role || target?.role || 'tester';
+    const selectedSchools = normalizeSchoolList(draft.schools);
+    const fieldErrors = {};
+    if (superAdmin) {
+      if (isBlank(draft.name)) fieldErrors.name = FIELD_REQUIRED_MESSAGES.name;
+      if (isBlank(draft.email)) fieldErrors.email = FIELD_REQUIRED_MESSAGES.email;
+    }
+    if (isBlank(tagRole)) fieldErrors.role = FIELD_REQUIRED_MESSAGES.role;
+    if (
+      superAdmin
+      && targetUserId !== user.uid
+      && tagRole === USER_ROLE_ADMIN
+      && selectedSchools.length === 0
+    ) {
+      fieldErrors.schools = FIELD_REQUIRED_MESSAGES.schools;
+    }
+    if (Object.keys(fieldErrors).length > 0) {
+      setEditFieldErrors((prev) => ({ ...prev, [targetUserId]: fieldErrors }));
+      setSuccess('');
+      return;
+    }
+    setEditFieldErrors((prev) => {
+      if (!prev[targetUserId]) return prev;
+      const next = { ...prev };
+      delete next[targetUserId];
+      return next;
+    });
     setSavingId(targetUserId);
     setError('');
     setSuccess('');
     try {
-      const draft = editDrafts[targetUserId] || {};
-      const target = users.find((item) => item.id === targetUserId);
-      const tagRole = draft.role || target?.role || 'tester';
       const updates = {
         name: draft.name,
         email: draft.email,
@@ -317,8 +384,10 @@ const UsersManagement = () => {
         status: draft.status,
       };
       if (superAdmin && targetUserId !== user.uid) {
-        if (tagRole === USER_ROLE_ADMIN || tagRole === USER_ROLE_SUPERADMIN) {
-          updates.schools = normalizeSchoolList(draft.schools);
+        if (tagRole === USER_ROLE_ADMIN) {
+          updates.schools = selectedSchools;
+        } else if (tagRole === USER_ROLE_SUPERADMIN) {
+          if (selectedSchools.length > 0) updates.schools = selectedSchools;
         } else {
           updates.school = draft.school || '';
         }
@@ -424,18 +493,39 @@ const UsersManagement = () => {
     && actorSchools.length > 1
     && !actorSchools.includes(createForm.school);
   const creatingAdmin = superAdmin && createRole === USER_ROLE_ADMIN;
-  const createAdminSchoolsMissing = creatingAdmin && normalizeSchoolList(createForm.schools).length === 0;
   const createBlocked = !superAdmin && creatingTester && actorSchools.length === 0;
+
+  const setCreateValue = (field, value) => {
+    const fixed = field === 'schools'
+      ? normalizeSchoolList(value).length > 0
+      : !isBlank(value);
+    setCreateFieldErrors((prev) => dropFieldError(prev, field, fixed));
+    setCreateForm((prev) => ({ ...prev, [field]: value }));
+  };
 
   const handleCreate = async (event) => {
     event.preventDefault();
     if (!user?.uid) return;
+    const role = assignableRoles.includes(createForm.role) ? createForm.role : 'tester';
+    const fieldErrors = {};
+    if (isBlank(createForm.name)) fieldErrors.name = FIELD_REQUIRED_MESSAGES.name;
+    if (isBlank(createForm.email)) fieldErrors.email = FIELD_REQUIRED_MESSAGES.email;
+    if (isBlank(createForm.password)) fieldErrors.password = FIELD_REQUIRED_MESSAGES.password;
+    if (isBlank(role)) fieldErrors.role = FIELD_REQUIRED_MESSAGES.role;
+    if (role === USER_ROLE_ADMIN && normalizeSchoolList(createForm.schools).length === 0) {
+      fieldErrors.schools = FIELD_REQUIRED_MESSAGES.schools;
+    }
+    if (Object.keys(fieldErrors).length > 0) {
+      setCreateFieldErrors(fieldErrors);
+      setSuccess('');
+      return;
+    }
+    setCreateFieldErrors({});
 
     setCreating(true);
     setError('');
     setSuccess('');
     try {
-      const role = assignableRoles.includes(createForm.role) ? createForm.role : 'tester';
       if (!superAdmin && role === USER_ROLE_TESTER && actorSchools.length === 0) {
         throw new Error(NO_SCHOOLS_CREATE_MESSAGE);
       }
@@ -455,11 +545,7 @@ const UsersManagement = () => {
       };
       if (role === USER_ROLE_TESTER && school) payload.school = school;
       if (role === USER_ROLE_ADMIN) {
-        const schools = normalizeSchoolList(createForm.schools);
-        if (!schools.length) {
-          throw new Error('Choose at least one school for this admin.');
-        }
-        payload.schools = schools;
+        payload.schools = normalizeSchoolList(createForm.schools);
       }
       const created = await createManagedAuthUser(user.uid, payload);
       setUsers((prev) => [created, ...prev]);
@@ -654,38 +740,46 @@ const UsersManagement = () => {
                 Email
                 <input
                   type="email"
-                  required
                   value={createForm.email}
-                  onChange={(e) => setCreateForm((prev) => ({ ...prev, email: e.target.value }))}
+                  aria-invalid={createFieldErrors.email ? true : undefined}
+                  className={createFieldErrors.email ? 'field-invalid' : undefined}
+                  onChange={(e) => setCreateValue('email', e.target.value)}
                   disabled={creating}
                 />
+                <FieldMessage message={createFieldErrors.email} />
               </label>
               <label>
                 Temporary Password
                 <input
                   type="password"
-                  required
-                  minLength={6}
                   value={createForm.password}
-                  onChange={(e) => setCreateForm((prev) => ({ ...prev, password: e.target.value }))}
+                  aria-invalid={createFieldErrors.password ? true : undefined}
+                  className={createFieldErrors.password ? 'field-invalid' : undefined}
+                  onChange={(e) => setCreateValue('password', e.target.value)}
                   disabled={creating}
                 />
+                <FieldMessage message={createFieldErrors.password} />
               </label>
               <label>
                 Name
                 <input
                   type="text"
                   value={createForm.name}
-                  onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))}
+                  aria-invalid={createFieldErrors.name ? true : undefined}
+                  className={createFieldErrors.name ? 'field-invalid' : undefined}
+                  onChange={(e) => setCreateValue('name', e.target.value)}
                   disabled={creating}
                 />
+                <FieldMessage message={createFieldErrors.name} />
               </label>
               <label>
                 Role
                 <select
                   aria-label="Role"
+                  aria-invalid={createFieldErrors.role ? true : undefined}
+                  className={createFieldErrors.role ? 'field-invalid' : undefined}
                   value={creatableRoles.includes(createForm.role) ? createForm.role : 'tester'}
-                  onChange={(e) => setCreateForm((prev) => ({ ...prev, role: e.target.value }))}
+                  onChange={(e) => setCreateValue('role', e.target.value)}
                   disabled={creating}
                 >
                   {creatableRoles.filter((role) => role !== USER_ROLE_SUPERADMIN).map((role) => (
@@ -759,7 +853,8 @@ const UsersManagement = () => {
                   schools={masterSchools}
                   selected={normalizeSchoolList(createForm.schools)}
                   disabled={creating}
-                  onChange={(schools) => setCreateForm((prev) => ({ ...prev, schools }))}
+                  error={createFieldErrors.schools}
+                  onChange={(schools) => setCreateValue('schools', schools)}
                 />
               )}
             </div>
@@ -769,7 +864,7 @@ const UsersManagement = () => {
             <button
               type="submit"
               className="users-primary-button"
-              disabled={creating || createBlocked || createSchoolMissing || createAdminSchoolsMissing}
+              disabled={creating || createBlocked || createSchoolMissing}
             >
               {creating ? 'Creating...' : 'Create User'}
             </button>
@@ -873,6 +968,7 @@ const UsersManagement = () => {
               const canEditSchoolTags = superAdmin && !isSelf && !roleIsSuperAdmin;
               const canEditSuperAdminSchools = superAdmin && !isSelf && roleIsSuperAdmin;
               const statusPill = accountStatusLabel(item);
+              const cardErrors = editFieldErrors[item.id] || {};
               return (
                 <article key={item.id} className="user-card">
                   <div className="user-card-top">
@@ -905,18 +1001,24 @@ const UsersManagement = () => {
                       <input
                         type="text"
                         value={draft.name || ''}
+                        aria-invalid={cardErrors.name ? true : undefined}
+                        className={cardErrors.name ? 'field-invalid' : undefined}
                         onChange={(e) => handleDraftChange(item.id, 'name', e.target.value)}
                         disabled={profileLocked || savingId === item.id}
                       />
+                      <FieldMessage message={cardErrors.name} />
                     </label>
                     <label>
                       Email
                       <input
                         type="email"
                         value={draft.email || ''}
+                        aria-invalid={cardErrors.email ? true : undefined}
+                        className={cardErrors.email ? 'field-invalid' : undefined}
                         onChange={(e) => handleDraftChange(item.id, 'email', e.target.value)}
                         disabled={profileLocked || savingId === item.id}
                       />
+                      <FieldMessage message={cardErrors.email} />
                     </label>
                     <label>
                       Role
@@ -925,6 +1027,8 @@ const UsersManagement = () => {
                       ) : (
                         <select
                           aria-label="Role"
+                          aria-invalid={cardErrors.role ? true : undefined}
+                          className={cardErrors.role ? 'field-invalid' : undefined}
                           value={currentRole}
                           onChange={(e) => handleDraftChange(item.id, 'role', e.target.value)}
                           disabled={locked || savingId === item.id || isSelf}
@@ -971,6 +1075,7 @@ const UsersManagement = () => {
                         schools={schoolChoices}
                         selected={assignedSchools}
                         disabled={savingId === item.id}
+                        error={cardErrors.schools}
                         onChange={(schools) => handleDraftChange(item.id, 'schools', schools)}
                       />
                     ) : (
