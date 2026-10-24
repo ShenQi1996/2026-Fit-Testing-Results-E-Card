@@ -1,6 +1,8 @@
 import {
   accessDateInputValue,
   accessWindowOrderError,
+  accessEndLocksAccount,
+  accountStatusLabel,
   canModifyManagedUser,
   isAdminOrAbove,
   isSuperAdmin,
@@ -53,6 +55,49 @@ describe('role helpers', () => {
       .toBe('Access end date cannot be before the start date.');
     expect(accessWindowOrderError('2026-10-10', '2026-10-10')).toBe('');
     expect(accessWindowOrderError('', '2026-10-10')).toBe('');
+  });
+
+  test('the status pill matches the rules end instant, including the equal boundary', () => {
+    const end = new Date('2026-10-23T15:00:00.000Z');
+    const approved = { role: 'admin', status: 'approved', endDate: end.toISOString() };
+    expect(accessEndLocksAccount(end.toISOString(), end)).toBe(false);
+    expect(accessEndLocksAccount(end.toISOString(), new Date(end.getTime() + 1))).toBe(true);
+    expect(accountStatusLabel(approved, end)).toEqual({
+      label: 'Approved',
+      statusClass: 'status-approved',
+    });
+    expect(accountStatusLabel(approved, new Date(end.getTime() - 1))).toEqual({
+      label: 'Approved',
+      statusClass: 'status-approved',
+    });
+    expect(accountStatusLabel(approved, new Date(end.getTime() + 1))).toEqual({
+      label: 'Expired',
+      statusClass: 'status-expired',
+    });
+    expect(accountStatusLabel({
+      role: 'admin',
+      status: 'approved',
+      endDate: '2026-10-23T12:00:00.000Z',
+    }, new Date('2026-10-23T18:00:00.000Z')).label).toBe('Expired');
+    expect(accountStatusLabel({ role: 'admin', status: 'approved' }, end)).toEqual({
+      label: 'Approved',
+      statusClass: 'status-approved',
+    });
+    expect(accountStatusLabel({
+      role: 'admin',
+      status: 'pending',
+      endDate: '2020-01-01T00:00:00.000Z',
+    }, end)).toEqual({ label: 'Pending', statusClass: 'status-pending' });
+    expect(accountStatusLabel({
+      role: 'superadmin',
+      status: 'approved',
+      endDate: '2020-01-01T00:00:00.000Z',
+    }, end).label).toBe('Approved');
+    expect(accountStatusLabel({
+      role: 'admin',
+      status: 'approved',
+      endDate: 'not-a-timestamp',
+    }, end).label).toBe('Expired');
   });
 
   test('a regular admin cannot modify admin or superadmin profiles', () => {

@@ -90,6 +90,44 @@ export const accessWindowOrderError = (startDate, endDate) => {
 };
 
 /**
+ * Rules lock the account when endDate is present and request.time is after it.
+ * The end instant itself is still allowed (`request.time <= endDate`).
+ * A missing end leaves that side open. A present value that is not a time
+ * fails the rules' timestamp check.
+ */
+export const accessEndLocksAccount = (endDate, now = new Date()) => {
+  if (endDate == null || endDate === '') return false;
+  const end = parseAccessInstant(endDate);
+  if (!end) return true;
+  return now.getTime() > end.getTime();
+};
+
+const STATUS_PILL_LABELS = {
+  approved: 'Approved',
+  pending: 'Pending',
+  rejected: 'Rejected',
+};
+
+/**
+ * Label for the Manage Users status pill. Display only: an approved account
+ * whose end timestamp is before now reads Expired, matching endAllows in
+ * firestore.rules. Nothing is written back.
+ */
+export const accountStatusLabel = (user, now = new Date()) => {
+  const status = String(user?.status || 'pending').toLowerCase();
+  if (
+    status === 'approved'
+    && user?.role !== USER_ROLE_SUPERADMIN
+    && accessEndLocksAccount(user?.endDate, now)
+  ) {
+    return { label: 'Expired', statusClass: 'status-expired' };
+  }
+  const label = STATUS_PILL_LABELS[status]
+    || (status.charAt(0).toUpperCase() + status.slice(1));
+  return { label, statusClass: `status-${status}` };
+};
+
+/**
  * Roles a manager may set on an existing user from the client.
  * Never superadmin. A plain admin only keeps tester. A super admin may
  * set tester or admin.

@@ -139,6 +139,59 @@
   color: var(--text-secondary);
 }
 
+.users-form-grid .school-checkboxes {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  min-width: 0;
+}
+
+.school-checkboxes legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.school-checkbox-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.users-form-grid .school-checkbox {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.users-form-grid .school-checkbox.checked {
+  border-color: var(--teal);
+  background: rgba(20, 184, 166, 0.16);
+}
+
+.users-form-grid .school-checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 16px;
+  accent-color: var(--teal);
+}
+
 .users-form-grid input,
 .users-form-grid select,
 .users-form-grid .user-role-readonly,
@@ -153,6 +206,70 @@
   color: var(--text-primary);
   font-size: 14px;
   box-sizing: border-box;
+}
+
+.users-schools-section {
+  margin-bottom: 24px;
+}
+
+.users-schools-section .solution-profile-list,
+.users-schools-section > .users-search,
+.users-schools-section .solution-add-button {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.users-schools-section .solution-profile-item,
+.users-schools-section > .users-search,
+.users-schools-section .solution-add-button {
+  height: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.users-schools-section .solution-profile-item {
+  padding: 4px 12px;
+}
+
+.users-schools-section > .users-search {
+  margin-bottom: 12px;
+  padding: 0 12px;
+}
+
+.users-schools-section .solution-add-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0;
+  padding: 0 14px;
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
+}
+
+.users-schools-section .solution-profile-item .users-search {
+  flex: 1 1 160px;
+  width: auto;
+  height: 32px;
+  min-height: 0;
+  min-width: 0;
+  margin-bottom: 0;
+  padding: 0 10px;
+}
+
+.users-schools-section .solution-profile-details {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .users-schools-section .solution-profile-item {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    height: auto;
+    min-height: 44px;
+  }
 }
 
 .users-view-tabs {
@@ -311,8 +428,14 @@
 }
 
 .user-badge.role-admin {
-  background: rgba(11, 45, 74, 0.08);
-  color: var(--navy);
+  background: #d6e4f0;
+  color: #0B2D4A;
+}
+
+.user-badge.status-expired {
+  background: #c2410c;
+  color: #ffffff;
+  text-transform: none;
 }
 
 .user-badge.role-tester {

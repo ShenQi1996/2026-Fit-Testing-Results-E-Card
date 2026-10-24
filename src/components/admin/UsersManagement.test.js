@@ -1,4 +1,6 @@
 import React from 'react';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -136,6 +138,18 @@ const heleneAdmin = {
 
 const optionValues = (select) => select.findAllByType('option').map((option) => option.props.value);
 
+const schoolGroup = (root) => root.findByProps({ 'aria-label': 'Schools' });
+
+const checkboxNames = (group) => group.findAllByType('label').map((label) => (
+  label.findByType('span').children.join('')
+));
+
+const checkboxFor = (group, name) => group.findAllByType('label').find((label) => (
+  label.findByType('span').children.join('') === name
+)).findByType('input');
+
+const statusPill = (card) => card.findByProps({ 'aria-label': 'Account status' });
+
 const selectsByLabel = (renderer, label) => renderer.root.findAll(
   (node) => node.type === 'select' && node.props['aria-label'] === label,
 );
@@ -155,9 +169,9 @@ const pendingCards = (renderer) => renderer.root.findAllByProps({
 
 const cardText = (card) => card.findAllByType('p').map((node) => node.children.join('')).join(' ');
 
-const renderPage = async (user, pendingUsers = USERS.filter((item) => item.status === 'pending')) => {
+const renderPage = async (user, pendingUsers = USERS.filter((item) => item.status === 'pending'), users = USERS) => {
   useAuth.mockReturnValue({ user });
-  getAllUsers.mockResolvedValue(USERS);
+  getAllUsers.mockResolvedValue(users);
   getFitTestCountsByUser.mockResolvedValue({});
   getPendingUsers.mockResolvedValue(pendingUsers);
   let renderer;
@@ -326,7 +340,7 @@ test('a super admin sees every user and can set school tags', async () => {
 
   expect(visibleIds).toEqual(['super-1', 'admin-2', 'admin-helene', 'tester-1', 'tester-2']);
   expect(cardFor(renderer, 'super-1').findByProps({ 'aria-label': 'Schools' }).children)
-    .toEqual([`${HELENE}, ${SECOND}`]);
+    .toEqual(['All']);
 
   const testerCard = cardFor(renderer, 'tester-1');
   const schoolInput = testerCard.findByProps({ 'aria-label': 'School' });
@@ -635,27 +649,30 @@ test('the schools section is only shown to a super admin', async () => {
 
   const adminRenderer = await renderPage(scopedAdmin);
   expect(adminRenderer.root.findAllByProps({ 'aria-label': 'Master schools' })).toHaveLength(0);
-  expect(adminRenderer.root.findAllByType('button').some((button) => button.children.includes('Add school')))
+  expect(adminRenderer.root.findAllByType('button').some((button) => button.children.includes('+ Add School')))
     .toBe(false);
 
   const renderer = await renderPage(superAdminUser);
   const section = renderer.root.findByProps({ 'aria-label': 'Master schools' });
-  expect(section.findAllByType('button').map((button) => button.children.join('')))
-    .toEqual(expect.arrayContaining([`Edit`, `Remove ${HELENE}`, 'Add school']));
+  const sectionLabels = section.findAllByType('button').map((button) => button.props['aria-label']);
+  expect(sectionLabels).toEqual(expect.arrayContaining([`Edit ${HELENE}`, `Remove ${HELENE}`]));
+  expect(section.findAllByType('button').some((button) => button.children.includes('+ Add School'))).toBe(true);
+  expect(section.findAllByProps({ className: 'solution-profile-item' })).toHaveLength(1);
 
   await act(async () => {
     section.findAllByType('button')
-      .find((button) => button.children.includes(`Remove ${HELENE}`))
+      .find((button) => button.props['aria-label'] === `Remove ${HELENE}`)
       .props.onClick();
   });
   expect(removeMasterSchool).toHaveBeenCalledWith('super-1', HELENE);
 
   const nameInput = renderer.root.findByProps({ 'aria-label': 'New school name' });
+  expect(nameInput.props.className).toBe('users-search');
   await act(async () => {
     nameInput.props.onChange({ target: { value: 'North Campus' } });
   });
   await act(async () => {
-    renderer.root.findAllByType('button').find((button) => button.children.includes('Add school')).props.onClick();
+    renderer.root.findAllByType('button').find((button) => button.children.includes('+ Add School')).props.onClick();
   });
   await act(async () => {
     await Promise.resolve();
@@ -665,7 +682,7 @@ test('the schools section is only shown to a super admin', async () => {
   await act(async () => {
     renderer.root.findByProps({ 'aria-label': 'Master schools' })
       .findAllByType('button')
-      .find((button) => button.children.includes('Edit'))
+      .find((button) => button.props['aria-label'] === `Edit ${HELENE}`)
       .props.onClick();
   });
   await act(async () => {
@@ -674,12 +691,94 @@ test('the schools section is only shown to a super admin', async () => {
     });
   });
   await act(async () => {
-    renderer.root.findAllByType('button').find((button) => button.children.includes('Save school')).props.onClick();
+    renderer.root.findAllByType('button').find((button) => button.props['aria-label'] === 'Save school name').props.onClick();
   });
   expect(renameMasterSchool).toHaveBeenCalledWith('super-1', HELENE, 'North Campus');
 });
 
-test('a super admin multi-selects schools when creating an admin', async () => {
+test('a super admin card shows All and saves schools on another super admin', async () => {
+  listMasterSchools.mockResolvedValue([HELENE, SECOND]);
+  updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
+    id,
+    role: 'superadmin',
+    ...draft,
+  }));
+  const stored = {
+    id: 'super-stored',
+    name: 'Other Super',
+    email: 'other-super@example.com',
+    role: 'superadmin',
+    status: 'approved',
+    schools: [HELENE],
+  };
+  const sam = {
+    id: 'super-sam',
+    name: 'Sam',
+    email: 'qisam1989@gmail.com',
+    role: 'superadmin',
+    status: 'approved',
+  };
+  const renderer = await renderPage({
+    uid: 'super-sam',
+    role: 'superadmin',
+    email: 'qisam1989@gmail.com',
+  }, [], [stored, sam]);
+
+  const schoolSummary = (card) => card.findAll(
+    (node) => node.type === 'div' && node.props['aria-label'] === 'Schools',
+  );
+  expect(schoolSummary(cardFor(renderer, 'super-stored'))).toHaveLength(1);
+  expect(schoolSummary(cardFor(renderer, 'super-stored'))[0].children).toEqual(['All']);
+  expect(schoolSummary(cardFor(renderer, 'super-sam'))).toHaveLength(1);
+  expect(schoolSummary(cardFor(renderer, 'super-sam'))[0].children).toEqual(['All']);
+  const storedBoxes = cardFor(renderer, 'super-stored').findByProps({ className: 'school-checkboxes' });
+  expect(checkboxNames(storedBoxes)).toEqual([HELENE, SECOND]);
+  expect(checkboxFor(storedBoxes, HELENE).props.checked).toBe(true);
+  expect(checkboxFor(storedBoxes, SECOND).props.checked).toBe(false);
+  expect(cardFor(renderer, 'super-sam').findAllByProps({ className: 'school-checkboxes' }))
+    .toHaveLength(0);
+
+  await act(async () => {
+    checkboxFor(cardFor(renderer, 'super-stored').findByProps({ className: 'school-checkboxes' }), SECOND)
+      .props.onChange({ target: { checked: true } });
+  });
+  const name = cardFor(renderer, 'super-stored').findAllByType('input')
+    .find((input) => input.props.type === 'text');
+  await act(async () => {
+    name.props.onChange({ target: { value: 'Renamed Super' } });
+  });
+  const save = cardFor(renderer, 'super-stored').findAllByType('button')
+    .find((button) => button.children.includes('Save'));
+  await act(async () => {
+    save.props.onClick();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  const payload = updateManagedUser.mock.calls[0][2];
+  expect(payload.name).toBe('Renamed Super');
+  expect(payload.schools).toEqual([HELENE, SECOND]);
+  expect(payload).not.toHaveProperty('school');
+
+  const ownName = cardFor(renderer, 'super-sam').findAllByType('input')
+    .find((input) => input.props.type === 'text');
+  await act(async () => {
+    ownName.props.onChange({ target: { value: 'Sam Renamed' } });
+  });
+  const ownSave = cardFor(renderer, 'super-sam').findAllByType('button')
+    .find((button) => button.children.includes('Save'));
+  await act(async () => {
+    ownSave.props.onClick();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(updateManagedUser.mock.calls[1][2]).not.toHaveProperty('schools');
+  expect(updateManagedUser.mock.calls[1][2]).not.toHaveProperty('school');
+});
+
+test('a super admin checks schools when creating an admin', async () => {
   listMasterSchools.mockResolvedValue([HELENE, SECOND]);
   createManagedAuthUser.mockResolvedValue({
     id: 'new-admin',
@@ -694,20 +793,27 @@ test('a super admin multi-selects schools when creating an admin', async () => {
     form.findByProps({ 'aria-label': 'Role' }).props.onChange({ target: { value: 'admin' } });
   });
   const nextForm = renderer.root.findByProps({ className: 'users-create-form' });
-  const schools = nextForm.findByProps({ 'aria-label': 'Schools' });
-  expect(schools.props.multiple).toBe(true);
-  expect(optionValues(schools)).toEqual([HELENE, SECOND]);
+  const schools = schoolGroup(nextForm);
+  expect(schools.type).toBe('fieldset');
+  expect(checkboxNames(schools)).toEqual([HELENE, SECOND]);
+  expect(checkboxFor(schools, HELENE).props.checked).toBe(false);
+  expect(checkboxFor(schools, SECOND).props.checked).toBe(false);
   expect(nextForm.findAll(
     (node) => node.type === 'select' && node.props['aria-label'] === 'School',
   )).toHaveLength(0);
   expect(createUserButton(nextForm).props.disabled).toBe(true);
 
   await act(async () => {
-    schools.props.onChange({
-      target: { selectedOptions: [{ value: HELENE }, { value: SECOND }] },
-    });
+    checkboxFor(schoolGroup(renderer.root.findByProps({ className: 'users-create-form' })), HELENE)
+      .props.onChange({ target: { checked: true } });
+  });
+  await act(async () => {
+    checkboxFor(schoolGroup(renderer.root.findByProps({ className: 'users-create-form' })), SECOND)
+      .props.onChange({ target: { checked: true } });
   });
   const readyForm = renderer.root.findByProps({ className: 'users-create-form' });
+  expect(checkboxFor(schoolGroup(readyForm), HELENE).props.checked).toBe(true);
+  expect(checkboxFor(schoolGroup(readyForm), SECOND).props.checked).toBe(true);
   expect(createUserButton(readyForm).props.disabled).toBe(false);
   await submitCreateForm(readyForm);
 
@@ -717,13 +823,167 @@ test('a super admin multi-selects schools when creating an admin', async () => {
   expect(payload.role).toBe('admin');
 });
 
-test('a super admin edits another admin with the school multi-select', async () => {
+test('a super admin edits another admin with school checkboxes', async () => {
   listMasterSchools.mockResolvedValue([HELENE]);
+  updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
+    id,
+    role: 'admin',
+    status: 'approved',
+    name: 'Ada',
+    email: 'ada@example.com',
+    ...draft,
+  }));
   const renderer = await renderPage(superAdminUser);
   const adminCard = cardFor(renderer, 'admin-2');
-  const schools = adminCard.findByProps({ 'aria-label': 'Schools' });
-  expect(schools.type).toBe('select');
-  expect(schools.props.multiple).toBe(true);
-  expect(optionValues(schools)).toEqual([HELENE, SECOND]);
-  expect(cardFor(renderer, 'super-1').findByProps({ 'aria-label': 'Schools' }).type).not.toBe('select');
+  const schools = schoolGroup(adminCard);
+  expect(schools.type).toBe('fieldset');
+  expect(schools.findAllByType('select')).toHaveLength(0);
+  expect(checkboxNames(schools)).toEqual([HELENE, SECOND]);
+  expect(checkboxFor(schools, HELENE).props.checked).toBe(true);
+  expect(checkboxFor(schools, SECOND).props.checked).toBe(true);
+  expect(schoolGroup(cardFor(renderer, 'super-1')).type).not.toBe('fieldset');
+
+  await act(async () => {
+    checkboxFor(schoolGroup(cardFor(renderer, 'admin-2')), SECOND)
+      .props.onChange({ target: { checked: false } });
+  });
+  const save = cardFor(renderer, 'admin-2').findAllByType('button')
+    .find((button) => button.children.includes('Save'));
+  await act(async () => {
+    save.props.onClick();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(updateManagedUser.mock.calls[0][2].schools).toEqual([HELENE]);
+});
+
+test('the status pill shows Expired, Approved, or Pending without writing', async () => {
+  const users = [
+    {
+      id: 'expired-admin',
+      name: 'Expired Admin',
+      email: 'expired@example.com',
+      role: 'admin',
+      status: 'approved',
+      schools: [HELENE],
+      endDate: '2020-01-15T23:59:59',
+    },
+    {
+      id: 'open-admin',
+      name: 'Open Admin',
+      email: 'open@example.com',
+      role: 'admin',
+      status: 'approved',
+      schools: [HELENE],
+      startDate: '2020-01-01T00:00:00',
+      endDate: '2099-12-31T23:59:59',
+    },
+    {
+      id: 'undated-admin',
+      name: 'Undated Admin',
+      email: 'undated@example.com',
+      role: 'admin',
+      status: 'approved',
+      schools: [HELENE],
+    },
+    {
+      id: 'pending-admin',
+      name: 'Pending Admin',
+      email: 'pending-admin@example.com',
+      role: 'admin',
+      status: 'pending',
+      schools: [HELENE],
+      endDate: '2020-01-15T23:59:59',
+    },
+  ];
+  const renderer = await renderPage(superAdminUser, [], users);
+
+  const expired = statusPill(cardFor(renderer, 'expired-admin'));
+  expect(expired.children).toEqual(['Expired']);
+  expect(expired.props.className).toContain('status-expired');
+
+  const inWindow = statusPill(cardFor(renderer, 'open-admin'));
+  expect(inWindow.children).toEqual(['Approved']);
+  expect(inWindow.props.className).toContain('status-approved');
+  expect(inWindow.props.className).not.toContain('status-expired');
+
+  const noDates = statusPill(cardFor(renderer, 'undated-admin'));
+  expect(noDates.children).toEqual(['Approved']);
+  expect(noDates.props.className).toContain('status-approved');
+
+  const pending = statusPill(cardFor(renderer, 'pending-admin'));
+  expect(pending.children).toEqual(['Pending']);
+  expect(pending.props.className).toContain('status-pending');
+  expect(pending.props.className).not.toContain('status-expired');
+
+  expect(updateManagedUser).not.toHaveBeenCalled();
+});
+
+test('the Admin role badge uses opaque colors with readable contrast', () => {
+  const css = readFileSync(join(__dirname, 'UsersManagement.css'), 'utf8');
+  const block = css.match(/\.user-badge\.role-admin\s*\{([^}]+)\}/);
+  expect(block).not.toBeNull();
+  const background = block[1].match(/background:\s*(#[0-9a-fA-F]{6})/);
+  const color = block[1].match(/color:\s*(#[0-9a-fA-F]{6})/);
+  expect(background).not.toBeNull();
+  expect(color).not.toBeNull();
+  expect(block[1]).not.toMatch(/var\(--navy\)/);
+  expect(block[1]).not.toMatch(/rgba\(11,\s*45,\s*74/);
+
+  const channel = (hex) => {
+    const value = parseInt(hex.slice(1), 16);
+    return [16, 8, 0].map((shift) => {
+      const unit = ((value >> shift) & 255) / 255;
+      return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    });
+  };
+  const luminance = (hex) => {
+    const [red, green, blue] = channel(hex);
+    return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+  };
+  const [lighter, darker] = [luminance(background[1]), luminance(color[1])]
+    .sort((left, right) => right - left);
+  expect((lighter + 0.05) / (darker + 0.05)).toBeGreaterThanOrEqual(4.5);
+});
+
+test('narrow screens let a school row grow and keep the add input and button at 44px', () => {
+  const css = readFileSync(join(__dirname, 'UsersManagement.css'), 'utf8');
+  const narrow = css.match(/@media \(max-width: 768px\)\s*\{([\s\S]*?)\n\}/);
+  expect(narrow).not.toBeNull();
+  const row = narrow[1].match(/\.users-schools-section \.solution-profile-item\s*\{([^}]+)\}/);
+  expect(row).not.toBeNull();
+  expect(row[1]).toMatch(/(?<![\w-])height:\s*auto/);
+  expect(row[1]).toMatch(/min-height:\s*44px/);
+  expect(row[1]).not.toMatch(/(?<![\w-])height:\s*44px/);
+  expect(narrow[1]).not.toMatch(/\.users-search/);
+  expect(narrow[1]).not.toMatch(/\.solution-add-button/);
+
+  const fixed = [...css.matchAll(
+    /\.users-schools-section > \.users-search,\s*\.users-schools-section \.solution-add-button\s*\{([^}]+)\}/g,
+  )].find((match) => /height:\s*44px/.test(match[1]));
+  expect(fixed).toBeTruthy();
+});
+
+test('the Add School button uses a darker teal with white text', () => {
+  const css = readFileSync(join(__dirname, 'UsersManagement.css'), 'utf8');
+  const block = [...css.matchAll(/\.users-schools-section \.solution-add-button\s*\{([^}]+)\}/g)]
+    .find((match) => /background:\s*#0f766e/i.test(match[1]));
+  expect(block).toBeTruthy();
+  expect(block[1]).toMatch(/color:\s*#ffffff/i);
+  const channel = (hex) => {
+    const value = parseInt(hex.slice(1), 16);
+    return [16, 8, 0].map((shift) => {
+      const unit = ((value >> shift) & 255) / 255;
+      return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    });
+  };
+  const luminance = (hex) => {
+    const [red, green, blue] = channel(hex);
+    return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+  };
+  const [lighter, darker] = [luminance('#ffffff'), luminance('#0f766e')]
+    .sort((left, right) => right - left);
+  expect((lighter + 0.05) / (darker + 0.05)).toBeGreaterThanOrEqual(4.5);
 });
