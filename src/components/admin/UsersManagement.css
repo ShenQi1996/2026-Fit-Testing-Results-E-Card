@@ -139,6 +139,19 @@
   color: var(--text-secondary);
 }
 
+.users-form-grid input.field-invalid,
+.users-form-grid select.field-invalid,
+.users-form-grid .school-checkboxes.field-invalid {
+  border: 1px solid #b42318;
+}
+
+.field-error {
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
 .users-form-grid .school-checkboxes {
   grid-column: 1 / -1;
   margin: 0;
