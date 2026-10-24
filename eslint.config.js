@@ -82,4 +82,16 @@ module.exports = [
       },
     },
   },
+  {
+    files: [
+      "src/config/prodFirebaseConfig.js",
+      "src/config/stagingFirebaseGuard.js",
+    ],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
 ];

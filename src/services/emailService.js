@@ -1,14 +1,39 @@
+/* global process */
 // Email service for sending e-cards via EmailJS
 
 import emailjs from '@emailjs/browser';
 import { generateFitTestCard } from '../utils/fitTestCardTemplate';
 
-// EmailJS Configuration - Replace with your credentials
-// Get these from: https://dashboard.emailjs.com/admin/account
+// Production EmailJS account. Left compiled in so APP_ENV-unset production sends
+// exactly as before. Staging must not use it to reach real customers: see
+// assertStagingRecipient. There is no separate staging EmailJS project yet.
 const EMAILJS_CONFIG = {
   SERVICE_ID: 'service_u84chaq',
   TEMPLATE_ID: 'template_n6pvpvf',
   PUBLIC_KEY: 'S3Owi-2s2Q_FCXW1k',
+};
+
+const STAGING_EMAIL_MESSAGE = 'Staging does not email real customers. Recipient must be one @example.com address.';
+
+// One address only. Commas, semicolons, quotes, question marks, spaces, and a
+// second @ are rejected so a production inbox cannot hide behind example.com.
+const STAGING_RECIPIENT = /^[^@\s,;"?]+@example\.com$/i;
+
+/**
+ * Staging builds accept exactly one trimmed @example.com address.
+ * Any other APP_ENV, including unset production, does not apply this check.
+ * @param {string} recipientEmail
+ * @param {string} [appEnv]
+ * @returns {string} Trimmed recipient. Staging returns it only when it is allowed.
+ */
+export const assertStagingRecipient = (recipientEmail, appEnv) => {
+  const resolvedEnv = appEnv === undefined ? process.env.APP_ENV : appEnv;
+  const email = String(recipientEmail || '').trim();
+  if (resolvedEnv !== 'staging') return email;
+  if (!STAGING_RECIPIENT.test(email)) {
+    throw new Error(STAGING_EMAIL_MESSAGE);
+  }
+  return email;
 };
 
 // Check if EmailJS is configured
@@ -29,8 +54,9 @@ export const sendFitTestCard = async (formData) => {
     throw new Error('EmailJS is not configured. Please set up EmailJS credentials in src/services/emailService.js');
   }
 
-  // Validate recipient email
-  if (!formData.recipientEmail || !formData.recipientEmail.trim()) {
+  // Validate recipient email. Staging must see the same string EmailJS receives.
+  const recipientEmail = assertStagingRecipient(formData.recipientEmail);
+  if (!recipientEmail) {
     throw new Error('Recipient email address is required');
   }
 
@@ -40,12 +66,12 @@ export const sendFitTestCard = async (formData) => {
   // Prepare email template parameters
   // Note: EmailJS uses these variable names - make sure your template uses the same names
   const templateParams = {
-    to_email: formData.recipientEmail.trim(),
+    to_email: recipientEmail,
     to_name: formData.clientName || 'Recipient',
     message: htmlContent,
     html_message: htmlContent,
     subject: 'Fit Testing Results E-card',
-    reply_to: formData.recipientEmail.trim(),
+    reply_to: recipientEmail,
   };
 
   // Send email using EmailJS

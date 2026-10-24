@@ -6,15 +6,12 @@ import {
   deleteUserSolutionProfile,
   reorderUserSolutionProfiles,
   setDefaultSolutionProfile,
-  getUserSchoolProfiles,
-  saveUserSchoolProfile,
-  deleteUserSchoolProfile,
-  reorderUserSchoolProfiles,
-  setDefaultSchoolProfile,
-  getPendingUsers,
-  updateUserApprovalStatus,
 } from '../../services/firebaseDb';
+import { listMasterSchools } from '../../services/masterSchools';
 import { useSavedProfiles } from '../../hooks/useSavedProfiles';
+import { isAdminOrAbove, isSuperAdmin, USER_ROLE_ADMIN } from '../../utils/roles';
+import { normalizeSchoolList } from '../../utils/schoolScope';
+import { accountSchoolLabel } from '../../utils/ecardSchools';
 import SavedProfilesPanel from './SavedProfilesPanel';
 import './EditAccount.css';
 
@@ -31,17 +28,10 @@ const toSolutionPayload = (data) => ({
   solutionExpirationDate: data.solutionExpirationDate.trim(),
 });
 
-const toSchoolPayload = (data) => ({
-  schoolName: data.schoolName.trim(),
-});
-
-const EMPTY_SCHOOL_FORM = {
-  schoolName: '',
-  setAsDefault: false,
-};
-
-const EditAccount = ({ onBack }) => {
+const EditAccount = ({ onBack, onManageSchools }) => {
   const { user, updateUser } = useAuth();
+  const staffAdmin = isAdminOrAbove(user);
+  const superAdmin = isSuperAdmin(user?.role);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -52,10 +42,7 @@ const EditAccount = ({ onBack }) => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [pendingUsers, setPendingUsers] = useState([]);
-  const [pendingUsersLoading, setPendingUsersLoading] = useState(false);
-  const [pendingUsersError, setPendingUsersError] = useState('');
-  const [pendingUsersSuccess, setPendingUsersSuccess] = useState('');
+  const [masterSchools, setMasterSchools] = useState([]);
 
   const solutionProfiles = useSavedProfiles({
     userId: user?.uid,
@@ -67,17 +54,6 @@ const EditAccount = ({ onBack }) => {
     emptyForm: EMPTY_SOLUTION_FORM,
     toPayload: toSolutionPayload,
     dateFields: ['solutionOpenDate', 'solutionExpirationDate'],
-  });
-
-  const schoolProfiles = useSavedProfiles({
-    userId: user?.uid,
-    fetchAll: getUserSchoolProfiles,
-    save: saveUserSchoolProfile,
-    remove: deleteUserSchoolProfile,
-    reorder: reorderUserSchoolProfiles,
-    setDefault: setDefaultSchoolProfile,
-    emptyForm: EMPTY_SCHOOL_FORM,
-    toPayload: toSchoolPayload,
   });
 
   useEffect(() => {
@@ -92,24 +68,28 @@ const EditAccount = ({ onBack }) => {
     }
   }, [user]);
 
-  const loadPendingUsers = async () => {
-    if (!user?.uid || user?.role !== 'admin') return;
-    setPendingUsersLoading(true);
-    setPendingUsersError('');
-    try {
-      const users = await getPendingUsers(user.uid);
-      setPendingUsers(users);
-    } catch (err) {
-      setPendingUsersError(err.message || 'Failed to load pending users.');
-    } finally {
-      setPendingUsersLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadPendingUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, user?.role]);
+    if (!superAdmin) {
+      setMasterSchools([]);
+      return undefined;
+    }
+    let cancelled = false;
+    listMasterSchools()
+      .then((names) => {
+        if (!cancelled) setMasterSchools(names);
+      })
+      .catch(() => {
+        if (!cancelled) setMasterSchools([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [superAdmin, user?.uid]);
+
+  const assignedSchools = user?.role === USER_ROLE_ADMIN
+    ? normalizeSchoolList(user?.schools)
+    : [];
+  const testerSchool = typeof user?.school === 'string' ? user.school.trim() : '';
 
   const handleChange = (e) => {
     setFormData({
@@ -118,24 +98,6 @@ const EditAccount = ({ onBack }) => {
     });
     setError('');
     setSuccess('');
-  };
-
-  const handleApprovalAction = async (targetUserId, nextStatus) => {
-    if (!user?.uid || user?.role !== 'admin') return;
-    setPendingUsersError('');
-    setPendingUsersSuccess('');
-
-    try {
-      await updateUserApprovalStatus(user.uid, targetUserId, nextStatus);
-      setPendingUsersSuccess(
-        nextStatus === 'approved'
-          ? 'User approved successfully.'
-          : 'User rejected successfully.'
-      );
-      await loadPendingUsers();
-    } catch (err) {
-      setPendingUsersError(err.message || 'Failed to update approval status.');
-    }
   };
 
   const handleSubmit = async (e) => {
@@ -240,16 +202,38 @@ const EditAccount = ({ onBack }) => {
                 borderRadius: '4px',
                 cursor: 'not-allowed',
                 fontWeight: 500,
-                color: user?.role === 'admin' ? 'var(--accent-blue, #2563eb)' : 'var(--text-secondary, #666)',
+                color: staffAdmin ? 'var(--accent-blue, #2563eb)' : 'var(--text-secondary, #666)',
                 fontSize: '14px'
               }}>
                 {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Tester'}
               </div>
               <small style={{ display: 'block', marginTop: '4px', color: 'var(--text-secondary, #666)', fontSize: '12px' }}>
-                {user?.role === 'admin'
-                  ? 'You have admin privileges and can edit/delete test results.'
-                  : 'You have tester privileges. Contact an admin to change your role.'}
+                {superAdmin
+                  ? 'You are a super admin. You can grant admin access and edit or delete test results.'
+                  : staffAdmin
+                    ? 'You have admin privileges. You can approve testers and edit or delete test results.'
+                    : 'You have tester privileges. Contact an admin to change your role.'}
               </small>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="account-school">School</label>
+              <div
+                id="account-school"
+                aria-label="Account school"
+                style={{
+                  padding: '10px 12px',
+                  backgroundColor: 'var(--bg-secondary, #f5f5f5)',
+                  border: '1px solid var(--border-color, #ddd)',
+                  borderRadius: '4px',
+                  cursor: 'not-allowed',
+                  fontWeight: 500,
+                  color: 'var(--text-secondary, #666)',
+                  fontSize: '14px'
+                }}
+              >
+                {accountSchoolLabel(user)}
+              </div>
             </div>
           </div>
 
@@ -344,101 +328,55 @@ const EditAccount = ({ onBack }) => {
             }
           />
 
-          <SavedProfilesPanel
-            title="Saved School / Client Profiles"
-            description="Add, reorder, set default, or delete schools/clients used on the fit test form."
-            error={schoolProfiles.error}
-            success={schoolProfiles.success}
-            fields={[
-              { name: 'schoolName', id: 'schoolName', label: 'School Name', placeholder: 'Enter school name', defaultId: 'schoolSetAsDefault', defaultLabel: 'Set as new default school' },
-            ]}
-            formData={schoolProfiles.formData}
-            onChange={schoolProfiles.handleChange}
-            onAdd={(e) => schoolProfiles.handleAdd(e, (data) => (
-              data.schoolName.trim() ? '' : 'Please enter school name.'
-            ), 'Saved school profile added.')}
-            addLabel="+ Add School Profile"
-            savingLabel="Saving..."
-            saving={schoolProfiles.saving}
-            disabled={isLoading}
-            profiles={schoolProfiles.profiles}
-            loading={schoolProfiles.loading}
-            loadingLabel="Loading saved schools..."
-            emptyLabel="No saved school profiles yet."
-            renderDetails={(profile) => <strong>{profile.schoolName}</strong>}
-            onMove={(index, direction) =>
-              schoolProfiles.handleMove(index, direction, 'School profile order updated.')
-            }
-            onSetDefault={(id) =>
-              schoolProfiles.handleSetDefault(id, 'Default school profile updated.')
-            }
-            onDelete={(id) =>
-              schoolProfiles.handleDelete(id, 'School profile deleted.')
-            }
-          />
-
-          {user?.role === 'admin' && (
-            <div className="form-section">
-              <h3 className="section-title">Pending User Approvals</h3>
-              <p className="section-description">
-                Approve or reject new user account requests before they can access the app.
-              </p>
-
-              {pendingUsersError && <div className="auth-error">{pendingUsersError}</div>}
-              {pendingUsersSuccess && <div className="auth-success">{pendingUsersSuccess}</div>}
-
-              <button
-                type="button"
-                className="solution-add-button"
-                onClick={loadPendingUsers}
-                disabled={pendingUsersLoading || isLoading}
-                style={{ marginBottom: '10px' }}
-              >
-                {pendingUsersLoading ? 'Refreshing...' : 'Refresh Pending Users'}
-              </button>
-
-              <div className="solution-profile-list">
-                {pendingUsersLoading ? (
-                  <div className="solution-empty">Loading pending approvals...</div>
-                ) : pendingUsers.length === 0 ? (
-                  <div className="solution-empty">No pending users.</div>
+          <section className="account-schools" aria-label="Account schools">
+            <h3 className="section-title">Schools</h3>
+            {superAdmin ? (
+              <>
+                <p className="section-description">
+                  Master school list. The fit test form offers these names to super admins.
+                  Add, edit, or remove them in Users Management.
+                </p>
+                {masterSchools.length === 0 ? (
+                  <div className="account-school-readonly" aria-label="Master schools">—</div>
                 ) : (
-                  pendingUsers.map((pendingUser) => (
-                    <div key={pendingUser.id} className="solution-profile-item">
-                      <div className="solution-profile-details">
-                        <strong>{pendingUser.name || 'No Name'}</strong>
-                        <span>{pendingUser.email || 'No Email'}</span>
-                        <span>
-                          Requested:{' '}
-                          {pendingUser.requestedAt
-                            ? new Date(pendingUser.requestedAt).toLocaleString()
-                            : 'N/A'}
-                        </span>
-                      </div>
-                      <div className="solution-profile-actions">
-                        <button
-                          type="button"
-                          onClick={() => handleApprovalAction(pendingUser.id, 'approved')}
-                          disabled={pendingUsersLoading || isLoading}
-                          title="Approve user"
-                        >
-                          ✅
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleApprovalAction(pendingUser.id, 'rejected')}
-                          disabled={pendingUsersLoading || isLoading}
-                          title="Reject user"
-                        >
-                          ❌
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                  <ul aria-label="Master schools">
+                    {masterSchools.map((name) => (
+                      <li key={name}>{name}</li>
+                    ))}
+                  </ul>
                 )}
-              </div>
-            </div>
-          )}
+                <button
+                  type="button"
+                  className="auth-button secondary"
+                  onClick={onManageSchools}
+                >
+                  Manage schools
+                </button>
+              </>
+            ) : user?.role === USER_ROLE_ADMIN ? (
+              <>
+                <p className="section-description">Schools assigned to this admin account.</p>
+                {assignedSchools.length === 0 ? (
+                  <div className="account-school-readonly" aria-label="Schools">—</div>
+                ) : (
+                  <ul aria-label="Schools">
+                    {assignedSchools.map((name) => (
+                      <li key={name}>{name}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="section-description">
+                  Your school is pre-selected on the fit test form.
+                </p>
+                <div className="account-school-readonly" aria-label="School" aria-readonly="true">
+                  {testerSchool || '—'}
+                </div>
+              </>
+            )}
+          </section>
 
           <button
             type="submit"

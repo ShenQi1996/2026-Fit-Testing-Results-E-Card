@@ -8,15 +8,15 @@ const RespiratoryProtectionProgramSection = ({
   formData,
   onChange,
   schoolOptions = [],
-  selectedSchoolOption,
   onSchoolOptionChange,
-  setSchoolProfileAsDefault,
-  onSetSchoolProfileAsDefaultChange,
-  isAddingNewSchoolProfile,
+  schoolLocked = false,
+  schoolBlockedMessage = '',
   isLoadingSchoolProfiles,
   isLoading,
   fieldErrors,
 }) => {
+  const chosenSchool = (formData.schoolsList || '').trim();
+
   return (
     <FormSection title="Respiratory protection program">
       <FormCheckbox
@@ -29,40 +29,32 @@ const RespiratoryProtectionProgramSection = ({
         Schools are on file
       </FormCheckbox>
 
-      <FormSelect
-        id="schoolsList"
-        label="School / client"
-        value={selectedSchoolOption || ''}
-        onChange={(e) => onSchoolOptionChange(e.target.value)}
-        options={schoolOptions}
-        disabled={isLoading || isLoadingSchoolProfiles}
-        error={fieldErrors?.schoolsList}
-      />
-
-      {isAddingNewSchoolProfile && (
-        <>
-          <FormInput
-            id="schoolsListOther"
-            label="School name"
-            type="text"
-            value={formData.schoolsList || ''}
-            onChange={(e) => onChange('schoolsList', e.target.value)}
-            placeholder="Enter school name"
-            required
-            disabled={isLoading}
-            error={fieldErrors?.schoolsList}
-          />
-
-          <FormCheckbox
-            id="setSchoolProfileAsDefault"
-            className="nested-checkbox"
-            checked={setSchoolProfileAsDefault}
-            onChange={onSetSchoolProfileAsDefaultChange}
-            disabled={isLoading}
+      {schoolBlockedMessage ? (
+        <p className="form-error-message" role="alert">{schoolBlockedMessage}</p>
+      ) : schoolLocked ? (
+        <div className="form-group">
+          <label htmlFor="schoolsList">School / client</label>
+          <div
+            id="schoolsList"
+            className="form-input"
+            aria-label="School / client"
+            aria-readonly="true"
           >
-            Save as new default school
-          </FormCheckbox>
-        </>
+            {chosenSchool}
+          </div>
+        </div>
+      ) : (
+        <FormSelect
+          id="schoolsList"
+          label="School / client"
+          value={chosenSchool}
+          onChange={(e) => onSchoolOptionChange(e.target.value)}
+          options={schoolOptions}
+          placeholder={schoolOptions.length > 1 ? 'Select a school' : undefined}
+          disabled={isLoading || isLoadingSchoolProfiles}
+          error={fieldErrors?.schoolsList}
+          required
+        />
       )}
 
       <div className="form-row">

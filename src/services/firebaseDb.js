@@ -14,6 +14,7 @@ import {
   where,
   orderBy,
   Timestamp,
+  deleteField,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -34,6 +35,19 @@ import {
   isValidVerificationToken,
   normalizeVerificationToken,
 } from '../utils/verificationToken';
+import {
+  USER_ROLES,
+  USER_ROLE_ADMIN,
+  USER_ROLE_SUPERADMIN,
+  USER_ROLE_TESTER,
+  accessBoundaryDate,
+  accessDateInputValue,
+  accessWindowOrderError,
+  canModifyManagedUser,
+  isAdminOrAbove,
+  isSuperAdmin,
+} from '../utils/roles';
+import { normalizeSchoolList } from '../utils/schoolScope';
 
 const FIRESTORE_BATCH_LIMIT = 400;
 
@@ -223,19 +237,87 @@ const syncLookupsForFitTests = async (tests = []) => {
 export const USER_STATUS_PENDING = 'pending';
 export const USER_STATUS_APPROVED = 'approved';
 export const USER_STATUS_REJECTED = 'rejected';
-export const USER_ROLES = ['tester', 'admin'];
+export { USER_ROLES };
 export const USER_STATUSES = [
   USER_STATUS_PENDING,
   USER_STATUS_APPROVED,
   USER_STATUS_REJECTED,
 ];
 
-const assertAdmin = async (adminUserId) => {
-  const adminRole = await getUserRole(adminUserId);
-  if (adminRole !== 'admin') {
-    const error = new Error('Only admin users can manage users.');
-    error.code = 'PERMISSION_DENIED';
-    throw error;
+const permissionError = (message) => {
+  const error = new Error(message);
+  error.code = 'PERMISSION_DENIED';
+  return error;
+};
+
+/** Missing or unknown status is pending. Approved and rejected pass through. */
+export const normalizeUserStatus = (status) => (
+  USER_STATUSES.includes(status) ? status : USER_STATUS_PENDING
+);
+
+const assertAdmin = async (userId) => {
+  const access = await getUserAccessProfile(userId);
+  if (access.status !== USER_STATUS_APPROVED || !isAdminOrAbove(access)) {
+    throw permissionError('Only admin users can manage users.');
+  }
+  return access.role;
+};
+
+// Firestore `in` filters accept at most 30 values.
+const FIRESTORE_IN_LIMIT = 30;
+
+const chunkValues = (values, size) => {
+  const chunks = [];
+  for (let i = 0; i < values.length; i += size) {
+    chunks.push(values.slice(i, i + size));
+  }
+  return chunks;
+};
+
+const docsById = (snapshots) => {
+  const byId = new Map();
+  snapshots.forEach((snapshot) => {
+    snapshot.forEach((docSnap) => {
+      byId.set(docSnap.id, docSnap);
+    });
+  });
+  return [...byId.values()];
+};
+
+// Scoped admins may list only testers whose school is in their own schools.
+const listScopedTesters = async (schools, extraConstraints = []) => {
+  const scopedSchools = normalizeSchoolList(schools);
+  if (scopedSchools.length === 0) return [];
+  const snapshots = await Promise.all(
+    chunkValues(scopedSchools, FIRESTORE_IN_LIMIT).map((chunk) => getDocs(query(
+      collection(db, USERS_COLLECTION),
+      ...extraConstraints,
+      where('role', '==', USER_ROLE_TESTER),
+      where('school', 'in', chunk),
+    )))
+  );
+  return docsById(snapshots);
+};
+
+const assertSuperAdmin = async (userId) => {
+  const access = await getUserAccessProfile(userId);
+  if (access.status !== USER_STATUS_APPROVED || !isSuperAdmin(access.role)) {
+    throw permissionError('Only a super admin can grant or change admin access.');
+  }
+  return access.role;
+};
+
+const assertCanAssignRole = async (actorUserId, actorRole, targetUserId, currentRole, nextRole) => {
+  const current = currentRole || USER_ROLE_TESTER;
+  const next = nextRole || current;
+  if (!USER_ROLES.includes(next)) {
+    throw new Error('Invalid role. Must be tester, admin, or superadmin.');
+  }
+  if (actorUserId === targetUserId && isSuperAdmin(actorRole) && next !== USER_ROLE_SUPERADMIN) {
+    throw permissionError('You cannot remove your own super admin role.');
+  }
+  if (current !== USER_ROLE_TESTER || next !== USER_ROLE_TESTER) {
+    await assertSuperAdmin(actorUserId);
   }
 };
 
@@ -248,13 +330,17 @@ const serializeUserDoc = (docSnap) => {
     email: data.email || '',
     name: data.name || '',
     role: data.role || 'tester',
-    status: data.status || USER_STATUS_APPROVED,
+    status: normalizeUserStatus(data.status),
     provider: data.provider || 'unknown',
     requestedAt: toIso(data.requestedAt),
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
     approvedAt: toIso(data.approvedAt),
     approvedBy: data.approvedBy || null,
+    school: typeof data.school === 'string' ? data.school : '',
+    schools: normalizeSchoolList(data.schools),
+    startDate: toIso(data.startDate),
+    endDate: toIso(data.endDate),
   };
 };
 
@@ -387,9 +473,9 @@ export const purgeExpiredFitTests = async (userId) => {
   if (!userId) return 0;
 
   try {
-    const role = await getUserRole(userId);
+    const access = await getUserAccessProfile(userId);
     const testsQuery =
-      role === 'admin'
+      isAdminOrAbove(access)
         ? collection(db, FIT_TESTS_COLLECTION)
         : query(collection(db, FIT_TESTS_COLLECTION), where('userId', '==', userId));
 
@@ -668,8 +754,8 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
       throw new Error('User ID is required to update fit test records.');
     }
     
-    const userRole = await getUserRole(userId);
-    if (userRole !== 'admin') {
+    const access = await getUserAccessProfile(userId);
+    if (!isAdminOrAbove(access)) {
       const error = new Error('Only admin users can edit test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -735,8 +821,8 @@ export const deleteFitTest = async (fitTestId, userId) => {
       throw new Error('User ID is required to delete fit test records.');
     }
     
-    const userRole = await getUserRole(userId);
-    if (userRole !== 'admin') {
+    const access = await getUserAccessProfile(userId);
+    if (!isAdminOrAbove(access)) {
       const error = new Error('Only admin users can delete test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -768,7 +854,7 @@ export const deleteFitTest = async (fitTestId, userId) => {
 /**
  * Get user role from Firestore
  * @param {string} userId - User ID
- * @returns {Promise<string>} User role ('admin' or 'tester')
+ * @returns {Promise<string>} User role ('tester', 'admin', or 'superadmin')
  */
 export const getUserRole = async (userId) => {
   try {
@@ -816,12 +902,16 @@ export const ensureUserProfile = async (userInfo) => {
       return { isNewUser: true };
     }
 
-    // Backfill common profile fields for existing users without changing approval state.
-    await updateDoc(userDocRef, {
-      email: userInfo.email || userDocSnap.data().email || '',
-      name: userInfo.name || userDocSnap.data().name || '',
-      updatedAt: Timestamp.now(),
-    });
+    // Backfill is best-effort. A rules denial must not block sign-in.
+    try {
+      await updateDoc(userDocRef, {
+        email: userInfo.email || userDocSnap.data().email || '',
+        name: userInfo.name || userDocSnap.data().name || '',
+        updatedAt: Timestamp.now(),
+      });
+    } catch (backfillError) {
+      console.error('Error backfilling user profile:', backfillError);
+    }
 
     return { isNewUser: false };
   } catch (error) {
@@ -832,31 +922,40 @@ export const ensureUserProfile = async (userInfo) => {
 
 /**
  * Get user access profile including role + approval status
- * Missing status defaults to approved for backward compatibility.
+ * Missing or unknown status is pending. Only 'approved' can sign in.
  * @param {string} userId - User ID
  * @returns {Promise<{role: string, status: string}>}
  */
+const emptyAccessProfile = () => ({
+  role: 'tester',
+  status: USER_STATUS_PENDING,
+  school: '',
+  schools: [],
+  startDate: null,
+  endDate: null,
+});
+
 export const getUserAccessProfile = async (userId) => {
   try {
-    if (!userId) {
-      return { role: 'tester', status: USER_STATUS_PENDING };
-    }
+    if (!userId) return emptyAccessProfile();
 
     const userDocRef = doc(db, USERS_COLLECTION, userId);
     const userDocSnap = await getDoc(userDocRef);
 
-    if (!userDocSnap.exists()) {
-      return { role: 'tester', status: USER_STATUS_PENDING };
-    }
+    if (!userDocSnap.exists()) return emptyAccessProfile();
 
-    const data = userDocSnap.data();
+    const data = userDocSnap.data() || {};
     return {
       role: data.role || 'tester',
-      status: data.status || USER_STATUS_APPROVED,
+      status: normalizeUserStatus(data.status),
+      school: typeof data.school === 'string' ? data.school : '',
+      schools: normalizeSchoolList(data.schools),
+      startDate: toIso(data.startDate),
+      endDate: toIso(data.endDate),
     };
   } catch (error) {
     console.error('Error getting user access profile:', error);
-    return { role: 'tester', status: USER_STATUS_PENDING };
+    return emptyAccessProfile();
   }
 };
 
@@ -867,17 +966,26 @@ export const getUserAccessProfile = async (userId) => {
  */
 export const getPendingUsers = async (adminUserId) => {
   try {
-    await assertAdmin(adminUserId);
-
-    const pendingQuery = query(
-      collection(db, USERS_COLLECTION),
-      where('status', '==', USER_STATUS_PENDING)
-    );
-    const querySnapshot = await getDocs(pendingQuery);
+    const actorRole = await assertAdmin(adminUserId);
+    const pendingConstraint = where('status', '==', USER_STATUS_PENDING);
+    let docSnaps;
+    if (isSuperAdmin(actorRole)) {
+      const querySnapshot = await getDocs(query(
+        collection(db, USERS_COLLECTION),
+        pendingConstraint,
+      ));
+      docSnaps = [];
+      querySnapshot.forEach((docSnap) => docSnaps.push(docSnap));
+    } else {
+      const { schools } = await getUserAccessProfile(adminUserId);
+      docSnaps = await listScopedTesters(schools, [pendingConstraint]);
+    }
 
     const users = [];
-    querySnapshot.forEach((docSnap) => {
-      users.push(serializeUserDoc(docSnap));
+    docSnaps.forEach((docSnap) => {
+      const pendingUser = serializeUserDoc(docSnap);
+      if (!canModifyManagedUser(actorRole, pendingUser.role)) return;
+      users.push(pendingUser);
     });
 
     users.sort((a, b) => {
@@ -901,11 +1009,19 @@ export const getPendingUsers = async (adminUserId) => {
  */
 export const getAllUsers = async (adminUserId) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
+    let docSnaps;
+    if (isSuperAdmin(actorRole)) {
+      const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
+      docSnaps = [];
+      querySnapshot.forEach((docSnap) => docSnaps.push(docSnap));
+    } else {
+      const { schools } = await getUserAccessProfile(adminUserId);
+      docSnaps = await listScopedTesters(schools);
+    }
 
-    const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
     const users = [];
-    querySnapshot.forEach((docSnap) => {
+    docSnaps.forEach((docSnap) => {
       users.push(serializeUserDoc(docSnap));
     });
 
@@ -931,7 +1047,7 @@ export const getAllUsers = async (adminUserId) => {
  */
 export const updateManagedUser = async (adminUserId, targetUserId, updates = {}) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
 
     if (!targetUserId) {
       throw new Error('Target user ID is required.');
@@ -946,18 +1062,18 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
     const current = targetSnap.data() || {};
     const nextName = typeof updates.name === 'string' ? updates.name.trim() : current.name || '';
     const nextEmail = typeof updates.email === 'string' ? updates.email.trim() : current.email || '';
-    const nextRole = updates.role || current.role || 'tester';
-    const nextStatus = updates.status || current.status || USER_STATUS_APPROVED;
-
-    if (!USER_ROLES.includes(nextRole)) {
-      throw new Error('Invalid role. Must be admin or tester.');
+    const nextRole = updates.role || current.role || USER_ROLE_TESTER;
+    const nextStatus = normalizeUserStatus(
+      updates.status !== undefined ? updates.status : current.status
+    );
+    const profileChanged = nextName !== (current.name || '') || nextEmail !== (current.email || '');
+    if (profileChanged && !isSuperAdmin(actorRole)) {
+      throw permissionError('Only a super admin can edit name or email. Admins can update tester role and status.');
     }
+
+    await assertCanAssignRole(adminUserId, actorRole, targetUserId, current.role, nextRole);
     if (!USER_STATUSES.includes(nextStatus)) {
       throw new Error('Invalid status.');
-    }
-
-    if (targetUserId === adminUserId && nextRole !== 'admin') {
-      throw new Error('You cannot remove your own admin role.');
     }
     if (targetUserId === adminUserId && nextStatus !== USER_STATUS_APPROVED) {
       throw new Error('You cannot change your own approval status.');
@@ -978,6 +1094,48 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
       }
     }
 
+    // School tags are super-admin only, and not on the caller's own document.
+    if (isSuperAdmin(actorRole) && adminUserId !== targetUserId) {
+      if (typeof updates.school === 'string') {
+        const nextSchool = updates.school.trim();
+        const currentSchool = typeof current.school === 'string' ? current.school : '';
+        if (nextSchool !== currentSchool) payload.school = nextSchool;
+      }
+      if (Array.isArray(updates.schools)) {
+        const nextSchools = normalizeSchoolList(updates.schools);
+        const currentSchools = normalizeSchoolList(current.schools);
+        const sameSchools = nextSchools.length === currentSchools.length
+          && nextSchools.every((school, index) => school === currentSchools[index]);
+        if (!sameSchools) payload.schools = nextSchools;
+      }
+      if (nextRole === USER_ROLE_ADMIN) {
+        const currentStart = accessDateInputValue(current.startDate);
+        const currentEnd = accessDateInputValue(current.endDate);
+        const nextStart = updates.startDate !== undefined ? String(updates.startDate || '') : currentStart;
+        const nextEnd = updates.endDate !== undefined ? String(updates.endDate || '') : currentEnd;
+        const orderError = accessWindowOrderError(nextStart, nextEnd);
+        if (orderError) throw new Error(orderError);
+        if (updates.startDate !== undefined && nextStart !== currentStart) {
+          if (!nextStart) {
+            payload.startDate = deleteField();
+          } else {
+            const start = accessBoundaryDate(nextStart, 'start');
+            if (!start) throw new Error('Access start date is invalid.');
+            payload.startDate = Timestamp.fromDate(start);
+          }
+        }
+        if (updates.endDate !== undefined && nextEnd !== currentEnd) {
+          if (!nextEnd) {
+            payload.endDate = deleteField();
+          } else {
+            const end = accessBoundaryDate(nextEnd, 'end');
+            if (!end) throw new Error('Access end date is invalid.');
+            payload.endDate = Timestamp.fromDate(end);
+          }
+        }
+      }
+    }
+
     await updateDoc(targetRef, payload);
     const refreshed = await getDoc(targetRef);
     return serializeUserDoc(refreshed);
@@ -989,13 +1147,15 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
 };
 
 /**
- * Admin-only: delete a user profile document
+ * Admin-only: delete a user profile document.
+ * The Auth login is left in place. The client SDK cannot delete another
+ * user's Auth account on the Spark plan.
  * @param {string} adminUserId
  * @param {string} targetUserId
  */
 export const deleteManagedUser = async (adminUserId, targetUserId) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
 
     if (!targetUserId) {
       throw new Error('Target user ID is required.');
@@ -1009,6 +1169,13 @@ export const deleteManagedUser = async (adminUserId, targetUserId) => {
     if (!targetSnap.exists()) {
       throw new Error('User profile not found.');
     }
+    await assertCanAssignRole(
+      adminUserId,
+      actorRole,
+      targetUserId,
+      targetSnap.data()?.role,
+      USER_ROLE_TESTER
+    );
 
     await deleteDoc(targetRef);
   } catch (error) {
@@ -1026,7 +1193,7 @@ export const deleteManagedUser = async (adminUserId, targetUserId) => {
  */
 export const createManagedUserProfile = async (adminUserId, targetUserId, userData = {}) => {
   try {
-    await assertAdmin(adminUserId);
+    const actorRole = await assertAdmin(adminUserId);
 
     if (!targetUserId) {
       throw new Error('Target user ID is required.');
@@ -1034,15 +1201,16 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
 
     const email = (userData.email || '').trim();
     const name = (userData.name || '').trim();
-    const role = userData.role || 'tester';
-    const status = userData.status || USER_STATUS_APPROVED;
+    const role = userData.role || USER_ROLE_TESTER;
+    if (role === USER_ROLE_SUPERADMIN) {
+      throw permissionError('A super admin cannot be created from the client.');
+    }
+    await assertCanAssignRole(adminUserId, actorRole, targetUserId, USER_ROLE_TESTER, role);
+    const status = normalizeUserStatus(userData.status);
     const provider = userData.provider || 'password';
 
     if (!email) {
       throw new Error('Email is required.');
-    }
-    if (!USER_ROLES.includes(role)) {
-      throw new Error('Invalid role. Must be admin or tester.');
     }
     if (!USER_STATUSES.includes(status)) {
       throw new Error('Invalid status.');
@@ -1059,6 +1227,34 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
       createdAt: now,
       updatedAt: now,
     };
+
+    if (role === USER_ROLE_TESTER) {
+      const requestedSchool = typeof userData.school === 'string' ? userData.school.trim() : '';
+      if (isSuperAdmin(actorRole)) {
+        if (requestedSchool) profile.school = requestedSchool;
+      } else {
+        const { schools } = await getUserAccessProfile(adminUserId);
+        if (schools.length === 0) {
+          throw permissionError('You have no schools assigned, so you cannot add a tester.');
+        }
+        const school = requestedSchool || (schools.length === 1 ? schools[0] : '');
+        if (!schools.includes(school)) {
+          throw permissionError('Choose one of your schools before adding a tester.');
+        }
+        profile.school = school;
+      }
+    }
+
+    if (role === USER_ROLE_ADMIN) {
+      const requestedSchools = normalizeSchoolList(userData.schools);
+      if (!isSuperAdmin(actorRole)) {
+        throw permissionError('Only a super admin can assign schools to an admin.');
+      }
+      if (requestedSchools.length === 0) {
+        throw new Error('Choose at least one school for this admin.');
+      }
+      profile.schools = requestedSchools;
+    }
 
     if (status === USER_STATUS_APPROVED || status === USER_STATUS_REJECTED) {
       profile.approvedAt = now;
@@ -1094,35 +1290,49 @@ export const updateUserApprovalStatus = async (adminUserId, targetUserId, nextSt
 };
 
 /**
- * Set user role in Firestore
- * @param {string} userId - User ID
- * @param {string} role - Role to set ('admin' or 'tester')
+ * Set a user's role. The actor must be an admin or super admin.
+ * Only a super admin may assign admin or superadmin.
+ * @param {string} actorUserId
+ * @param {string} targetUserId
+ * @param {string} role
  * @returns {Promise<void>}
  */
-export const setUserRole = async (userId, role) => {
+export const setUserRole = async (actorUserId, targetUserId, role) => {
   try {
-    if (role !== 'admin' && role !== 'tester') {
-      throw new Error('Invalid role. Must be "admin" or "tester".');
+    const actorRole = await assertAdmin(actorUserId);
+    if (!targetUserId) {
+      throw new Error('Target user ID is required.');
     }
-    
-    const userDocRef = doc(db, USERS_COLLECTION, userId);
+    const userDocRef = doc(db, USERS_COLLECTION, targetUserId);
     const userDocSnap = await getDoc(userDocRef);
-    
+    const currentRole = userDocSnap.exists() ? userDocSnap.data()?.role : USER_ROLE_TESTER;
+    if (!userDocSnap.exists() && role === USER_ROLE_SUPERADMIN) {
+      throw permissionError('A super admin cannot be created from the client.');
+    }
+    await assertCanAssignRole(actorUserId, actorRole, targetUserId, currentRole, role);
+
     if (userDocSnap.exists()) {
-      await updateDoc(userDocRef, {
+      const data = userDocSnap.data() || {};
+      const payload = {
         role,
         updatedAt: Timestamp.now(),
-      });
+      };
+      if (!USER_STATUSES.includes(data.status)) {
+        payload.status = USER_STATUS_PENDING;
+      }
+      await setDoc(userDocRef, payload, { merge: true });
     } else {
       await setDoc(userDocRef, {
         role,
+        status: USER_STATUS_PENDING,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });
     }
   } catch (error) {
     console.error('Error setting user role:', error);
-    throw new Error('Failed to set user role. Please try again.');
+    if (error.code === 'PERMISSION_DENIED') throw error;
+    throw new Error(error.message || 'Failed to set user role. Please try again.');
   }
 };
 
