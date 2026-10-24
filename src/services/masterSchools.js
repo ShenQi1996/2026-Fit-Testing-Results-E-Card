@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   writeBatch,
   Timestamp,
@@ -12,6 +13,22 @@ import { isSuperAdmin } from '../utils/roles';
 const SCHOOLS_COLLECTION = 'schools';
 const DIRECTORY_COLLECTION = 'schoolDirectory';
 const DIRECTORY_ID = 'names';
+
+let sessionNames = null;
+
+const sortedNames = (names) => [...names]
+  .filter((name) => typeof name === 'string' && name.trim())
+  .sort((a, b) => a.localeCompare(b));
+
+const rememberSchools = (names) => {
+  sessionNames = sortedNames(names);
+  return [...sessionNames];
+};
+
+/** Test helper. The app cache lives for the browser session. */
+export const clearMasterSchoolsCache = () => {
+  sessionNames = null;
+};
 
 const permissionError = (message) => {
   const error = new Error(message);
@@ -38,13 +55,20 @@ export const cleanSchoolName = (name) => {
 };
 
 export const listMasterSchools = async () => {
+  if (sessionNames) return [...sessionNames];
+
+  const directorySnap = await getDoc(doc(db, DIRECTORY_COLLECTION, DIRECTORY_ID));
+  const directoryNames = directorySnap.exists() ? directorySnap.data()?.names : null;
+  if (Array.isArray(directoryNames)) {
+    return rememberSchools(directoryNames);
+  }
+
   const snapshot = await getDocs(collection(db, SCHOOLS_COLLECTION));
   const names = [];
   snapshot.forEach((docSnap) => {
     names.push(docSnap.id);
   });
-  names.sort((a, b) => a.localeCompare(b));
-  return names;
+  return rememberSchools(names);
 };
 
 const writeDirectory = (batch, names) => {
@@ -71,7 +95,7 @@ export const addMasterSchool = async (userId, name) => {
   });
   writeDirectory(batch, names);
   await batch.commit();
-  return names;
+  return rememberSchools(names);
 };
 
 export const renameMasterSchool = async (userId, currentName, nextName) => {
@@ -99,7 +123,7 @@ export const renameMasterSchool = async (userId, currentName, nextName) => {
   batch.delete(doc(db, SCHOOLS_COLLECTION, from));
   writeDirectory(batch, names);
   await batch.commit();
-  return names;
+  return rememberSchools(names);
 };
 
 export const removeMasterSchool = async (userId, name) => {
@@ -114,5 +138,5 @@ export const removeMasterSchool = async (userId, name) => {
   batch.delete(doc(db, SCHOOLS_COLLECTION, schoolName));
   writeDirectory(batch, names);
   await batch.commit();
-  return names;
+  return rememberSchools(names);
 };

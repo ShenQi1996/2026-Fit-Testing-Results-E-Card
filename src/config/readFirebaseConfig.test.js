@@ -15,6 +15,19 @@ const stagingEnv = {
   FIREBASE_APP_ID: '1:966738964858:web:9a5324a2db3326169666c3',
 };
 
+test('a development build refuses the production Firebase project', () => {
+  expect(() => resolveFirebaseConfig(undefined, {}, 'development')).toThrow(/production Firebase project/);
+  expect(() => resolveFirebaseConfig('', {}, 'development')).toThrow(/FIREBASE_API_KEY/);
+  expect(resolveFirebaseConfig(undefined, stagingEnv, 'development')).toEqual({
+    apiKey: 'staging-api-key',
+    authDomain: 'fit-test-result-e-card-staging.firebaseapp.com',
+    projectId: 'fit-test-result-e-card-staging',
+    storageBucket: 'fit-test-result-e-card-staging.firebasestorage.app',
+    messagingSenderId: '966738964858',
+    appId: '1:966738964858:web:9a5324a2db3326169666c3',
+  });
+});
+
 test('an unset APP_ENV keeps the production Firebase config', () => {
   expect(resolveFirebaseConfig(undefined, {})).toEqual(PROD_FIREBASE_CONFIG);
   expect(resolveFirebaseConfig('', stagingEnv)).toEqual(PROD_FIREBASE_CONFIG);
@@ -93,6 +106,7 @@ test('staging rejects production Firebase identifiers after trim and case foldin
 test('the client reads APP_ENV and FIREBASE_* and still contains the production fallback', () => {
   const source = fs.readFileSync('src/config/firebase.js', 'utf8');
   expect(source).toContain('process.env.APP_ENV');
+  expect(source).toContain('process.env.NODE_ENV');
   FIREBASE_ENV_KEYS.forEach((key) => {
     expect(source).toContain(`process.env.${key}`);
   });
