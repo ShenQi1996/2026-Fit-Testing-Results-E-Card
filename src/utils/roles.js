@@ -89,11 +89,17 @@ export const accessWindowOrderError = (startDate, endDate) => {
   return '';
 };
 
-/** True when the access end calendar day is earlier than today's calendar day. */
-export const accessEndDayBeforeToday = (endDate, now = new Date()) => {
-  const endDay = accessDateInputValue(endDate);
-  if (!endDay) return false;
-  return endDay < accessDateInputValue(now);
+/**
+ * Rules lock the account when endDate is present and request.time is after it.
+ * The end instant itself is still allowed (`request.time <= endDate`).
+ * A missing end leaves that side open. A present value that is not a time
+ * fails the rules' timestamp check.
+ */
+export const accessEndLocksAccount = (endDate, now = new Date()) => {
+  if (endDate == null || endDate === '') return false;
+  const end = parseAccessInstant(endDate);
+  if (!end) return true;
+  return now.getTime() > end.getTime();
 };
 
 const STATUS_PILL_LABELS = {
@@ -104,11 +110,16 @@ const STATUS_PILL_LABELS = {
 
 /**
  * Label for the Manage Users status pill. Display only: an approved account
- * whose end day is before today reads Expired, and nothing is written back.
+ * whose end timestamp is before now reads Expired, matching endAllows in
+ * firestore.rules. Nothing is written back.
  */
 export const accountStatusLabel = (user, now = new Date()) => {
   const status = String(user?.status || 'pending').toLowerCase();
-  if (status === 'approved' && accessEndDayBeforeToday(user?.endDate, now)) {
+  if (
+    status === 'approved'
+    && user?.role !== USER_ROLE_SUPERADMIN
+    && accessEndLocksAccount(user?.endDate, now)
+  ) {
     return { label: 'Expired', statusClass: 'status-expired' };
   }
   const label = STATUS_PILL_LABELS[status]

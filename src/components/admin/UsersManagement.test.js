@@ -696,7 +696,8 @@ test('the schools section is only shown to a super admin', async () => {
   expect(renameMasterSchool).toHaveBeenCalledWith('super-1', HELENE, 'North Campus');
 });
 
-test('super admin cards show All and a save does not change stored schools', async () => {
+test('a super admin card shows All and saves schools on another super admin', async () => {
+  listMasterSchools.mockResolvedValue([HELENE, SECOND]);
   updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
     id,
     role: 'superadmin',
@@ -723,17 +724,24 @@ test('super admin cards show All and a save does not change stored schools', asy
     email: 'qisam1989@gmail.com',
   }, [], [stored, sam]);
 
-  expect(cardFor(renderer, 'super-stored').findByProps({ 'aria-label': 'Schools' }).children)
-    .toEqual(['All']);
-  expect(cardFor(renderer, 'super-sam').findByProps({ 'aria-label': 'Schools' }).children)
-    .toEqual(['All']);
-  expect(cardFor(renderer, 'super-stored').findAll(
-    (node) => node.type === 'select' && node.props['aria-label'] === 'Schools',
-  )).toHaveLength(0);
-  expect(cardFor(renderer, 'super-sam').findAll(
-    (node) => node.type === 'select' && node.props['aria-label'] === 'Schools',
-  )).toHaveLength(0);
+  const schoolSummary = (card) => card.findAll(
+    (node) => node.type === 'div' && node.props['aria-label'] === 'Schools',
+  );
+  expect(schoolSummary(cardFor(renderer, 'super-stored'))).toHaveLength(1);
+  expect(schoolSummary(cardFor(renderer, 'super-stored'))[0].children).toEqual(['All']);
+  expect(schoolSummary(cardFor(renderer, 'super-sam'))).toHaveLength(1);
+  expect(schoolSummary(cardFor(renderer, 'super-sam'))[0].children).toEqual(['All']);
+  const storedBoxes = cardFor(renderer, 'super-stored').findByProps({ className: 'school-checkboxes' });
+  expect(checkboxNames(storedBoxes)).toEqual([HELENE, SECOND]);
+  expect(checkboxFor(storedBoxes, HELENE).props.checked).toBe(true);
+  expect(checkboxFor(storedBoxes, SECOND).props.checked).toBe(false);
+  expect(cardFor(renderer, 'super-sam').findAllByProps({ className: 'school-checkboxes' }))
+    .toHaveLength(0);
 
+  await act(async () => {
+    checkboxFor(cardFor(renderer, 'super-stored').findByProps({ className: 'school-checkboxes' }), SECOND)
+      .props.onChange({ target: { checked: true } });
+  });
   const name = cardFor(renderer, 'super-stored').findAllByType('input')
     .find((input) => input.props.type === 'text');
   await act(async () => {
@@ -750,8 +758,24 @@ test('super admin cards show All and a save does not change stored schools', asy
 
   const payload = updateManagedUser.mock.calls[0][2];
   expect(payload.name).toBe('Renamed Super');
-  expect(payload).not.toHaveProperty('schools');
+  expect(payload.schools).toEqual([HELENE, SECOND]);
   expect(payload).not.toHaveProperty('school');
+
+  const ownName = cardFor(renderer, 'super-sam').findAllByType('input')
+    .find((input) => input.props.type === 'text');
+  await act(async () => {
+    ownName.props.onChange({ target: { value: 'Sam Renamed' } });
+  });
+  const ownSave = cardFor(renderer, 'super-sam').findAllByType('button')
+    .find((button) => button.children.includes('Save'));
+  await act(async () => {
+    ownSave.props.onClick();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(updateManagedUser.mock.calls[1][2]).not.toHaveProperty('schools');
+  expect(updateManagedUser.mock.calls[1][2]).not.toHaveProperty('school');
 });
 
 test('a super admin checks schools when creating an admin', async () => {
@@ -940,4 +964,26 @@ test('narrow screens let a school row grow and keep the add input and button at 
     /\.users-schools-section > \.users-search,\s*\.users-schools-section \.solution-add-button\s*\{([^}]+)\}/g,
   )].find((match) => /height:\s*44px/.test(match[1]));
   expect(fixed).toBeTruthy();
+});
+
+test('the Add School button uses a darker teal with white text', () => {
+  const css = readFileSync(join(__dirname, 'UsersManagement.css'), 'utf8');
+  const block = [...css.matchAll(/\.users-schools-section \.solution-add-button\s*\{([^}]+)\}/g)]
+    .find((match) => /background:\s*#0f766e/i.test(match[1]));
+  expect(block).toBeTruthy();
+  expect(block[1]).toMatch(/color:\s*#ffffff/i);
+  const channel = (hex) => {
+    const value = parseInt(hex.slice(1), 16);
+    return [16, 8, 0].map((shift) => {
+      const unit = ((value >> shift) & 255) / 255;
+      return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    });
+  };
+  const luminance = (hex) => {
+    const [red, green, blue] = channel(hex);
+    return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+  };
+  const [lighter, darker] = [luminance('#ffffff'), luminance('#0f766e')]
+    .sort((left, right) => right - left);
+  expect((lighter + 0.05) / (darker + 0.05)).toBeGreaterThanOrEqual(4.5);
 });

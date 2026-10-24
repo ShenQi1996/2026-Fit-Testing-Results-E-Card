@@ -316,8 +316,8 @@ const UsersManagement = () => {
         role: draft.role,
         status: draft.status,
       };
-      if (superAdmin && targetUserId !== user.uid && tagRole !== USER_ROLE_SUPERADMIN) {
-        if (tagRole === USER_ROLE_ADMIN) {
+      if (superAdmin && targetUserId !== user.uid) {
+        if (tagRole === USER_ROLE_ADMIN || tagRole === USER_ROLE_SUPERADMIN) {
           updates.schools = normalizeSchoolList(draft.schools);
         } else {
           updates.school = draft.school || '';
@@ -868,9 +868,10 @@ const UsersManagement = () => {
                   : (draft.school || '');
               const schoolChoices = withAssignedNames(
                 masterSchools,
-                schoolTagIsList ? assignedSchools : [draft.school || ''],
+                (schoolTagIsList || roleIsSuperAdmin) ? assignedSchools : [draft.school || ''],
               );
               const canEditSchoolTags = superAdmin && !isSelf && !roleIsSuperAdmin;
+              const canEditSuperAdminSchools = superAdmin && !isSelf && roleIsSuperAdmin;
               const statusPill = accountStatusLabel(item);
               return (
                 <article key={item.id} className="user-card">
@@ -950,7 +951,22 @@ const UsersManagement = () => {
                         ))}
                       </select>
                     </label>
-                    {canEditSchoolTags && schoolTagIsList ? (
+                    {roleIsSuperAdmin ? (
+                      <>
+                        <label>
+                          Schools
+                          <div className="user-school-readonly" aria-label="Schools">All</div>
+                        </label>
+                        {canEditSuperAdminSchools && (
+                          <SchoolCheckboxGroup
+                            schools={schoolChoices}
+                            selected={assignedSchools}
+                            disabled={savingId === item.id}
+                            onChange={(schools) => handleDraftChange(item.id, 'schools', schools)}
+                          />
+                        )}
+                      </>
+                    ) : canEditSchoolTags && schoolTagIsList ? (
                       <SchoolCheckboxGroup
                         schools={schoolChoices}
                         selected={assignedSchools}
