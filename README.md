@@ -86,6 +86,12 @@ Public verify and resend read one document by known key. Listing those collectio
 2. Publish the contents of [`firestore.rules`](./firestore.rules) in this repo
 3. Create the composite index if Test Results asks for it: `fitTests` with `userId` ascending, `createdAt` descending
 
+Composite indexes are listed in [`firestore.indexes.json`](./firestore.indexes.json). Deploy them to staging with:
+
+```bash
+npx firebase-tools deploy --only firestore:indexes --project fit-test-result-e-card-staging
+```
+
 Until `fitTestVerifications` rules are published, `/verify` cannot confirm cards.
 
 Collections:
