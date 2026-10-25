@@ -92,7 +92,7 @@ test('fit tests cover three generations, a failure, and the lookup and verify do
   expect(fitById.seedftlegacy00000001.signatureDataUrl.startsWith('data:')).toBe(true);
 
   expect(Object.keys(fitById.seedftfull0000000001)).toHaveLength(50);
-  expect(fitById.seedftfull0000000001.fitTestMethod).toBe('Locked to Qualitative');
+  expect(fitById.seedftfull0000000001.fitTestMethod).toBe('Qualitative');
   expect(fitById.seedftfull0000000001.testerAttestationMedicalClearanceVerified).toBe(true);
   expect(fitById.seedftfull0000000001.consentToFitTest).toBeUndefined();
   expect(fitById.seedftfull0000000001.testLocation).toBe('Harlem');

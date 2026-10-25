@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { deleteField } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
-import { getUserFitTests, deleteFitTest, updateFitTest, ensureFitTestVerification } from '../services/firebaseDb';
+import {
+  getUserFitTests,
+  getFacultyFitTests,
+  deleteFitTest,
+  updateFitTest,
+  ensureFitTestVerification,
+} from '../services/firebaseDb';
+import { isAccessWindowOpen, isFaculty } from '../utils/roles';
 import { sendFitTestCard } from '../services/emailService';
-import { calculateExpirationDate } from '../utils/dateUtils';
 import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../utils/csvUtils';
 import { TEST_LOCATION_OPTIONS } from '../constants/fitTestOptions';
@@ -34,14 +41,25 @@ export const useFitTestResults = () => {
   const [locationFilter, setLocationFilter] = useState(FILTER_ALL);
 
   const userId = user?.uid;
+  const faculty = isFaculty(user);
+  const facultySchoolsKey = faculty ? (user?.school || '') : '';
 
   const loadFitTests = useCallback(async () => {
     if (!userId) return;
+    if (faculty && !isAccessWindowOpen(user)) {
+      setFitTests([]);
+      setLoading(false);
+      setError('');
+      setIndexError(null);
+      return;
+    }
     try {
       setLoading(true);
       setError('');
       setIndexError(null);
-      const tests = await getUserFitTests(userId);
+      const tests = faculty
+        ? await getFacultyFitTests(user)
+        : await getUserFitTests(userId);
       setFitTests(tests);
     } catch (err) {
       console.error('Error loading fit tests:', err);
@@ -59,7 +77,7 @@ export const useFitTestResults = () => {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, faculty, facultySchoolsKey, user]);
 
   useEffect(() => {
     if (userId) {
@@ -170,11 +188,15 @@ export const useFitTestResults = () => {
   const isCardExpanded = (testId) => expandedCards.has(testId);
 
   const handleDeleteClick = (testId, clientName) => {
-    setDeleteConfirm({ id: testId, clientName: clientName || 'this record' });
+    setDeleteConfirm({ id: testId, clientName: clientName || 'this record', reason: '' });
   };
 
   const handleDeleteCancel = () => {
     setDeleteConfirm(null);
+  };
+
+  const handleDeleteReasonChange = (reason) => {
+    setDeleteConfirm((prev) => (prev ? { ...prev, reason } : prev));
   };
 
   const handleDeleteConfirm = async () => {
@@ -188,10 +210,14 @@ export const useFitTestResults = () => {
       if (!user || !user.uid) {
         throw new Error('User must be logged in to delete records.');
       }
-      await deleteFitTest(deleteConfirm.id, user.uid);
+      const reason = (deleteConfirm.reason || '').trim();
+      if (!reason) {
+        throw new Error('A reason is required to remove a fit test from the list.');
+      }
+      await deleteFitTest(deleteConfirm.id, user.uid, reason);
 
       setFitTests((prev) => prev.filter((test) => test.id !== deleteConfirm.id));
-      setSuccessMessage(`Fit test record for "${deleteConfirm.clientName}" has been deleted successfully.`);
+      setSuccessMessage(`Fit test record for "${deleteConfirm.clientName}" was hidden. The record is kept.`);
       setDeleteConfirm(null);
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
@@ -289,6 +315,9 @@ export const useFitTestResults = () => {
       testingAgent: test.testingAgent || '',
       maskSize: test.maskSize || '',
       model: test.model || '',
+      style: test.style || '',
+      fitTestMethod: test.fitTestMethod || '',
+      fitFactor: test.fitFactor ?? '',
       result: test.result || '',
       fitTester: test.fitTester || '',
     });
@@ -300,6 +329,9 @@ export const useFitTestResults = () => {
   };
 
   const handleEditChange = (field, value) => {
+    if (field === 'result' || field === 'issueDate') {
+      return;
+    }
     setEditData((prev) => ({
       ...prev,
       [field]: value,
@@ -312,32 +344,57 @@ export const useFitTestResults = () => {
       flashMessage(setError, 'Please select or enter a test location before saving.', 4000);
       return;
     }
+    const original = fitTests.find((test) => test.id === testId);
+    const nextModel = (editData.model || '').trim();
+    const nextStyle = (editData.style || '').trim();
+    if ((editData.model && !nextModel) || (editData.style && !nextStyle)) {
+      flashMessage(setError, 'Model and style cannot be blank.', 4000);
+      return;
+    }
+    if ((original?.model || '').trim() && !nextModel) {
+      flashMessage(setError, 'Model cannot be cleared after it is saved.', 4000);
+      return;
+    }
+    if ((original?.style || '').trim() && !nextStyle) {
+      flashMessage(setError, 'Style cannot be cleared after it is saved.', 4000);
+      return;
+    }
+    if (editData.fitTestMethod === 'Quantitative') {
+      const fitFactor = Number(editData.fitFactor);
+      if (!Number.isFinite(fitFactor) || fitFactor < 1 || fitFactor > 100000) {
+        flashMessage(setError, 'Enter a fit factor from 1 to 100000.', 4000);
+        return;
+      }
+    }
 
     try {
       setSaving(true);
       setSuccessMessage('');
       setError('');
 
-      const updates = { ...editData };
+      const updates = { ...editData, model: nextModel, style: nextStyle };
+      delete updates.result;
+      delete updates.issueDate;
+      delete updates.expirationDate;
+      delete updates.retentionDate;
       updates.testLocation = nextLocation;
-      if (editData.issueDate) {
-        updates.expirationDate = calculateExpirationDate(editData.issueDate);
+      delete updates.fitFactor;
+      if (editData.fitTestMethod === 'Quantitative') {
+        updates.fitFactor = Number(editData.fitFactor);
+      } else if (editData.fitTestMethod === 'Qualitative') {
+        updates.fitFactor = deleteField();
+      } else {
+        delete updates.fitTestMethod;
       }
 
       if (!user || !user.uid) {
         throw new Error('User must be logged in to update records.');
       }
-      const previousIssueDate = fitTests.find((test) => test.id === testId)?.issueDate || '';
-      const issueDateChanged = previousIssueDate !== (editData.issueDate || '');
       await updateFitTest(testId, updates, user.uid);
 
-      if (issueDateChanged) {
-        await loadFitTests();
-      } else {
-        setFitTests((prev) => prev.map((test) =>
-          test.id === testId ? { ...test, ...updates } : test
-        ));
-      }
+      setFitTests((prev) => prev.map((test) =>
+        test.id === testId ? { ...test, ...updates } : test
+      ));
 
       setSuccessMessage('Record updated successfully!');
       setEditing(null);
@@ -386,6 +443,7 @@ export const useFitTestResults = () => {
     isCardExpanded,
     handleDeleteClick,
     handleDeleteCancel,
+    handleDeleteReasonChange,
     handleDeleteConfirm,
     handlePreviewResultPdf,
     handleDownloadResultPdf,

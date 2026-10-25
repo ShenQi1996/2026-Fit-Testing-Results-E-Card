@@ -13,10 +13,14 @@ import {
   getCountFromServer,
   getDoc,
   getDocs,
+  limit,
+  orderBy,
   query,
+  serverTimestamp,
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 
 const RULES = fs.readFileSync('firestore.rules', 'utf8');
@@ -70,6 +74,15 @@ const testerAt = (school, extra = {}) => ({
   status: 'pending',
   email: 'tester@example.com',
   school,
+  ...extra,
+});
+
+const respiratorRecord = (extra = {}) => ({
+  respiratorMfg: '3M',
+  model: '1860',
+  style: 'Filtering facepiece',
+  maskSize: 'Regular',
+  fitTestMethod: 'Qualitative',
   ...extra,
 });
 
@@ -813,6 +826,47 @@ test('school tags must be current master-list names', async () => {
   }));
 });
 
+// Tests describe a diff as { field: { oldValue, newValue } }. Rules store the
+// same diff as { old, new } maps, and a null value means the field was absent.
+const toHistoryChanges = (changes) => {
+  if (changes && Object.prototype.hasOwnProperty.call(changes, 'old')) return changes;
+  const oldMap = {};
+  const newMap = {};
+  const fields = [];
+  Object.entries(changes || {}).forEach(([field, value]) => {
+    if (!value || typeof value !== 'object' || !('oldValue' in value)) return;
+    fields.push(field);
+    if (value.oldValue != null) oldMap[field] = value.oldValue;
+    if (value.newValue != null) newMap[field] = value.newValue;
+  });
+  return { fields, old: oldMap, new: newMap };
+};
+
+const historyEntry = (fitTestId, actorId, editedAt, changes) => {
+  const history = toHistoryChanges(changes);
+  return {
+    fitTestId,
+    editedBy: actorId,
+    editedAt,
+    fields: history.fields || [],
+    changes: { old: history.old || {}, new: history.new || {} },
+  };
+};
+
+const commitEdit = (db, fitTestId, actorId, entryId, changes, extra = {}) => {
+  const batch = writeBatch(db);
+  batch.update(doc(db, `fitTests/${fitTestId}`), {
+    ...extra,
+    lastEditId: entryId,
+    updatedAt: serverTimestamp(),
+  });
+  batch.set(
+    doc(db, `fitTests/${fitTestId}/editHistory/${entryId}`),
+    historyEntry(fitTestId, actorId, serverTimestamp(), changes),
+  );
+  return batch.commit();
+};
+
 test('renamed or removed school names stay readable until the field changes', async () => {
   const oldName = 'Old Training School';
   await seed([
@@ -829,20 +883,36 @@ test('renamed or removed school names stay readable until the field changes', as
   await assertSucceeds(getDoc(doc(testerDb, 'users/tester-1')));
   await assertSucceeds(getDoc(doc(adminDb, 'fitTests/old-1')));
   await assertSucceeds(updateDoc(doc(superDb, 'users/tester-1'), { name: 'Tess Updated' }));
-  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/old-1'), { result: 'Pass' }));
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'old-1',
+    'tester-1',
+    'edit-old-1',
+    { clientName: { oldValue: null, newValue: 'Tess Client' } },
+    { clientName: 'Tess Client' },
+  ));
   await assertFails(updateDoc(doc(superDb, 'users/tester-1'), { school: 'Another Missing School' }));
   await assertFails(updateDoc(doc(testerDb, 'fitTests/old-1'), { schoolsList: 'Another Missing School' }));
   await assertSucceeds(setDoc(doc(testerDb, 'fitTests/new-1'), {
     userId: 'tester-1',
     schoolsList: HELENE,
+    creatorRole: 'tester',
+    creatorSchool: oldName,
+    ...respiratorRecord(),
   }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/new-2'), {
     userId: 'tester-1',
     schoolsList: 'Not On The List',
+    creatorRole: 'tester',
+    creatorSchool: oldName,
+    ...respiratorRecord(),
   }));
   await assertSucceeds(setDoc(doc(testerDb, 'fitTests/blank-1'), {
     userId: 'tester-1',
     schoolsList: '',
+    creatorRole: 'tester',
+    creatorSchool: oldName,
+    ...respiratorRecord(),
   }));
 });
 
@@ -870,16 +940,708 @@ test('fitTests count queries follow the same read rules as document reads', asyn
   )));
 });
 
+const commitSoftDelete = (db, fitTestId, actorId, ownerId, reason, deletedAt = serverTimestamp(), schoolsList = HELENE) => {
+  const batch = writeBatch(db);
+  batch.update(doc(db, `fitTests/${fitTestId}`), {
+    deletedAt,
+    deletedBy: actorId,
+    deleteReason: reason,
+    updatedAt: serverTimestamp(),
+  });
+  batch.set(doc(db, `fitTestDeletionLogs/${fitTestId}`), {
+    fitTestId,
+    userId: ownerId,
+    schoolsList,
+    deletedAt,
+    deletedBy: actorId,
+    deleteReason: reason,
+  });
+  return batch.commit();
+};
+
+test('result and issue date cannot change, and edit history matches the diff', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/tester-2', approved('tester', 'other@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin()],
+    ['fitTests/own-1', {
+      userId: 'tester-1',
+      result: 'Pass',
+      issueDate: '01/15/2026',
+      expirationDate: '01/15/2027',
+      model: '1860',
+    }],
+  ]);
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const otherDb = testEnv.authenticatedContext('tester-2').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const modelChange = { model: { oldValue: '1860', newValue: '1870' } };
+
+  await assertFails(updateDoc(doc(ownerDb, 'fitTests/own-1'), { result: 'Fail' }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), { issueDate: '02/02/2026' }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), { result: deleteField() }));
+  await assertFails(commitEdit(
+    adminDb,
+    'own-1',
+    'admin-1',
+    'bad-exp',
+    { expirationDate: { oldValue: '01/15/2027', newValue: '02/02/2027' } },
+    { expirationDate: '02/02/2027' },
+  ));
+  await assertFails(commitEdit(
+    adminDb,
+    'own-1',
+    'admin-1',
+    'bad-retention',
+    { retentionDate: { oldValue: null, newValue: 'later' } },
+    { retentionDate: Timestamp.now() },
+  ));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), {
+    model: '1870',
+    lastEditId: 'missing-history',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), {
+    lastEditId: 'house-only',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(commitEdit(
+    adminDb,
+    'own-1',
+    'admin-1',
+    'forged',
+    { model: { oldValue: '9999', newValue: '1870' } },
+    { model: '1870' },
+  ));
+  await assertFails(commitEdit(
+    adminDb,
+    'own-1',
+    'admin-1',
+    'unrelated',
+    { clientName: { oldValue: null, newValue: 'Nope' } },
+    {},
+  ));
+  await assertFails(setDoc(
+    doc(adminDb, 'fitTests/own-1/editHistory/alone'),
+    historyEntry('own-1', 'admin-1', serverTimestamp(), modelChange),
+  ));
+  const backdated = writeBatch(adminDb);
+  backdated.update(doc(adminDb, 'fitTests/own-1'), {
+    model: '1870',
+    lastEditId: 'backdated',
+    updatedAt: serverTimestamp(),
+  });
+  backdated.set(
+    doc(adminDb, 'fitTests/own-1/editHistory/backdated'),
+    historyEntry('own-1', 'admin-1', Timestamp.now(), modelChange),
+  );
+  await assertFails(backdated.commit());
+  await assertFails(commitEdit(otherDb, 'own-1', 'tester-2', 'nope', modelChange, { model: '1870' }));
+  await assertFails(commitEdit(adminDb, 'own-1', 'tester-1', 'spoof', modelChange, { model: '1870' }));
+  await assertFails(commitEdit(adminDb, 'own-1', 'admin-1', 'empty', {}, { model: '1870' }));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTests/own-1'), {
+    verificationToken: 'abc',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(commitEdit(adminDb, 'own-1', 'admin-1', 'entry-1', modelChange, { model: '1870' }));
+  await assertFails(commitEdit(
+    adminDb,
+    'own-1',
+    'admin-1',
+    'entry-1',
+    { model: { oldValue: '1870', newValue: '1860' } },
+    { model: '1860' },
+  ));
+  await assertSucceeds(getDoc(doc(ownerDb, 'fitTests/own-1/editHistory/entry-1')));
+  await assertFails(getDoc(doc(otherDb, 'fitTests/own-1/editHistory/entry-1')));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1/editHistory/entry-1'), {
+    editedBy: 'admin-1',
+  }));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTests/own-1/editHistory/entry-1')));
+});
+
+test('fit test records are soft-deleted with a reason and cannot be hard-deleted', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin()],
+    ['users/admin-2', scopedAdmin([SECOND], 'other-admin@example.com')],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/other-1', approved('tester', 'other@example.com', { school: SECOND })],
+    ['fitTests/own-1', { userId: 'tester-1', result: 'Pass', schoolsList: HELENE }],
+    ['fitTests/own-2', { userId: 'tester-1', result: 'Fail', schoolsList: HELENE }],
+    ['fitTests/second-1', { userId: 'other-1', result: 'Pass', schoolsList: SECOND }],
+    ['fitTests/blank-school', { userId: 'tester-1', result: 'Pass' }],
+    ['fitTestLookups/lookup-1', { userId: 'tester-1', fitTestId: 'own-1' }],
+    ['fitTestVerifications/abc', { userId: 'tester-1', fitTestId: 'own-1', result: 'Pass' }],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const otherAdminDb = testEnv.authenticatedContext('admin-2').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+  const otherDb = testEnv.authenticatedContext('other-1').firestore();
+  const deletedAt = Timestamp.fromDate(new Date('2026-10-25T12:00:00Z'));
+
+  await assertFails(deleteDoc(doc(testerDb, 'fitTests/own-1')));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTests/own-1')));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTestLookups/lookup-1')));
+  await assertFails(deleteDoc(doc(testerDb, 'fitTestLookups/lookup-1')));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTestVerifications/abc')));
+  await assertFails(deleteDoc(doc(testerDb, 'fitTestVerifications/abc')));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/created-deleted'), {
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    deletedAt,
+    deletedBy: 'tester-1',
+    deleteReason: 'Should not be on create',
+  }));
+  await assertFails(commitSoftDelete(testerDb, 'own-2', 'tester-1', 'tester-1', 'Duplicate entry'));
+  await assertFails(commitSoftDelete(otherDb, 'own-1', 'other-1', 'tester-1', 'Not my record'));
+  await assertFails(commitSoftDelete(otherAdminDb, 'own-1', 'admin-2', 'tester-1', 'Outside my schools'));
+  await assertFails(commitSoftDelete(adminDb, 'blank-school', 'admin-1', 'tester-1', 'No school on the record'));
+  await assertFails(commitSoftDelete(
+    adminDb,
+    'own-1',
+    'admin-1',
+    'tester-1',
+    'Wrong participant',
+    deletedAt,
+  ));
+  await assertFails(commitSoftDelete(adminDb, 'own-1', 'admin-1', 'tester-1', '   '));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), {
+    deletedAt: serverTimestamp(),
+    deletedBy: 'admin-1',
+    deleteReason: 'Missing the log',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(setDoc(doc(adminDb, 'fitTestDeletionLogs/own-1'), {
+    fitTestId: 'own-1',
+    userId: 'tester-1',
+    deletedAt: serverTimestamp(),
+    deletedBy: 'admin-1',
+    deleteReason: 'Log without the delete',
+  }));
+
+  await assertSucceeds(commitSoftDelete(adminDb, 'own-1', 'admin-1', 'tester-1', 'Wrong participant'));
+  await assertSucceeds(getDoc(doc(adminDb, 'fitTests/own-1')));
+  await assertSucceeds(getDoc(doc(adminDb, 'fitTestDeletionLogs/own-1')));
+  await assertSucceeds(getDoc(doc(testerDb, 'fitTestDeletionLogs/own-1')));
+  await assertFails(getDoc(doc(otherAdminDb, 'fitTestDeletionLogs/own-1')));
+  await assertSucceeds(getDocs(query(
+    collection(adminDb, 'fitTestDeletionLogs'),
+    where('schoolsList', '==', HELENE),
+  )));
+  await assertFails(getDocs(query(
+    collection(otherAdminDb, 'fitTestDeletionLogs'),
+    where('schoolsList', '==', HELENE),
+  )));
+  await assertFails(getDocs(collection(adminDb, 'fitTestDeletionLogs')));
+  await assertSucceeds(getDocs(collection(superDb, 'fitTestDeletionLogs')));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), { result: 'Fail' }));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTests/own-1')));
+  await assertFails(updateDoc(doc(adminDb, 'fitTestDeletionLogs/own-1'), { deleteReason: 'Changed' }));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTestDeletionLogs/own-1')));
+  await assertSucceeds(commitSoftDelete(superDb, 'second-1', 'super-1', 'other-1', 'Super admin removal', serverTimestamp(), SECOND));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTestLookups/lookup-1'), {
+    revokedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTestVerifications/abc'), {
+    revokedAt: serverTimestamp(),
+  }));
+});
+
+test('new fit tests require make, model, style, size, test type, and a fit factor when quantitative', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+
+  await assertFails(setDoc(doc(testerDb, 'fitTests/missing-model'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ model: '' }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/quant-missing'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative' }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/quant-string'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: '100' }),
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/quant-ok'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100 }),
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/qual-ok'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    ...respiratorRecord(),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/spaces'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ model: '   ' }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/factor-zero'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 0 }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/factor-high'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100001 }),
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/factor-max'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100000 }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/qual-factor'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitFactor: 10 }),
+  }));
+});
+
+test('an update cannot blank model or style or put a fit factor on a qualitative test', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/stamped', {
+      userId: 'tester-1',
+      ...respiratorRecord(),
+    }],
+    ['fitTests/legacy', { userId: 'tester-1', result: 'Pass' }],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { model: '' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { style: '   ' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { respiratorMfg: '' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { maskSize: deleteField() }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitTestMethod: deleteField() }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitTestMethod: '   ' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitFactor: 100 }));
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'stamped',
+    'tester-1',
+    'edit-model',
+    { model: { oldValue: '1860', newValue: '1870' } },
+    { model: '1870' },
+  ));
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'stamped',
+    'tester-1',
+    'edit-mfg',
+    { respiratorMfg: { oldValue: '3M', newValue: 'Honeywell' } },
+    { respiratorMfg: 'Honeywell' },
+  ));
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'legacy',
+    'tester-1',
+    'edit-legacy',
+    { clientName: { oldValue: null, newValue: 'Legacy Client' } },
+    { clientName: 'Legacy Client' },
+  ));
+});
+
+test('a new fit test stamps the creator role and school, and those stamps stay put', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+
+  await assertFails(setDoc(doc(testerDb, 'fitTests/missing'), {
+    userId: 'tester-1',
+    schoolsList: HELENE,
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/spoof'), {
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    creatorRole: 'admin',
+    creatorSchool: SECOND,
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/ok'), {
+    userId: 'tester-1',
+    schoolsList: SECOND,
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    ...respiratorRecord(),
+  }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/ok'), { creatorSchool: SECOND }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/ok'), { creatorRole: 'admin' }));
+  await assertSucceeds(commitEdit(
+    adminDb,
+    'ok',
+    'admin-1',
+    'edit-ok',
+    { clientName: { oldValue: null, newValue: 'Kept' } },
+    { clientName: 'Kept' },
+  ));
+
+  await assertSucceeds(setDoc(doc(adminDb, 'fitTests/admin-card'), {
+    userId: 'admin-1',
+    schoolsList: HELENE,
+    creatorRole: 'admin',
+    creatorSchool: HELENE,
+    ...respiratorRecord(),
+  }));
+  await assertFails(setDoc(doc(adminDb, 'fitTests/admin-spoof'), {
+    userId: 'admin-1',
+    schoolsList: HELENE,
+    creatorRole: 'admin',
+    creatorSchool: SECOND,
+  }));
+});
+
+test('faculty can read their stamped school and cannot write tests or users', async () => {
+  await seed([
+    ['users/faculty-1', approved('faculty', 'faculty@example.com', { school: HELENE })],
+    ['users/faculty-2', approved('faculty', 'other@example.com', { school: SECOND })],
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['fitTests/stamped', {
+      userId: 'tester-1',
+      creatorRole: 'tester',
+      creatorSchool: HELENE,
+      schoolsList: HELENE,
+    }],
+    ['fitTests/legacy', { userId: 'faculty-1', schoolsList: HELENE }],
+    ['fitTests/other-school', {
+      userId: 'faculty-1',
+      creatorRole: 'tester',
+      creatorSchool: SECOND,
+    }],
+  ]);
+  const facultyDb = testEnv.authenticatedContext('faculty-1').firestore();
+  const otherDb = testEnv.authenticatedContext('faculty-2').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertSucceeds(getDoc(doc(facultyDb, 'fitTests/stamped')));
+  await assertFails(getDoc(doc(otherDb, 'fitTests/stamped')));
+  await assertFails(getDoc(doc(facultyDb, 'fitTests/legacy')));
+  await assertFails(getDoc(doc(facultyDb, 'fitTests/other-school')));
+  await assertSucceeds(getDocs(query(
+    collection(facultyDb, 'fitTests'),
+    where('creatorSchool', '==', HELENE),
+    orderBy('createdAt', 'desc'),
+    limit(100),
+  )));
+  await assertFails(getDocs(query(
+    collection(facultyDb, 'fitTests'),
+    where('creatorSchool', '==', SECOND),
+    orderBy('createdAt', 'desc'),
+    limit(100),
+  )));
+
+  await assertFails(setDoc(doc(facultyDb, 'fitTests/new'), {
+    userId: 'faculty-1',
+    schoolsList: HELENE,
+    creatorRole: 'faculty',
+    creatorSchool: HELENE,
+  }));
+  await assertFails(updateDoc(doc(facultyDb, 'fitTests/stamped'), { result: 'Pass' }));
+  await assertFails(deleteDoc(doc(facultyDb, 'fitTests/stamped')));
+  await assertFails(updateDoc(doc(facultyDb, 'users/tester-1'), { status: 'rejected' }));
+  await assertFails(setDoc(doc(facultyDb, 'fitTestLookups/abc'), { userId: 'faculty-1' }));
+
+  await assertSucceeds(updateDoc(doc(adminDb, 'users/tester-1'), { role: 'faculty' }));
+  await assertSucceeds(getDoc(doc(facultyDb, 'fitTests/stamped')));
+  const creatorDb = testEnv.authenticatedContext('tester-1').firestore();
+  await assertSucceeds(getDoc(doc(creatorDb, 'fitTests/stamped')));
+
+  await assertSucceeds(updateDoc(doc(superDb, 'users/tester-1'), { role: 'faculty', school: SECOND }));
+  const movedDb = testEnv.authenticatedContext('tester-1').firestore();
+  await assertFails(getDoc(doc(movedDb, 'fitTests/stamped')));
+  await assertSucceeds(getDoc(doc(facultyDb, 'fitTests/stamped')));
+});
+
+test('admins can create faculty inside their schools', async () => {
+  await seed([
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/tester-1', testerAt(HELENE)],
+  ]);
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+
+  await assertSucceeds(setDoc(doc(adminDb, 'users/faculty-new'), {
+    role: 'faculty',
+    status: 'pending',
+    email: 'new-faculty@example.com',
+    school: HELENE,
+  }));
+  await assertFails(setDoc(doc(adminDb, 'users/faculty-out'), {
+    role: 'faculty',
+    status: 'pending',
+    email: 'out@example.com',
+    school: SECOND,
+  }));
+  await assertSucceeds(getDocs(query(
+    collection(adminDb, 'users'),
+    where('role', '==', 'faculty'),
+    where('school', 'in', [HELENE]),
+  )));
+  await assertFails(getDocs(query(
+    collection(adminDb, 'users'),
+    where('role', '==', 'faculty'),
+    where('school', 'in', [SECOND]),
+  )));
+  await assertSucceeds(setDoc(doc(superDb, 'users/faculty-super'), {
+    role: 'faculty',
+    status: 'approved',
+    email: 'super-faculty@example.com',
+    school: SECOND,
+  }));
+  await assertFails(setDoc(doc(superDb, 'users/faculty-blank'), {
+    role: 'faculty',
+    status: 'approved',
+    email: 'blank@example.com',
+  }));
+  await assertFails(setDoc(doc(superDb, 'users/faculty-list'), {
+    role: 'faculty',
+    status: 'approved',
+    email: 'list@example.com',
+    school: HELENE,
+    schools: [HELENE],
+  }));
+});
+
+test('creatorSchool cannot be taken from the card, and a tester with no school cannot create', async () => {
+  await seed([
+    ['users/tester-blank', approved('tester', 'blank@example.com')],
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE, SECOND])],
+    ['users/admin-second', scopedAdmin([SECOND], 'second@example.com')],
+  ]);
+  const blankDb = testEnv.authenticatedContext('tester-blank').firestore();
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const secondDb = testEnv.authenticatedContext('admin-second').firestore();
+
+  await assertFails(setDoc(doc(blankDb, 'fitTests/forged'), {
+    userId: 'tester-blank',
+    schoolsList: HELENE,
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/card-school'), {
+    userId: 'tester-1',
+    schoolsList: SECOND,
+    creatorRole: 'tester',
+    creatorSchool: SECOND,
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/own-school'), {
+    userId: 'tester-1',
+    schoolsList: SECOND,
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    ...respiratorRecord(),
+  }));
+  await assertSucceeds(setDoc(doc(adminDb, 'fitTests/admin-second'), {
+    userId: 'admin-1',
+    schoolsList: HELENE,
+    creatorRole: 'admin',
+    creatorSchool: SECOND,
+    ...respiratorRecord(),
+  }));
+  await assertFails(setDoc(doc(secondDb, 'fitTests/not-mine'), {
+    userId: 'admin-second',
+    schoolsList: HELENE,
+    creatorRole: 'admin',
+    creatorSchool: HELENE,
+  }));
+});
+
+test('faculty have one school, and a schools list does not widen what they can read', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/admin-1', scopedAdmin([HELENE, SECOND])],
+    ['users/faculty-both', approved('faculty', 'both@example.com', {
+      school: HELENE,
+      schools: [SECOND],
+    })],
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/helene', {
+      userId: 'tester-1',
+      creatorRole: 'tester',
+      creatorSchool: HELENE,
+    }],
+    ['fitTests/second', {
+      userId: 'tester-1',
+      creatorRole: 'tester',
+      creatorSchool: SECOND,
+    }],
+  ]);
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+  const facultyDb = testEnv.authenticatedContext('faculty-both').firestore();
+
+  await assertFails(updateDoc(doc(superDb, 'users/admin-1'), {
+    role: 'faculty',
+    school: HELENE,
+  }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/admin-1'), {
+    role: 'faculty',
+    school: HELENE,
+    schools: deleteField(),
+  }));
+  await assertSucceeds(getDoc(doc(facultyDb, 'fitTests/helene')));
+  await assertFails(getDoc(doc(facultyDb, 'fitTests/second')));
+  await assertFails(getDocs(query(
+    collection(facultyDb, 'fitTests'),
+    where('creatorSchool', '==', SECOND),
+    orderBy('createdAt', 'desc'),
+    limit(100),
+  )));
+});
+
+test('faculty outside the access window cannot read results', async () => {
+  const past = Timestamp.fromDate(new Date('2020-01-01T00:00:00Z'));
+  const future = Timestamp.fromDate(new Date('2099-01-01T00:00:00Z'));
+  await seed([
+    ['users/faculty-expired', approved('faculty', 'expired@example.com', {
+      school: HELENE,
+      endDate: past,
+    })],
+    ['users/faculty-future', approved('faculty', 'future@example.com', {
+      school: HELENE,
+      startDate: future,
+    })],
+    ['users/faculty-open', approved('faculty', 'open@example.com', {
+      school: HELENE,
+      startDate: past,
+      endDate: future,
+    })],
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/stamped', {
+      userId: 'tester-1',
+      creatorRole: 'tester',
+      creatorSchool: HELENE,
+    }],
+    ['fitTests/owned-by-expired', {
+      userId: 'faculty-expired',
+      creatorRole: 'tester',
+      creatorSchool: HELENE,
+    }],
+  ]);
+  const expiredDb = testEnv.authenticatedContext('faculty-expired').firestore();
+  const futureDb = testEnv.authenticatedContext('faculty-future').firestore();
+  const openDb = testEnv.authenticatedContext('faculty-open').firestore();
+
+  await assertFails(getDoc(doc(expiredDb, 'fitTests/stamped')));
+  await assertFails(getDoc(doc(expiredDb, 'fitTests/owned-by-expired')));
+  await assertFails(getDocs(query(
+    collection(expiredDb, 'fitTests'),
+    where('creatorSchool', '==', HELENE),
+    orderBy('createdAt', 'desc'),
+    limit(100),
+  )));
+  await assertFails(getDoc(doc(futureDb, 'fitTests/stamped')));
+  await assertFails(setDoc(doc(expiredDb, 'fitTests/new'), {
+    userId: 'faculty-expired',
+    schoolsList: HELENE,
+    creatorRole: 'faculty',
+    creatorSchool: HELENE,
+  }));
+  await assertSucceeds(getDoc(doc(openDb, 'fitTests/stamped')));
+});
+
+test('lookup and verification copies match the fit test and stay inside the admin school', async () => {
+  const token = 'a'.repeat(32);
+  const parent = {
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    lookupKey: 'lookup-1',
+    verificationToken: token,
+    clientName: 'Ada',
+    result: 'Pass',
+    ...respiratorRecord(),
+  };
+  const lookup = {
+    recipientEmail: '',
+    clientName: 'Ada',
+    dob: '',
+    testLocation: '',
+    issueDate: '',
+    expirationDate: '',
+    fitTestType: '',
+    testingAgent: '',
+    fitFactor: '',
+    result: 'Pass',
+    fitTester: '',
+    verificationToken: token,
+    userId: 'tester-1',
+    fitTestId: 'own-1',
+    lookupKey: 'lookup-1',
+    ...respiratorRecord(),
+  };
+  const verification = {
+    clientName: 'Ada',
+    testLocation: '',
+    issueDate: '',
+    expirationDate: '',
+    fitTestType: '',
+    fitFactor: '',
+    result: 'Pass',
+    fitTester: '',
+    userId: 'tester-1',
+    fitTestId: 'own-1',
+    verificationToken: token,
+    ...respiratorRecord(),
+  };
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/tester-2', approved('tester', 'other@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/admin-2', scopedAdmin([SECOND], 'other-admin@example.com')],
+    ['fitTests/own-1', parent],
+  ]);
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const otherDb = testEnv.authenticatedContext('tester-2').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const outsideDb = testEnv.authenticatedContext('admin-2').firestore();
+
+  await assertSucceeds(setDoc(doc(ownerDb, 'fitTestLookups/lookup-1'), lookup));
+  await assertSucceeds(setDoc(doc(adminDb, `fitTestVerifications/${token}`), verification));
+  await assertFails(setDoc(doc(outsideDb, 'fitTestLookups/lookup-1'), lookup));
+  await assertFails(setDoc(doc(otherDb, `fitTestVerifications/${token}`), verification));
+  await assertFails(setDoc(doc(adminDb, `fitTestVerifications/${token}`), {
+    ...verification,
+    result: 'Fail',
+  }));
+  await assertFails(setDoc(doc(ownerDb, 'fitTestLookups/lookup-1'), {
+    ...lookup,
+    revokedAt: Timestamp.now(),
+  }));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTestLookups/lookup-1'), {
+    revokedAt: Timestamp.now(),
+  }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTestLookups/lookup-1'), {
+    revokedAt: deleteField(),
+  }));
+  await assertFails(updateDoc(doc(adminDb, `fitTestVerifications/${token}`), {
+    userId: 'admin-1',
+  }));
+});
+
 test('medical restriction notes stay off the fit test and follow the admin school scope', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
     ['users/tester-2', approved('tester', 'other@example.com', { school: HELENE })],
+    ['users/faculty-1', approved('faculty', 'faculty@example.com', { school: HELENE })],
     ['users/admin-1', scopedAdmin()],
     ['users/admin-2', scopedAdmin([SECOND], 'other-admin@example.com')],
     ['users/super-1', approved('superadmin', 'sam@example.com')],
     ['fitTests/own-1', {
       userId: 'tester-1',
       schoolsList: HELENE,
+      ...respiratorRecord(),
       testerMedicalRestrictionsReceived: true,
       testerMedicalRestrictionsNote: 'legacy note',
     }],
@@ -891,6 +1653,7 @@ test('medical restriction notes stay off the fit test and follow the admin schoo
   ]);
   const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
   const otherDb = testEnv.authenticatedContext('tester-2').firestore();
+  const facultyDb = testEnv.authenticatedContext('faculty-1').firestore();
   const adminDb = testEnv.authenticatedContext('admin-1').firestore();
   const outsideDb = testEnv.authenticatedContext('admin-2').firestore();
   const superDb = testEnv.authenticatedContext('super-1').firestore();
@@ -902,46 +1665,93 @@ test('medical restriction notes stay off the fit test and follow the admin schoo
     testerMedicalRestrictionsReceived: true,
     testerMedicalRestrictionsNote: 'asthma',
   };
+  const strip = {
+    testerMedicalRestrictionsReceived: { oldValue: true, newValue: null },
+    testerMedicalRestrictionsNote: { oldValue: 'legacy note', newValue: null },
+  };
+  const stripFields = {
+    testerMedicalRestrictionsReceived: deleteField(),
+    testerMedicalRestrictionsNote: deleteField(),
+  };
 
   await assertFails(setDoc(doc(ownerDb, 'fitTests/new-note'), {
     userId: 'tester-1',
-    testerMedicalRestrictionsNote: 'asthma',
+    schoolsList: HELENE,
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    ...respiratorRecord(),
     testerMedicalRestrictionsReceived: true,
+    testerMedicalRestrictionsNote: 'asthma',
   }));
-  await assertSucceeds(updateDoc(doc(ownerDb, 'fitTests/own-1'), { model: '1860' }));
-  await assertFails(updateDoc(doc(ownerDb, 'fitTests/own-1'), {
-    testerMedicalRestrictionsNote: 'changed',
-  }));
-  await assertFails(updateDoc(doc(ownerDb, 'fitTests/own-1'), {
-    testerMedicalRestrictionsReceived: deleteField(),
-    testerMedicalRestrictionsNote: deleteField(),
-  }));
-  await assertFails(updateDoc(doc(outsideDb, 'fitTests/own-1'), {
-    testerMedicalRestrictionsReceived: deleteField(),
-    testerMedicalRestrictionsNote: deleteField(),
-  }));
-  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), {
-    testerMedicalRestrictionsNote: 'rewritten',
-  }));
-  await assertSucceeds(updateDoc(doc(adminDb, 'fitTests/own-1'), {
-    testerMedicalRestrictionsReceived: deleteField(),
-    testerMedicalRestrictionsNote: deleteField(),
-  }));
+  await assertFails(commitEdit(
+    ownerDb,
+    'own-1',
+    'tester-1',
+    'edit-owner-strip',
+    strip,
+    stripFields,
+  ));
+  await assertFails(commitEdit(
+    outsideDb,
+    'own-1',
+    'admin-2',
+    'edit-outside-strip',
+    strip,
+    stripFields,
+  ));
+  await assertFails(commitEdit(
+    adminDb,
+    'own-1',
+    'admin-1',
+    'edit-rewrite',
+    { testerMedicalRestrictionsNote: { oldValue: 'legacy note', newValue: 'rewritten' } },
+    { testerMedicalRestrictionsNote: 'rewritten' },
+  ));
+  await assertSucceeds(commitEdit(
+    adminDb,
+    'own-1',
+    'admin-1',
+    'edit-strip',
+    strip,
+    stripFields,
+  ));
   const cleared = await assertSucceeds(getDoc(doc(ownerDb, 'fitTests/own-1')));
   expect(cleared.data().testerMedicalRestrictionsNote).toBeUndefined();
   expect(cleared.data().testerMedicalRestrictionsReceived).toBeUndefined();
-  await assertFails(updateDoc(doc(adminDb, 'fitTests/blank-1'), {
-    testerMedicalRestrictionsReceived: deleteField(),
-    testerMedicalRestrictionsNote: deleteField(),
-  }));
-  await assertSucceeds(updateDoc(doc(superDb, 'fitTests/blank-1'), {
-    testerMedicalRestrictionsReceived: deleteField(),
-    testerMedicalRestrictionsNote: deleteField(),
-  }));
+  await assertFails(commitEdit(
+    adminDb,
+    'blank-1',
+    'admin-1',
+    'edit-blank-strip',
+    {
+      testerMedicalRestrictionsReceived: { oldValue: true, newValue: null },
+      testerMedicalRestrictionsNote: { oldValue: 'no school', newValue: null },
+    },
+    stripFields,
+  ));
+  await assertSucceeds(commitEdit(
+    superDb,
+    'blank-1',
+    'super-1',
+    'edit-super-strip',
+    {
+      testerMedicalRestrictionsReceived: { oldValue: true, newValue: null },
+      testerMedicalRestrictionsNote: { oldValue: 'no school', newValue: null },
+    },
+    stripFields,
+  ));
 
   await assertFails(setDoc(doc(otherDb, 'fitTestMedicalNotes/own-1'), {
     ...note,
     updatedBy: 'tester-2',
+  }));
+  await assertFails(setDoc(doc(facultyDb, 'fitTestMedicalNotes/own-1'), {
+    ...note,
+    updatedBy: 'faculty-1',
+  }));
+  await assertFails(setDoc(doc(outsideDb, 'fitTestMedicalNotes/own-1'), {
+    ...note,
+    updatedBy: 'admin-2',
   }));
   await assertFails(setDoc(doc(ownerDb, 'fitTestMedicalNotes/own-1'), {
     ...note,
@@ -981,9 +1791,36 @@ test('medical restriction notes stay off the fit test and follow the admin schoo
     collection(ownerDb, 'fitTestMedicalNotes'),
     where('userId', '==', 'tester-1'),
   )));
+  await assertFails(updateDoc(doc(outsideDb, 'fitTestMedicalNotes/own-1'), {
+    updatedBy: 'admin-2',
+    testerMedicalRestrictionsNote: 'not this school',
+  }));
   await assertSucceeds(updateDoc(doc(adminDb, 'fitTestMedicalNotes/own-1'), {
     updatedBy: 'admin-1',
     testerMedicalRestrictionsNote: 'updated by admin',
   }));
   await assertFails(deleteDoc(doc(adminDb, 'fitTestMedicalNotes/own-1')));
+
+  const removeNote = (db, actorId) => {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'fitTests/own-1'), {
+      deletedAt: serverTimestamp(),
+      deletedBy: actorId,
+      deleteReason: 'Wrong person',
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'fitTestDeletionLogs/own-1'), {
+      fitTestId: 'own-1',
+      userId: 'tester-1',
+      schoolsList: HELENE,
+      deletedAt: serverTimestamp(),
+      deletedBy: actorId,
+      deleteReason: 'Wrong person',
+    });
+    batch.delete(doc(db, 'fitTestMedicalNotes/own-1'));
+    return batch.commit();
+  };
+  await assertFails(removeNote(outsideDb, 'admin-2'));
+  await assertSucceeds(removeNote(adminDb, 'admin-1'));
+  await assertFails(getDoc(doc(ownerDb, 'fitTestMedicalNotes/own-1')));
 });

@@ -142,7 +142,7 @@ export const useFitTestForm = () => {
   }, [user]);
 
   const handleInputChange = (field, value) => {
-    if (field === 'fitTester' || field === 'fitTestMethod') {
+    if (field === 'fitTester') {
       return;
     }
 
@@ -151,6 +151,9 @@ export const useFitTestForm = () => {
         ...prev,
         [field]: value,
       };
+      if (field === 'fitTestMethod' && value !== 'Quantitative') {
+        updates.fitFactor = '';
+      }
 
       if (field === 'clientName' && !printedNameManuallyEdited.current) {
         const prevPrintedName = (prev.printedName || '').trim();
@@ -364,13 +367,20 @@ export const useFitTestForm = () => {
         printedName: formData.printedName.trim(),
         testLocation: formData.testLocation?.trim() || '',
         fitTester: user?.name || formData.fitTester || '',
-        fitTestMethod: 'Locked to Qualitative',
+        model: (formData.model || '').trim(),
+        style: formData.style || '',
+        fitTestMethod: formData.fitTestMethod || '',
         failureReason: showFailureReasonUI ? formData.failureReason : '',
         correctiveActionNote: showFailureReasonUI ? formData.correctiveActionNote : '',
         testerMedicalRestrictionsNote: formData.testerMedicalRestrictionsReceived === true
           ? (formData.testerMedicalRestrictionsNote || '').trim()
           : '',
       };
+      if (cleanedFormData.fitTestMethod === 'Quantitative') {
+        cleanedFormData.fitFactor = Number(formData.fitFactor);
+      } else {
+        delete cleanedFormData.fitFactor;
+      }
 
       const expirationDate = calculateExpirationDate(cleanedFormData.issueDate);
       const formDataWithSignature = {

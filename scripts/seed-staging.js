@@ -156,7 +156,7 @@ const protocolFields = (spec) => ({
   correctiveActionNote: spec.correctiveActionNote || '',
   expirationDate: spec.expirationDate,
   failureReason: spec.failureReason || '',
-  fitTestMethod: 'Locked to Qualitative',
+  fitTestMethod: 'Qualitative',
   programAdministratorContact: 'test-person-02@example.com',
   programAdministratorName: 'Test Person 02',
   schoolsList: 'Example Training School',

@@ -21,6 +21,7 @@ exports.Timestamp = {
   fromDate: (date) => ({ toDate: () => date, kind: 'timestamp', date }),
 };
 exports.deleteField = () => ({ kind: 'deleteField' });
+exports.serverTimestamp = () => ({ kind: 'serverTimestamp' });
 exports.writeBatch = jest.fn(() => ({
   delete: jest.fn(),
   update: jest.fn(),

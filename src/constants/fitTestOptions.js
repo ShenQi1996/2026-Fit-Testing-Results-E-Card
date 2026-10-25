@@ -43,7 +43,14 @@ export const RESULT_OPTIONS = [
 ];
 
 export const FIT_TEST_METHOD_OPTIONS = [
-  { value: 'Locked to Qualitative', label: 'Locked to Qualitative' },
+  { value: 'Qualitative', label: 'Qualitative' },
+  { value: 'Quantitative', label: 'Quantitative' },
+];
+
+export const RESPIRATOR_STYLE_OPTIONS = [
+  { value: 'Filtering facepiece', label: 'Filtering facepiece' },
+  { value: 'Half-facepiece', label: 'Half-facepiece' },
+  { value: 'Full-facepiece', label: 'Full-facepiece' },
 ];
 
 export const CLEANING_METHOD_OPTIONS = [
