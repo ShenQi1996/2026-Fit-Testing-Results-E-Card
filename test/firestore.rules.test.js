@@ -957,8 +957,13 @@ test('an update cannot blank model or style or put a fit factor on a qualitative
 
   await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { model: '' }));
   await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { style: '   ' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { respiratorMfg: '' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { maskSize: deleteField() }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitTestMethod: deleteField() }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitTestMethod: '   ' }));
   await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitFactor: 100 }));
   await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/stamped'), { model: '1870' }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/stamped'), { respiratorMfg: 'Honeywell' }));
   await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/legacy'), { result: 'Fail' }));
 });
 
@@ -1258,4 +1263,82 @@ test('faculty outside the access window cannot read results', async () => {
     creatorSchool: HELENE,
   }));
   await assertSucceeds(getDoc(doc(openDb, 'fitTests/stamped')));
+});
+
+test('lookup and verification copies match the fit test and stay inside the admin school', async () => {
+  const token = 'a'.repeat(32);
+  const parent = {
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    lookupKey: 'lookup-1',
+    verificationToken: token,
+    clientName: 'Ada',
+    result: 'Pass',
+    ...respiratorRecord(),
+  };
+  const lookup = {
+    recipientEmail: '',
+    clientName: 'Ada',
+    dob: '',
+    testLocation: '',
+    issueDate: '',
+    expirationDate: '',
+    fitTestType: '',
+    testingAgent: '',
+    fitFactor: '',
+    result: 'Pass',
+    fitTester: '',
+    verificationToken: token,
+    userId: 'tester-1',
+    fitTestId: 'own-1',
+    lookupKey: 'lookup-1',
+    ...respiratorRecord(),
+  };
+  const verification = {
+    clientName: 'Ada',
+    testLocation: '',
+    issueDate: '',
+    expirationDate: '',
+    fitTestType: '',
+    fitFactor: '',
+    result: 'Pass',
+    fitTester: '',
+    userId: 'tester-1',
+    fitTestId: 'own-1',
+    verificationToken: token,
+    ...respiratorRecord(),
+  };
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/tester-2', approved('tester', 'other@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/admin-2', scopedAdmin([SECOND], 'other-admin@example.com')],
+    ['fitTests/own-1', parent],
+  ]);
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const otherDb = testEnv.authenticatedContext('tester-2').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const outsideDb = testEnv.authenticatedContext('admin-2').firestore();
+
+  await assertSucceeds(setDoc(doc(ownerDb, 'fitTestLookups/lookup-1'), lookup));
+  await assertSucceeds(setDoc(doc(adminDb, `fitTestVerifications/${token}`), verification));
+  await assertFails(setDoc(doc(outsideDb, 'fitTestLookups/lookup-1'), lookup));
+  await assertFails(setDoc(doc(otherDb, `fitTestVerifications/${token}`), verification));
+  await assertFails(setDoc(doc(adminDb, `fitTestVerifications/${token}`), {
+    ...verification,
+    result: 'Fail',
+  }));
+  await assertFails(setDoc(doc(ownerDb, 'fitTestLookups/lookup-1'), {
+    ...lookup,
+    revokedAt: Timestamp.now(),
+  }));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTestLookups/lookup-1'), {
+    revokedAt: Timestamp.now(),
+  }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTestLookups/lookup-1'), {
+    revokedAt: deleteField(),
+  }));
+  await assertFails(updateDoc(doc(adminDb, `fitTestVerifications/${token}`), {
+    userId: 'admin-1',
+  }));
 });

@@ -108,9 +108,6 @@ const toVerifyCardData = (record = {}) => {
   VERIFY_CARD_FIELDS.forEach((field) => {
     data[field] = record[field] || '';
   });
-  if (!data.expirationDate && data.issueDate) {
-    data.expirationDate = calculateExpirationDate(data.issueDate);
-  }
   return data;
 };
 
@@ -788,6 +785,9 @@ export const lookupFitTestForVerification = async (token) => {
     }
 
     const card = toVerifyCardData(verifySnap.data() || {});
+    if (!card.expirationDate && card.issueDate) {
+      card.expirationDate = calculateExpirationDate(card.issueDate);
+    }
     const expired = isExpirationDatePast(card.expirationDate);
     const passed = (card.result || '').trim().toLowerCase() === 'pass';
 
@@ -852,6 +852,49 @@ export const ensureFitTestVerification = async (record, userId) => {
  * @param {string} userId - User ID of the user making the update (for authorization check)
  * @returns {Promise<void>}
  */
+const latestRemainingFitTest = async (lookupKey, removedFitTestId) => {
+  if (!lookupKey) return null;
+  const siblingsSnapshot = await getDocs(
+    query(collection(db, FIT_TESTS_COLLECTION), where('lookupKey', '==', lookupKey))
+  );
+  const remaining = siblingsSnapshot.docs
+    .filter((docSnap) => docSnap.id !== removedFitTestId)
+    .map(mapFitTestDoc)
+    .filter((record) => !isFitTestPastRetention(record))
+    .sort(compareFitTestRecency);
+  return remaining[0] || null;
+};
+
+const queueLookupUpsert = async (batch, lookupKey, record, fitTestId, userId) => {
+  if (!lookupKey || !fitTestId) return;
+  const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey);
+  const existingSnap = await getDoc(lookupRef);
+  if (existingSnap.exists()) {
+    const existing = existingSnap.data() || {};
+    const createdMs = toMillis(record.createdAt) || Date.now();
+    if (existing.fitTestId !== fitTestId && !isLaterFitTest(record, createdMs, existing)) {
+      return;
+    }
+  }
+  batch.set(lookupRef, {
+    ...toLookupCardData(record),
+    userId: userId || record.userId || '',
+    fitTestId,
+    lookupKey,
+    testCreatedAtMs: toMillis(record.createdAt) || Date.now(),
+    updatedAt: Timestamp.now(),
+  });
+};
+
+const queueLookupDeleteIfCurrent = async (batch, lookupKey, fitTestId) => {
+  if (!lookupKey) return;
+  const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey);
+  const lookupSnap = await getDoc(lookupRef);
+  if (!lookupSnap.exists()) return;
+  if (fitTestId && lookupSnap.data()?.fitTestId !== fitTestId) return;
+  batch.delete(lookupRef);
+};
+
 export const updateFitTest = async (fitTestId, updates, userId) => {
   try {
     // Check if user is admin
@@ -879,7 +922,9 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const safeUpdates = { ...(updates || {}) };
     delete safeUpdates[CREATOR_ROLE_FIELD];
     delete safeUpdates[CREATOR_SCHOOL_FIELD];
-    await updateDoc(docRef, {
+    const ownerId = existing.userId || userId;
+    const batch = writeBatch(db);
+    batch.update(docRef, {
       ...safeUpdates,
       lookupKey: nextKey || null,
       verificationToken,
@@ -887,27 +932,42 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
       ...(retentionDate ? { retentionDate } : {}),
     });
 
-    // Release lookups this record no longer owns, including any older key format.
+    // The parent and its public copies commit together. A later card failure
+    // must not leave the fit test already changed.
     const releasedKeys = new Set(
       [previousKey, existing.lookupKey].filter((key) => key && key !== nextKey)
     );
-    for (const key of releasedKeys) {
-      await deleteFitTestLookupIfCurrent(key, fitTestId);
-    }
-
+    let repointedKey = null;
     if (previousKey && previousKey !== nextKey) {
-      // The old name/DOB/email may still belong to other tests for that client.
-      await repointLookupToLatestRemaining(previousKey, fitTestId, existing.userId || userId);
+      const sibling = await latestRemainingFitTest(previousKey, fitTestId);
+      if (sibling) {
+        await queueLookupUpsert(
+          batch,
+          previousKey,
+          sibling,
+          sibling.id,
+          sibling.userId || ownerId,
+        );
+        repointedKey = previousKey;
+      }
+    }
+    for (const key of releasedKeys) {
+      if (key === repointedKey) continue;
+      await queueLookupDeleteIfCurrent(batch, key, fitTestId);
     }
     if (nextKey) {
-      await upsertFitTestLookup(nextKey, nextRecord, fitTestId, existing.userId || userId);
+      await queueLookupUpsert(batch, nextKey, nextRecord, fitTestId, ownerId);
     }
-    await upsertFitTestVerification(
-      verificationToken,
-      nextRecord,
-      fitTestId,
-      existing.userId || userId
-    );
+    if (isValidVerificationToken(verificationToken)) {
+      batch.set(doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken), {
+        ...toVerifyCardData({ ...nextRecord, verificationToken }),
+        userId: ownerId,
+        fitTestId,
+        verificationToken,
+        updatedAt: Timestamp.now(),
+      });
+    }
+    await batch.commit();
     notifyFitTestActivity();
   } catch (error) {
     console.error('Error updating fit test:', error);

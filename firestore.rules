@@ -554,9 +554,29 @@ service cloud.firestore {
             );
       }
 
+      function methodNotBlanked() {
+        return hadText(resource.data, 'fitTestMethod')
+          ? (
+            request.resource.data.get('fitTestMethod', '') == 'Qualitative'
+            || request.resource.data.get('fitTestMethod', '') == 'Quantitative'
+          )
+          : (
+            !request.resource.data.keys().hasAny(['fitTestMethod'])
+            || request.resource.data.get('fitTestMethod', '') == 'Qualitative'
+            || request.resource.data.get('fitTestMethod', '') == 'Quantitative'
+            || (
+              request.resource.data.fitTestMethod is string
+              && request.resource.data.fitTestMethod.size() == 0
+            )
+          );
+      }
+
       function respiratorFieldsOkOnUpdate() {
-        return textNotBlanked('model', 200)
+        return textNotBlanked('respiratorMfg', 200)
+          && textNotBlanked('model', 200)
           && textNotBlanked('style', 100)
+          && textNotBlanked('maskSize', 50)
+          && methodNotBlanked()
           && fitFactorOkOnWrite();
       }
 
@@ -581,30 +601,130 @@ service cloud.firestore {
         && creatorStampMatchesProfile();
     }
 
+    // Card copies. getAfter lets them be written in the same batch as the fit test.
+    // revokedAt, once set, cannot be cleared. There is no restore.
+    function cardParentReady(fitTestId) {
+      return fitTestId is string
+        && fitTestId.size() > 0
+        && fitTestId.size() <= 200
+        && existsAfter(/databases/$(database)/documents/fitTests/$(fitTestId));
+    }
+
+    function canWriteParentId(fitTestId) {
+      let ownerId = getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('userId', '');
+      let school = getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('schoolsList', '');
+      return request.auth.uid == ownerId
+        || isSuperAdmin()
+        || (isScopedAdmin() && school is string && school.size() > 0 && school in actorSchools());
+    }
+
+    function revokedAtNotCleared() {
+      return resource.data.keys().hasAny(['revokedAt'])
+        ? request.resource.data.get('revokedAt', null) == resource.data.get('revokedAt', null)
+        : (
+          request.resource.data.keys().hasAny(['revokedAt'])
+            ? (isSuperAdmin() || isScopedAdmin())
+            : true
+        );
+    }
+
+    function canDeleteStoredCard() {
+      let fitTestId = resource.data.get('fitTestId', '');
+      return fitTestId is string
+        && fitTestId.size() > 0
+        && exists(/databases/$(database)/documents/fitTests/$(fitTestId))
+        && (
+          request.auth.uid == get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('userId', '')
+          || isSuperAdmin()
+          || (
+            isScopedAdmin()
+            && get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('schoolsList', '') is string
+            && get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('schoolsList', '').size() > 0
+            && get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('schoolsList', '') in actorSchools()
+          )
+        );
+    }
+
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.
     // Listing is denied so the collection cannot be dumped.
     match /fitTestLookups/{lookupKey} {
+      function lookupFieldsMatch(fitTestId) {
+        let parent = getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data;
+        return canWriteParentId(fitTestId)
+          && request.resource.data.get('userId', '') == parent.get('userId', '')
+          && request.resource.data.get('lookupKey', '') == lookupKey
+          && parent.get('lookupKey', '') == lookupKey
+          && request.resource.data.get('recipientEmail', '') == parent.get('recipientEmail', '')
+          && request.resource.data.get('clientName', '') == parent.get('clientName', '')
+          && request.resource.data.get('dob', '') == parent.get('dob', '')
+          && request.resource.data.get('testLocation', '') == parent.get('testLocation', '')
+          && request.resource.data.get('issueDate', '') == parent.get('issueDate', '')
+          && request.resource.data.get('expirationDate', '') == parent.get('expirationDate', '')
+          && request.resource.data.get('fitTestType', '') == parent.get('fitTestType', '')
+          && request.resource.data.get('respiratorMfg', '') == parent.get('respiratorMfg', '')
+          && request.resource.data.get('testingAgent', '') == parent.get('testingAgent', '')
+          && request.resource.data.get('maskSize', '') == parent.get('maskSize', '')
+          && request.resource.data.get('model', '') == parent.get('model', '')
+          && request.resource.data.get('style', '') == parent.get('style', '')
+          && request.resource.data.get('fitTestMethod', '') == parent.get('fitTestMethod', '')
+          && request.resource.data.get('fitFactor', '') == parent.get('fitFactor', '')
+          && request.resource.data.get('result', '') == parent.get('result', '')
+          && request.resource.data.get('fitTester', '') == parent.get('fitTester', '')
+          && request.resource.data.get('verificationToken', '') == parent.get('verificationToken', '');
+      }
+      function lookupMatchesParent() {
+        let fitTestId = request.resource.data.get('fitTestId', '');
+        return cardParentReady(fitTestId) && lookupFieldsMatch(fitTestId);
+      }
       allow get: if true;
       allow list: if false;
-      allow create, update: if isSignedIn() && isApproved() && !isFacultyRole();
-      allow delete: if
-        isSignedIn() &&
-        isApproved() &&
-        !isFacultyRole() &&
-        (isAdmin() || request.auth.uid == resource.data.userId);
+      allow create: if isSignedIn() && isApproved() && !isFacultyRole()
+        && !request.resource.data.keys().hasAny(['revokedAt'])
+        && lookupMatchesParent();
+      allow update: if isSignedIn() && isApproved() && !isFacultyRole()
+        && request.resource.data.get('userId', '') == resource.data.get('userId', '')
+        && revokedAtNotCleared()
+        && lookupMatchesParent();
+      allow delete: if isSignedIn() && isApproved() && !isFacultyRole() && canDeleteStoredCard();
     }
 
     // Public verify: guests can read one verification doc only if they know the token.
     // Listing is denied so the collection cannot be dumped.
     match /fitTestVerifications/{token} {
+      function verificationFieldsMatch(fitTestId) {
+        let parent = getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data;
+        return canWriteParentId(fitTestId)
+          && request.resource.data.get('userId', '') == parent.get('userId', '')
+          && request.resource.data.get('verificationToken', '') == token
+          && parent.get('verificationToken', '') == token
+          && request.resource.data.get('clientName', '') == parent.get('clientName', '')
+          && request.resource.data.get('testLocation', '') == parent.get('testLocation', '')
+          && request.resource.data.get('issueDate', '') == parent.get('issueDate', '')
+          && request.resource.data.get('expirationDate', '') == parent.get('expirationDate', '')
+          && request.resource.data.get('fitTestType', '') == parent.get('fitTestType', '')
+          && request.resource.data.get('respiratorMfg', '') == parent.get('respiratorMfg', '')
+          && request.resource.data.get('maskSize', '') == parent.get('maskSize', '')
+          && request.resource.data.get('model', '') == parent.get('model', '')
+          && request.resource.data.get('style', '') == parent.get('style', '')
+          && request.resource.data.get('fitTestMethod', '') == parent.get('fitTestMethod', '')
+          && request.resource.data.get('fitFactor', '') == parent.get('fitFactor', '')
+          && request.resource.data.get('result', '') == parent.get('result', '')
+          && request.resource.data.get('fitTester', '') == parent.get('fitTester', '');
+      }
+      function verificationMatchesParent() {
+        let fitTestId = request.resource.data.get('fitTestId', '');
+        return cardParentReady(fitTestId) && verificationFieldsMatch(fitTestId);
+      }
       allow get: if true;
       allow list: if false;
-      allow create, update: if isSignedIn() && isApproved() && !isFacultyRole();
-      allow delete: if
-        isSignedIn() &&
-        isApproved() &&
-        !isFacultyRole() &&
-        (isAdmin() || request.auth.uid == resource.data.userId);
+      allow create: if isSignedIn() && isApproved() && !isFacultyRole()
+        && !request.resource.data.keys().hasAny(['revokedAt'])
+        && verificationMatchesParent();
+      allow update: if isSignedIn() && isApproved() && !isFacultyRole()
+        && request.resource.data.get('userId', '') == resource.data.get('userId', '')
+        && revokedAtNotCleared()
+        && verificationMatchesParent();
+      allow delete: if isSignedIn() && isApproved() && !isFacultyRole() && canDeleteStoredCard();
     }
 
     // One log per signed-in staff uid. Used to cap the two test accounts at 1 send / 24h.
