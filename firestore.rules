@@ -122,13 +122,23 @@ service cloud.firestore {
       return testerInScope(data) || facultyInScope(data) || adminInScope(data);
     }
 
-    // Faculty read schools: the profile `school` string, plus `schools` when set.
+    // Faculty read one school: the profile `school` string. A `schools` list is not consulted.
     function facultySchools() {
-      return schoolsOf(currentUserDoc().data).concat(
-        schoolOf(currentUserDoc().data).size() > 0
-          ? [schoolOf(currentUserDoc().data)]
-          : []
-      );
+      return schoolOf(currentUserDoc().data).size() > 0
+        ? [schoolOf(currentUserDoc().data)]
+        : [];
+    }
+
+    // Faculty accounts store exactly one non-empty school and no schools list.
+    function facultyAccountShapeOk(data) {
+      return data.get('role', null) == 'faculty'
+        ? (
+          data.keys().hasAny(['school'])
+          && data.school is string
+          && data.school.size() > 0
+          && !data.keys().hasAny(['schools'])
+        )
+        : true;
     }
 
     // Missing or blank creatorSchool is not readable by faculty. Legacy tests stay hidden.
@@ -145,19 +155,32 @@ service cloud.firestore {
         && request.resource.data.get('creatorSchool', null) == resource.data.get('creatorSchool', null);
     }
 
-    // creatorRole is the writer's current role. creatorSchool is their profile school
-    // when that string is set, otherwise the schoolsList on the card.
+    // creatorSchool is the profile school for a tester, or one of the actor's own
+    // schools for an admin. It is never taken from the card's schoolsList.
+    // A tester with no profile school cannot create a fit test.
+    function creatorSchoolMatchesActor() {
+      return request.resource.data.keys().hasAny(['creatorSchool'])
+        && request.resource.data.creatorSchool is string
+        && request.resource.data.creatorSchool.size() > 0
+        && (
+          currentUserDoc().data.get('role', null) == 'admin'
+            ? request.resource.data.creatorSchool in schoolsOf(currentUserDoc().data)
+            : (
+              currentUserDoc().data.get('role', null) == 'superadmin'
+                ? request.resource.data.creatorSchool in masterSchoolNames()
+                : (
+                  schoolOf(currentUserDoc().data) != ''
+                  && request.resource.data.creatorSchool == schoolOf(currentUserDoc().data)
+                )
+            )
+        );
+    }
+
     function creatorStampMatchesProfile() {
       return request.resource.data.keys().hasAny(['creatorRole'])
-        && request.resource.data.keys().hasAny(['creatorSchool'])
         && request.resource.data.creatorRole is string
-        && request.resource.data.creatorSchool is string
         && request.resource.data.creatorRole == currentUserDoc().data.get('role', 'tester')
-        && (
-          schoolOf(currentUserDoc().data) != ''
-            ? request.resource.data.creatorSchool == schoolOf(currentUserDoc().data)
-            : request.resource.data.creatorSchool == schoolsListOf(request.resource.data)
-        );
+        && creatorSchoolMatchesActor();
     }
 
     function schoolChanged() {
@@ -290,7 +313,7 @@ service cloud.firestore {
     }
 
     function fitTestSchoolOkOnCreate() {
-      return fitTestSchoolListed();
+      return fitTestSchoolListed() && creatorSchoolMatchesActor();
     }
 
     function fitTestSchoolOkOnUpdate() {
@@ -361,10 +384,12 @@ service cloud.firestore {
       // Admins may create a tester or faculty profile for someone else.
       // A super admin may create a tester, faculty, or admin profile for someone else.
       // A scoped admin creating a tester or faculty must set school to one of their schools.
-      // A super admin may omit school or set school or schools, and not on their own doc.
+      // A super admin may omit school on a tester, or set school or schools on an admin.
+      // Faculty must have exactly one school and no schools list.
       // Only a super admin may set startDate or endDate, and not on their own doc.
       allow create: if schoolTagsOkOnCreate(userId) &&
         accessDatesOkOnCreate(userId) &&
+        facultyAccountShapeOk(request.resource.data) &&
         request.resource.data.get('role', null) != 'superadmin'
         && (
           (isOwner(userId)
@@ -392,6 +417,7 @@ service cloud.firestore {
       // inside their list (role stays admin), plus approval bookkeeping.
       allow update: if schoolTagsOkOnUpdate(userId) &&
         accessDatesOkOnUpdate(userId) &&
+        facultyAccountShapeOk(request.resource.data) &&
         (request.resource.data.get('role', null) != 'superadmin'
           || request.resource.data.get('role', null) == resource.data.get('role', null))
         && (
@@ -452,7 +478,7 @@ service cloud.firestore {
     }
 
     match /fitTests/{fitTestId} {
-      // Faculty read only when creatorSchool is one of their schools.
+      // Faculty read only when creatorSchool equals their profile school.
       // Their own userId does not grant access, so a later role change
       // cannot reveal tests stamped for another school. Testers still read
       // their own userId. Admins still read every test.

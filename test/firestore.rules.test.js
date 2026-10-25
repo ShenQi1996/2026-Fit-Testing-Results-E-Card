@@ -1021,4 +1021,102 @@ test('admins can create faculty inside their schools', async () => {
     email: 'super-faculty@example.com',
     school: SECOND,
   }));
+  await assertFails(setDoc(doc(superDb, 'users/faculty-blank'), {
+    role: 'faculty',
+    status: 'approved',
+    email: 'blank@example.com',
+  }));
+  await assertFails(setDoc(doc(superDb, 'users/faculty-list'), {
+    role: 'faculty',
+    status: 'approved',
+    email: 'list@example.com',
+    school: HELENE,
+    schools: [HELENE],
+  }));
+});
+
+test('creatorSchool cannot be taken from the card, and a tester with no school cannot create', async () => {
+  await seed([
+    ['users/tester-blank', approved('tester', 'blank@example.com')],
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE, SECOND])],
+    ['users/admin-second', scopedAdmin([SECOND], 'second@example.com')],
+  ]);
+  const blankDb = testEnv.authenticatedContext('tester-blank').firestore();
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const secondDb = testEnv.authenticatedContext('admin-second').firestore();
+
+  await assertFails(setDoc(doc(blankDb, 'fitTests/forged'), {
+    userId: 'tester-blank',
+    schoolsList: HELENE,
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/card-school'), {
+    userId: 'tester-1',
+    schoolsList: SECOND,
+    creatorRole: 'tester',
+    creatorSchool: SECOND,
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/own-school'), {
+    userId: 'tester-1',
+    schoolsList: SECOND,
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+  }));
+  await assertSucceeds(setDoc(doc(adminDb, 'fitTests/admin-second'), {
+    userId: 'admin-1',
+    schoolsList: HELENE,
+    creatorRole: 'admin',
+    creatorSchool: SECOND,
+  }));
+  await assertFails(setDoc(doc(secondDb, 'fitTests/not-mine'), {
+    userId: 'admin-second',
+    schoolsList: HELENE,
+    creatorRole: 'admin',
+    creatorSchool: HELENE,
+  }));
+});
+
+test('faculty have one school, and a schools list does not widen what they can read', async () => {
+  await seed([
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/admin-1', scopedAdmin([HELENE, SECOND])],
+    ['users/faculty-both', approved('faculty', 'both@example.com', {
+      school: HELENE,
+      schools: [SECOND],
+    })],
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/helene', {
+      userId: 'tester-1',
+      creatorRole: 'tester',
+      creatorSchool: HELENE,
+    }],
+    ['fitTests/second', {
+      userId: 'tester-1',
+      creatorRole: 'tester',
+      creatorSchool: SECOND,
+    }],
+  ]);
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
+  const facultyDb = testEnv.authenticatedContext('faculty-both').firestore();
+
+  await assertFails(updateDoc(doc(superDb, 'users/admin-1'), {
+    role: 'faculty',
+    school: HELENE,
+  }));
+  await assertSucceeds(updateDoc(doc(superDb, 'users/admin-1'), {
+    role: 'faculty',
+    school: HELENE,
+    schools: deleteField(),
+  }));
+  await assertSucceeds(getDoc(doc(facultyDb, 'fitTests/helene')));
+  await assertFails(getDoc(doc(facultyDb, 'fitTests/second')));
+  await assertFails(getDocs(query(
+    collection(facultyDb, 'fitTests'),
+    where('creatorSchool', '==', SECOND),
+    orderBy('createdAt', 'desc'),
+    limit(100),
+  )));
 });

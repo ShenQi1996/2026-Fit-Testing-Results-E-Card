@@ -664,6 +664,31 @@ test('a super admin can leave a new tester school unset', async () => {
   expect(payload).not.toHaveProperty('school');
 });
 
+test('a super admin must choose one school when creating faculty', async () => {
+  const renderer = await renderPage({
+    uid: 'super-1',
+    role: 'superadmin',
+    email: 'sam@example.com',
+  });
+  const form = await openCreateForm(renderer);
+  const roleSelect = form.findByProps({ 'aria-label': 'Role' });
+  await act(async () => {
+    roleSelect.props.onChange({ target: { value: 'faculty' } });
+  });
+  const schoolSelect = renderer.root.findByProps({ className: 'users-create-form' })
+    .findByProps({ 'aria-label': 'School' });
+
+  expect(optionValues(schoolSelect)).toEqual([HELENE]);
+  expect(createUserButton(renderer.root.findByProps({ className: 'users-create-form' })).props.disabled)
+    .toBe(true);
+
+  await act(async () => {
+    schoolSelect.props.onChange({ target: { value: HELENE } });
+  });
+  expect(createUserButton(renderer.root.findByProps({ className: 'users-create-form' })).props.disabled)
+    .toBe(false);
+});
+
 test('the schools section is only shown to a super admin', async () => {
   addMasterSchool.mockResolvedValue([HELENE, 'North Campus']);
   renameMasterSchool.mockResolvedValue(['North Campus']);

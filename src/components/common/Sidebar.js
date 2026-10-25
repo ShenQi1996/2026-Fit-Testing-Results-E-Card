@@ -13,9 +13,7 @@ const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
   const faculty = isFaculty(user);
   const [testCount, setTestCount] = useState(null);
   const countCache = useRef({ uid: '', at: 0 });
-  const schoolKey = faculty
-    ? `${user?.school || ''}|${(user?.schools || []).join('\u0001')}`
-    : '';
+  const schoolKey = faculty ? (user?.school || '') : '';
 
   const loadTestCount = useCallback(async (force = false) => {
     if (!user?.uid) {

@@ -14,7 +14,6 @@ import {
   where,
   orderBy,
   limit,
-  getCountFromServer,
   Timestamp,
   deleteField,
   writeBatch,
@@ -242,20 +241,15 @@ export const FACULTY_RESULTS_LIMIT = 100;
 export const CREATOR_ROLE_FIELD = 'creatorRole';
 export const CREATOR_SCHOOL_FIELD = 'creatorSchool';
 
-/** School names a faculty account may read. One `school` string, plus `schools` if present. */
+/** The one school a faculty account may read. A `schools` list is ignored. */
 export const facultySchoolNames = (value) => {
   if (typeof value === 'string') {
     const school = value.trim();
     return school ? [school] : [];
   }
-  if (Array.isArray(value)) return normalizeSchoolList(value);
-  const names = [];
-  const single = typeof value?.school === 'string' ? value.school.trim() : '';
-  if (single) names.push(single);
-  normalizeSchoolList(value?.schools).forEach((school) => {
-    if (!names.includes(school)) names.push(school);
-  });
-  return names;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const school = typeof value.school === 'string' ? value.school.trim() : '';
+  return school ? [school] : [];
 };
 
 const chunkValues = (values, size) => {
@@ -369,11 +363,34 @@ const serializeUserDoc = (docSnap) => {
  */
 const creatorStampFor = (profile, schoolsList) => {
   const role = profile?.role || USER_ROLE_TESTER;
+  if (role === USER_ROLE_ADMIN) {
+    const ownSchools = normalizeSchoolList(profile?.schools);
+    const listed = typeof schoolsList === 'string' ? schoolsList.trim() : '';
+    if (!listed || !ownSchools.includes(listed)) {
+      throw permissionError('Choose one of your schools before saving this fit test.');
+    }
+    return {
+      [CREATOR_ROLE_FIELD]: role,
+      [CREATOR_SCHOOL_FIELD]: listed,
+    };
+  }
+  if (role === USER_ROLE_SUPERADMIN) {
+    const listed = typeof schoolsList === 'string' ? schoolsList.trim() : '';
+    if (!listed) {
+      throw permissionError('Choose a school before saving this fit test.');
+    }
+    return {
+      [CREATOR_ROLE_FIELD]: role,
+      [CREATOR_SCHOOL_FIELD]: listed,
+    };
+  }
   const ownSchool = typeof profile?.school === 'string' ? profile.school.trim() : '';
-  const listed = typeof schoolsList === 'string' ? schoolsList.trim() : '';
+  if (!ownSchool) {
+    throw permissionError('A school is required on your profile before you can save a fit test.');
+  }
   return {
     [CREATOR_ROLE_FIELD]: role,
-    [CREATOR_SCHOOL_FIELD]: ownSchool || listed,
+    [CREATOR_SCHOOL_FIELD]: ownSchool,
   };
 };
 
@@ -602,23 +619,16 @@ export const getFacultyFitTests = async (schools, options = {}) => {
 };
 
 /**
- * Server count of fit tests stamped with one of these schools.
- * Single-field aggregation, so it does not use the createdAt composite index.
- * @param {string|string[]|object} schools
+ * Count of faculty-visible fit tests. Uses the same school, limit, and
+ * retention filter as the results list, so the sidebar cannot show a higher
+ * number than the page.
+ * @param {string|object} schools
+ * @param {{ now?: Date, limit?: number }} [options]
  * @returns {Promise<number>}
  */
-export const countFacultyFitTests = async (schools) => {
-  const scopedSchools = facultySchoolNames(schools);
-  if (scopedSchools.length === 0) return 0;
-  let total = 0;
-  for (const chunk of chunkValues(scopedSchools, FIRESTORE_IN_LIMIT)) {
-    const snapshot = await getCountFromServer(query(
-      collection(db, FIT_TESTS_COLLECTION),
-      facultySchoolConstraint(chunk),
-    ));
-    total += snapshot.data().count;
-  }
-  return total;
+export const countFacultyFitTests = async (schools, options = {}) => {
+  const records = await getFacultyFitTests(schools, options);
+  return records.length;
 };
 
 /**
@@ -1173,6 +1183,27 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
       updatedAt: Timestamp.now(),
     };
 
+    const nextFacultySchool = nextRole === USER_ROLE_FACULTY
+      ? (
+        typeof updates.school === 'string'
+          ? updates.school.trim()
+          : (typeof current.school === 'string' ? current.school.trim() : '')
+      )
+      : '';
+    if (nextRole === USER_ROLE_FACULTY && !nextFacultySchool) {
+      throw new Error('Choose one school for this faculty member.');
+    }
+    if (
+      nextRole === USER_ROLE_FACULTY
+      && (!isSuperAdmin(actorRole) || adminUserId === targetUserId)
+      && (
+        normalizeSchoolList(current.schools).length > 0
+        || (typeof current.school === 'string' ? current.school.trim() : '') !== nextFacultySchool
+      )
+    ) {
+      throw permissionError('Faculty must have exactly one school.');
+    }
+
     if (nextStatus !== current.status) {
       if (nextStatus === USER_STATUS_APPROVED || nextStatus === USER_STATUS_REJECTED) {
         payload.approvedAt = Timestamp.now();
@@ -1182,12 +1213,18 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
 
     // School tags are super-admin only, and not on the caller's own document.
     if (isSuperAdmin(actorRole) && adminUserId !== targetUserId) {
-      if (typeof updates.school === 'string') {
+      if (nextRole === USER_ROLE_FACULTY) {
+        const currentSchool = typeof current.school === 'string' ? current.school : '';
+        if (nextFacultySchool !== currentSchool) payload.school = nextFacultySchool;
+        if (Object.prototype.hasOwnProperty.call(current, 'schools')) {
+          payload.schools = deleteField();
+        }
+      } else if (typeof updates.school === 'string') {
         const nextSchool = updates.school.trim();
         const currentSchool = typeof current.school === 'string' ? current.school : '';
         if (nextSchool !== currentSchool) payload.school = nextSchool;
       }
-      if (Array.isArray(updates.schools)) {
+      if (nextRole !== USER_ROLE_FACULTY && Array.isArray(updates.schools)) {
         const nextSchools = normalizeSchoolList(updates.schools);
         const currentSchools = normalizeSchoolList(current.schools);
         const sameSchools = nextSchools.length === currentSchools.length
@@ -1316,6 +1353,9 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
 
     if (singleSchoolRole(role)) {
       const requestedSchool = typeof userData.school === 'string' ? userData.school.trim() : '';
+      if (role === USER_ROLE_FACULTY && !requestedSchool) {
+        throw new Error('Choose one school for this faculty member.');
+      }
       if (isSuperAdmin(actorRole)) {
         if (requestedSchool) profile.school = requestedSchool;
       } else {
@@ -1403,11 +1443,26 @@ export const setUserRole = async (actorUserId, targetUserId, role) => {
         role,
         updatedAt: Timestamp.now(),
       };
+      if (role === USER_ROLE_FACULTY) {
+        const school = typeof data.school === 'string' ? data.school.trim() : '';
+        if (!school) {
+          throw new Error('Choose one school for this faculty member.');
+        }
+        if (Object.prototype.hasOwnProperty.call(data, 'schools')) {
+          if (!isSuperAdmin(actorRole)) {
+            throw permissionError('Faculty must have exactly one school.');
+          }
+          payload.schools = deleteField();
+        }
+      }
       if (!USER_STATUSES.includes(data.status)) {
         payload.status = USER_STATUS_PENDING;
       }
       await setDoc(userDocRef, payload, { merge: true });
     } else {
+      if (role === USER_ROLE_FACULTY) {
+        throw new Error('Choose one school for this faculty member.');
+      }
       await setDoc(userDocRef, {
         role,
         status: USER_STATUS_PENDING,

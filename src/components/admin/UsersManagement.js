@@ -364,6 +364,14 @@ const UsersManagement = () => {
     ) {
       fieldErrors.schools = FIELD_REQUIRED_MESSAGES.schools;
     }
+    if (
+      superAdmin
+      && targetUserId !== user.uid
+      && tagRole === USER_ROLE_FACULTY
+      && isBlank(draft.school)
+    ) {
+      fieldErrors.school = 'Choose one school for this faculty member.';
+    }
     if (Object.keys(fieldErrors).length > 0) {
       setEditFieldErrors((prev) => ({ ...prev, [targetUserId]: fieldErrors }));
       setSuccess('');
@@ -390,6 +398,9 @@ const UsersManagement = () => {
           updates.schools = selectedSchools;
         } else if (tagRole === USER_ROLE_SUPERADMIN) {
           if (selectedSchools.length > 0) updates.schools = selectedSchools;
+        } else if (tagRole === USER_ROLE_FACULTY) {
+          updates.school = (draft.school || '').trim();
+          updates.schools = [];
         } else {
           updates.school = draft.school || '';
         }
@@ -494,6 +505,9 @@ const UsersManagement = () => {
     && creatingSingleSchool
     && actorSchools.length > 1
     && !actorSchools.includes(createForm.school);
+  const createFacultySchoolMissing = superAdmin
+    && createRole === USER_ROLE_FACULTY
+    && isBlank(createForm.school);
   const creatingAdmin = superAdmin && createRole === USER_ROLE_ADMIN;
   const createBlocked = !superAdmin && creatingSingleSchool && actorSchools.length === 0;
 
@@ -516,6 +530,9 @@ const UsersManagement = () => {
     if (isBlank(role)) fieldErrors.role = FIELD_REQUIRED_MESSAGES.role;
     if (role === USER_ROLE_ADMIN && normalizeSchoolList(createForm.schools).length === 0) {
       fieldErrors.schools = FIELD_REQUIRED_MESSAGES.schools;
+    }
+    if (role === USER_ROLE_FACULTY && isBlank(createForm.school) && superAdmin) {
+      fieldErrors.school = 'Choose one school for this faculty member.';
     }
     if (Object.keys(fieldErrors).length > 0) {
       setCreateFieldErrors(fieldErrors);
@@ -815,7 +832,7 @@ const UsersManagement = () => {
                     onChange={(e) => setCreateForm((prev) => ({ ...prev, school: e.target.value }))}
                     disabled={creating}
                   >
-                    <option value="">Leave unset</option>
+                    {createRole !== USER_ROLE_FACULTY && <option value="">Leave unset</option>}
                     {masterSchools.map((school) => (
                       <option key={school} value={school}>
                         {school}
@@ -867,7 +884,7 @@ const UsersManagement = () => {
             <button
               type="submit"
               className="users-primary-button"
-              disabled={creating || createBlocked || createSchoolMissing}
+              disabled={creating || createBlocked || createSchoolMissing || createFacultySchoolMissing}
             >
               {creating ? 'Creating...' : 'Create User'}
             </button>
@@ -956,7 +973,9 @@ const UsersManagement = () => {
                 : locked
                   ? [currentRole]
                   : assignableRoles.filter((role) => role !== USER_ROLE_SUPERADMIN);
-              const schoolTagIsList = currentRole === USER_ROLE_ADMIN;
+              const draftRole = draft.role || currentRole;
+              const schoolTagIsList = draftRole === USER_ROLE_ADMIN;
+              const editingFaculty = draftRole === USER_ROLE_FACULTY;
               const schoolTagLabel = roleIsSuperAdmin || schoolTagIsList ? 'Schools' : 'School';
               const assignedSchools = normalizeSchoolList(draft.schools);
               const schoolTagValue = roleIsSuperAdmin
@@ -1091,7 +1110,7 @@ const UsersManagement = () => {
                             onChange={(e) => handleDraftChange(item.id, 'school', e.target.value)}
                             disabled={savingId === item.id}
                           >
-                            <option value="">Leave unset</option>
+                            {!editingFaculty && <option value="">Leave unset</option>}
                             {schoolChoices.map((school) => (
                               <option key={school} value={school}>{school}</option>
                             ))}

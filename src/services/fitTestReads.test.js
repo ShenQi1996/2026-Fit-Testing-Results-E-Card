@@ -142,7 +142,7 @@ test('faculty cannot create a fit test', async () => {
   expect(addDoc).not.toHaveBeenCalled();
 });
 
-test('faculty results use creatorSchool equality or in, createdAt desc, and a limit', async () => {
+test('faculty results read only the profile school, newest first, with a limit', async () => {
   getDocs.mockResolvedValue({ docs: [] });
   await getFacultyFitTests('Helene College of Nursing');
   expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'Helene College of Nursing');
@@ -151,24 +151,19 @@ test('faculty results use creatorSchool equality or in, createdAt desc, and a li
   expect(getDocs).toHaveBeenCalledTimes(1);
 
   where.mockClear();
-  orderBy.mockClear();
-  limit.mockClear();
   getDocs.mockClear();
-  await getFacultyFitTests(['Helene College of Nursing', 'Example Second School']);
-  expect(where).toHaveBeenCalledWith(
-    'creatorSchool',
-    'in',
-    ['Helene College of Nursing', 'Example Second School'],
-  );
-  expect(orderBy).toHaveBeenCalledWith('createdAt', 'desc');
-  expect(limit).toHaveBeenCalledWith(FACULTY_RESULTS_LIMIT);
+  await getFacultyFitTests({
+    school: 'Helene College of Nursing',
+    schools: ['Example Second School'],
+  });
+  expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'Helene College of Nursing');
+  expect(where).not.toHaveBeenCalledWith('creatorSchool', 'in', expect.anything());
+  expect(getDocs).toHaveBeenCalledTimes(1);
 
   where.mockClear();
-  const manySchools = Array.from({ length: 31 }, (_, index) => `School ${index}`);
-  await getFacultyFitTests(manySchools);
-  const inCalls = where.mock.calls.filter((call) => call[1] === 'in');
-  expect(inCalls.map((call) => call[2].length)).toEqual([30]);
-  expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'School 30');
+  getDocs.mockClear();
+  await getFacultyFitTests(['Helene College of Nursing', 'Example Second School']);
+  expect(getDocs).not.toHaveBeenCalled();
 });
 
 test('a missing faculty index is surfaced instead of an empty list', async () => {
@@ -178,17 +173,58 @@ test('a missing faculty index is surfaced instead of an empty list', async () =>
   indexError.code = 'failed-precondition';
   getDocs.mockRejectedValue(indexError);
 
-  await expect(getFacultyFitTests(['Helene College of Nursing'])).rejects.toMatchObject({
+  await expect(getFacultyFitTests({ school: 'Helene College of Nursing', schools: ['Other'] })).rejects.toMatchObject({
     message: 'FIREBASE_INDEX_REQUIRED',
     indexUrl: 'https://console.firebase.google.com/faculty',
   });
   expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'Helene College of Nursing');
 });
 
-test('faculty sidebar count aggregates creatorSchool without ordering', async () => {
-  getCountFromServer.mockResolvedValue({ data: () => ({ count: 5 }) });
-  await expect(countFacultyFitTests({ school: 'Helene College of Nursing', schools: [] })).resolves.toBe(5);
+test('a tester with no profile school cannot save a fit test', async () => {
+  getDoc.mockResolvedValue(userDoc('tester', { school: '  ' }));
+  await expect(saveFitTest('tester-1', {
+    schoolsList: 'Helene College of Nursing',
+    creatorSchool: 'Helene College of Nursing',
+  })).rejects.toThrow(/school is required on your profile/i);
+  expect(addDoc).not.toHaveBeenCalled();
+});
+
+test('an admin stamp must be one of that admin\'s schools', async () => {
+  getDoc.mockResolvedValue(userDoc('admin'));
+  await expect(saveFitTest('admin-1', { schoolsList: 'Example Second School' }))
+    .rejects.toThrow(/one of your schools/i);
+  expect(addDoc).not.toHaveBeenCalled();
+});
+
+test('faculty sidebar count uses the same limit and retention filter as the list', async () => {
+  getDocs.mockResolvedValue({
+    docs: [
+      {
+        id: 'live',
+        data: () => ({
+          creatorSchool: 'Helene College of Nursing',
+          issueDate: '10/24/2026',
+          createdAt: recentCreatedAt,
+        }),
+      },
+      {
+        id: 'old',
+        data: () => ({
+          creatorSchool: 'Helene College of Nursing',
+          issueDate: '10/23/2022',
+          createdAt: recentCreatedAt,
+        }),
+      },
+    ],
+  });
+
+  await expect(countFacultyFitTests({
+    school: 'Helene College of Nursing',
+    schools: ['Example Second School'],
+  }, { now: NOW })).resolves.toBe(1);
   expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'Helene College of Nursing');
-  expect(orderBy).not.toHaveBeenCalled();
-  expect(getDocs).not.toHaveBeenCalled();
+  expect(where).not.toHaveBeenCalledWith('creatorSchool', 'in', expect.anything());
+  expect(orderBy).toHaveBeenCalledWith('createdAt', 'desc');
+  expect(limit).toHaveBeenCalledWith(FACULTY_RESULTS_LIMIT);
+  expect(getCountFromServer).not.toHaveBeenCalled();
 });

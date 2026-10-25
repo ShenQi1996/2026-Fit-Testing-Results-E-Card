@@ -1,4 +1,4 @@
-import { deleteDoc, getDoc, getDocs, setDoc, updateDoc, where } from 'firebase/firestore';
+import { deleteDoc, deleteField, getDoc, getDocs, setDoc, updateDoc, where } from 'firebase/firestore';
 import {
   createManagedUserProfile,
   deleteManagedUser,
@@ -340,6 +340,7 @@ test('a scoped admin can assign faculty and cannot manage users as faculty', asy
     school: 'Helene College of Nursing',
   };
   users['admin-1'] = { ...users['admin-1'], schools: ['Helene College of Nursing'] };
+  users['tester-1'] = { ...users['tester-1'], school: 'Helene College of Nursing' };
 
   await updateManagedUser('admin-1', 'tester-1', { role: 'faculty', status: 'approved' });
   expect(updateDoc.mock.calls[0][1]).toEqual(expect.objectContaining({ role: 'faculty' }));
@@ -363,4 +364,41 @@ test('a scoped admin can assign faculty and cannot manage users as faculty', asy
       school: 'Helene College of Nursing',
     })
   );
+  expect(setDoc.mock.calls[0][1].schools).toBeUndefined();
+});
+
+test('faculty need one school, and converting an admin clears the schools list', async () => {
+  await expect(createManagedUserProfile('super-1', 'faculty-new', {
+    email: 'faculty@example.com',
+    role: 'faculty',
+    status: 'approved',
+  })).rejects.toThrow(/one school/i);
+  expect(setDoc).not.toHaveBeenCalled();
+
+  await createManagedUserProfile('super-1', 'faculty-new', {
+    email: 'faculty@example.com',
+    role: 'faculty',
+    status: 'approved',
+    school: 'Helene College of Nursing',
+  });
+  expect(setDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+    role: 'faculty',
+    school: 'Helene College of Nursing',
+  }));
+  expect(setDoc.mock.calls[0][1].schools).toBeUndefined();
+
+  users['admin-2'] = {
+    ...users['admin-2'],
+    schools: ['Helene College of Nursing', 'Example Second School'],
+  };
+  updateDoc.mockClear();
+  await updateManagedUser('super-1', 'admin-2', {
+    role: 'faculty',
+    school: 'Helene College of Nursing',
+  });
+  expect(updateDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+    role: 'faculty',
+    school: 'Helene College of Nursing',
+    schools: deleteField(),
+  }));
 });

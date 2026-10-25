@@ -42,9 +42,7 @@ export const useFitTestResults = () => {
 
   const userId = user?.uid;
   const faculty = isFaculty(user);
-  const facultySchoolsKey = faculty
-    ? `${user?.school || ''}|${(user?.schools || []).join('\u0001')}`
-    : '';
+  const facultySchoolsKey = faculty ? (user?.school || '') : '';
 
   const loadFitTests = useCallback(async () => {
     if (!userId) return;
