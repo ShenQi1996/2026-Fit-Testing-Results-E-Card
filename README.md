@@ -98,7 +98,8 @@ Collections:
 
 - `users` — testers/admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin)
+- `fitTests` — records (owner or admin). Removing one from the app sets `deletedAt`, `deletedBy`, and `deleteReason` and writes `fitTestDeletionLogs`. The document is not deleted.
+- `fitTestDeletionLogs` — append-only reason for hiding a fit test. Hard delete of `fitTests` is denied so the record is kept until the next fit test (OSHA 1910.134(m)(3)).
 - `fitTestLookups/{lookupKey}` — public get for resend
 - `fitTestVerifications/{token}` — public get for verify
 

@@ -170,11 +170,15 @@ export const useFitTestResults = () => {
   const isCardExpanded = (testId) => expandedCards.has(testId);
 
   const handleDeleteClick = (testId, clientName) => {
-    setDeleteConfirm({ id: testId, clientName: clientName || 'this record' });
+    setDeleteConfirm({ id: testId, clientName: clientName || 'this record', reason: '' });
   };
 
   const handleDeleteCancel = () => {
     setDeleteConfirm(null);
+  };
+
+  const handleDeleteReasonChange = (reason) => {
+    setDeleteConfirm((prev) => (prev ? { ...prev, reason } : prev));
   };
 
   const handleDeleteConfirm = async () => {
@@ -188,10 +192,14 @@ export const useFitTestResults = () => {
       if (!user || !user.uid) {
         throw new Error('User must be logged in to delete records.');
       }
-      await deleteFitTest(deleteConfirm.id, user.uid);
+      const reason = (deleteConfirm.reason || '').trim();
+      if (!reason) {
+        throw new Error('A reason is required to remove a fit test from the list.');
+      }
+      await deleteFitTest(deleteConfirm.id, user.uid, reason);
 
       setFitTests((prev) => prev.filter((test) => test.id !== deleteConfirm.id));
-      setSuccessMessage(`Fit test record for "${deleteConfirm.clientName}" has been deleted successfully.`);
+      setSuccessMessage(`Fit test record for "${deleteConfirm.clientName}" was hidden. The record is kept.`);
       setDeleteConfirm(null);
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
@@ -386,6 +394,7 @@ export const useFitTestResults = () => {
     isCardExpanded,
     handleDeleteClick,
     handleDeleteCancel,
+    handleDeleteReasonChange,
     handleDeleteConfirm,
     handlePreviewResultPdf,
     handleDownloadResultPdf,

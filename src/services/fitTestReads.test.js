@@ -1,6 +1,7 @@
-import { getDoc, getDocs, where, writeBatch } from 'firebase/firestore';
+import { addDoc, deleteDoc, getDoc, getDocs, updateDoc, where, writeBatch } from 'firebase/firestore';
 import {
   countFitTestsForUser,
+  deleteFitTest,
   getFitTestCountsByUser,
   getUserFitTests,
 } from './firebaseDb';
@@ -39,6 +40,9 @@ beforeEach(() => {
   getDocs.mockReset();
   where.mockClear();
   writeBatch.mockClear();
+  updateDoc.mockClear();
+  deleteDoc.mockClear();
+  addDoc.mockClear();
   getDocs.mockResolvedValue({ docs: [] });
 });
 
@@ -94,4 +98,49 @@ test('a missing composite index is surfaced instead of an empty results list', a
     indexUrl: 'https://console.firebase.google.com/example',
   });
   await expect(countFitTestsForUser('tester-1', { now: NOW })).rejects.toBe(indexError);
+});
+
+test('soft-deleted fit tests stay stored and drop out of normal lists', async () => {
+  const hidden = {
+    id: 'hidden-1',
+    data: () => ({
+      userId: 'tester-1',
+      issueDate: '10/24/2026',
+      createdAt: recentCreatedAt,
+      deletedAt: { toDate: () => new Date('2026-10-24T00:00:00.000Z') },
+    }),
+  };
+  getDocs.mockResolvedValue({ docs: [...reproDocs, hidden] });
+  getDoc.mockResolvedValue(userDoc('admin'));
+
+  const listed = await getUserFitTests('tester-1', { now: NOW });
+  expect(listed.map((record) => record.id).sort()).toEqual(['live-1', 'live-2']);
+  await expect(countFitTestsForUser('tester-1', { now: NOW })).resolves.toBe(2);
+
+  getDoc.mockImplementation(async (ref) => {
+    if (ref?.args?.[1] === 'users') return userDoc('admin');
+    return {
+      exists: () => true,
+      id: ref?.args?.[2],
+      data: () => ({ userId: 'tester-1', clientName: 'Ada' }),
+    };
+  });
+  await deleteFitTest('live-1', 'admin-1', ' Entered on the wrong person ');
+  expect(deleteDoc).not.toHaveBeenCalled();
+  expect(updateDoc).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    deletedBy: 'admin-1',
+    deleteReason: 'Entered on the wrong person',
+  }));
+  expect(addDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+    fitTestId: 'live-1',
+    userId: 'tester-1',
+    deletedBy: 'admin-1',
+    deleteReason: 'Entered on the wrong person',
+  }));
+
+  updateDoc.mockClear();
+  addDoc.mockClear();
+  await expect(deleteFitTest('live-1', 'admin-1', '   ')).rejects.toThrow(/reason is required/i);
+  expect(updateDoc).not.toHaveBeenCalled();
+  expect(addDoc).not.toHaveBeenCalled();
 });

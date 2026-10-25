@@ -869,3 +869,62 @@ test('fitTests count queries follow the same read rules as document reads', asyn
     where('userId', '==', 'tester-1'),
   )));
 });
+
+test('fit test records are soft-deleted with a reason and cannot be hard-deleted', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin()],
+    ['users/other-1', approved('tester', 'other@example.com', { school: SECOND })],
+    ['fitTests/own-1', { userId: 'tester-1', result: 'Pass', schoolsList: HELENE }],
+    ['fitTests/own-2', { userId: 'tester-1', result: 'Fail', schoolsList: HELENE }],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const otherDb = testEnv.authenticatedContext('other-1').firestore();
+  const deletedAt = Timestamp.fromDate(new Date('2026-10-25T12:00:00Z'));
+
+  await assertFails(deleteDoc(doc(testerDb, 'fitTests/own-1')));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTests/own-1')));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/own-1'), {
+    deletedAt,
+    deletedBy: 'tester-1',
+    deleteReason: '',
+  }));
+  await assertFails(updateDoc(doc(otherDb, 'fitTests/own-1'), {
+    deletedAt,
+    deletedBy: 'other-1',
+    deleteReason: 'Not my record',
+  }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/own-2'), {
+    deletedAt,
+    deletedBy: 'tester-1',
+    deleteReason: 'Duplicate entry',
+    updatedAt: deletedAt,
+  }));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTests/own-1'), {
+    deletedAt,
+    deletedBy: 'admin-1',
+    deleteReason: 'Wrong participant',
+    updatedAt: deletedAt,
+  }));
+  await assertSucceeds(getDoc(doc(adminDb, 'fitTests/own-1')));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), { result: 'Fail' }));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTests/own-1')));
+
+  await assertSucceeds(setDoc(doc(adminDb, 'fitTestDeletionLogs/log-1'), {
+    fitTestId: 'own-1',
+    userId: 'tester-1',
+    deletedAt,
+    deletedBy: 'admin-1',
+    deleteReason: 'Wrong participant',
+  }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTestDeletionLogs/log-1'), { deleteReason: 'Changed' }));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTestDeletionLogs/log-1')));
+  await assertFails(setDoc(doc(otherDb, 'fitTestDeletionLogs/log-2'), {
+    fitTestId: 'own-1',
+    userId: 'tester-1',
+    deletedAt,
+    deletedBy: 'other-1',
+    deleteReason: 'Not allowed',
+  }));
+});

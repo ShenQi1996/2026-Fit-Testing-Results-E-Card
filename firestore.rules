@@ -390,6 +390,28 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    function notSoftDeleted() {
+      return !resource.data.keys().hasAny(['deletedAt']);
+    }
+
+    function deletionFieldsUnchanged() {
+      return request.resource.data.get('deletedAt', null) == resource.data.get('deletedAt', null)
+        && request.resource.data.get('deletedBy', null) == resource.data.get('deletedBy', null)
+        && request.resource.data.get('deleteReason', null) == resource.data.get('deleteReason', null);
+    }
+
+    // Owners and admins keep the record. They may only add the deletion stamp once.
+    function softDeleteUpdate() {
+      return notSoftDeleted()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['deletedAt', 'deletedBy', 'deleteReason', 'updatedAt'])
+        && request.resource.data.deletedAt is timestamp
+        && request.resource.data.deletedBy == request.auth.uid
+        && request.resource.data.deleteReason is string
+        && request.resource.data.deleteReason.size() > 0
+        && request.resource.data.deleteReason.size() <= 500;
+    }
+
     match /fitTests/{fitTestId} {
       allow read: if
         isSignedIn() &&
@@ -399,16 +421,41 @@ service cloud.firestore {
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin())
-        && fitTestSchoolOkOnUpdate();
-      allow delete: if
-        isSignedIn() &&
-        isApproved() &&
-        (request.auth.uid == resource.data.userId || isAdmin());
+        && (
+          softDeleteUpdate()
+          || (notSoftDeleted() && deletionFieldsUnchanged() && fitTestSchoolOkOnUpdate())
+        );
+      // OSHA 1910.134(m)(3): fit test records are retained. Hard delete is denied.
+      allow delete: if false;
       allow create: if
         isSignedIn() &&
         isApproved() &&
         request.auth.uid == request.resource.data.userId
-        && fitTestSchoolOkOnCreate();
+        && fitTestSchoolOkOnCreate()
+        && !request.resource.data.keys().hasAny(['deletedAt']);
+    }
+
+    // Append-only log of a soft delete. The fit test document itself stays.
+    match /fitTestDeletionLogs/{logId} {
+      allow get: if isSignedIn() && isApproved() && (
+        isAdmin()
+        || resource.data.deletedBy == request.auth.uid
+        || resource.data.userId == request.auth.uid
+      );
+      allow list: if isSignedIn() && isApproved() && isAdmin();
+      allow create: if isSignedIn() && isApproved()
+        && request.resource.data.deletedBy == request.auth.uid
+        && request.resource.data.deleteReason is string
+        && request.resource.data.deleteReason.size() > 0
+        && request.resource.data.deleteReason.size() <= 500
+        && request.resource.data.fitTestId is string
+        && request.resource.data.fitTestId.size() > 0
+        && request.resource.data.deletedAt is timestamp
+        && request.resource.data.userId is string
+        && get(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data.userId
+          == request.resource.data.userId
+        && (request.auth.uid == request.resource.data.userId || isAdmin());
+      allow update, delete: if false;
     }
 
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.

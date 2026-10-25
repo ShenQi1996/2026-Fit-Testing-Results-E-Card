@@ -52,6 +52,7 @@ import {
 import { normalizeSchoolList } from '../utils/schoolScope';
 
 const FIT_TESTS_COLLECTION = 'fitTests';
+const FIT_TEST_DELETION_LOGS_COLLECTION = 'fitTestDeletionLogs';
 const FIT_TEST_LOOKUPS_COLLECTION = 'fitTestLookups';
 const FIT_TEST_VERIFICATIONS_COLLECTION = 'fitTestVerifications';
 const USERS_COLLECTION = 'users';
@@ -435,6 +436,7 @@ export const getUserFitTests = async (userId, options = {}) => {
     const querySnapshot = await getDocs(q);
 
     return querySnapshot.docs
+      .filter((docSnap) => !isSoftDeletedFitTest(docSnap.data() || {}))
       .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now))
       .map(mapFitTestDoc);
   } catch (error) {
@@ -487,8 +489,13 @@ export const countFitTestsForUser = async (userId, options = {}) => {
     }
     throw error;
   }
-  return snapshot.docs.filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now)).length;
+  return snapshot.docs
+    .filter((docSnap) => !isSoftDeletedFitTest(docSnap.data() || {}))
+    .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now))
+    .length;
 };
+
+const isSoftDeletedFitTest = (data) => data?.deletedAt != null && data.deletedAt !== '';
 
 /**
  * Admin-only: count fit test results for the given user ids.
@@ -760,43 +767,67 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
 };
 
 /**
- * Delete a fit test record
- * @param {string} fitTestId - Fit test document ID
- * @param {string} userId - User ID of the user making the delete (for authorization check)
+ * Soft-delete a fit test. The document stays so the record is kept until the
+ * next fit test. A reason is required, and a deletion log entry is written.
+ * @param {string} fitTestId
+ * @param {string} userId
+ * @param {string} reason
  * @returns {Promise<void>}
  */
-export const deleteFitTest = async (fitTestId, userId) => {
+export const deleteFitTest = async (fitTestId, userId, reason) => {
   try {
-    // Check if user is admin
     if (!userId) {
       throw new Error('User ID is required to delete fit test records.');
     }
-    
+    const deleteReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!deleteReason) {
+      throw new Error('A reason is required to remove a fit test from the list.');
+    }
+    if (deleteReason.length > 500) {
+      throw new Error('The reason must be 500 characters or fewer.');
+    }
+
     const access = await getUserAccessProfile(userId);
     if (!isAdminOrAbove(access)) {
       const error = new Error('Only admin users can delete test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
     }
-    
+
     const docRef = doc(db, FIT_TESTS_COLLECTION, fitTestId);
     const existingSnap = await getDoc(docRef);
-    const existing = existingSnap.exists() ? existingSnap.data() : {};
-    const lookupKey = await resolveLookupKey(existing);
-    await deleteDoc(docRef);
-
-    const staleKeys = new Set([lookupKey, existing.lookupKey].filter(Boolean));
-    for (const key of staleKeys) {
-      await deleteFitTestLookupIfCurrent(key, fitTestId);
+    if (!existingSnap.exists()) {
+      throw new Error('Fit test record not found.');
+    }
+    const existing = existingSnap.data() || {};
+    if (isSoftDeletedFitTest(existing)) {
+      throw new Error('This fit test record is already hidden.');
     }
 
-    await deleteFitTestVerification(existing.verificationToken);
-    await repointLookupToLatestRemaining(lookupKey, fitTestId, existing.userId || userId);
+    const deletedAt = Timestamp.now();
+    await updateDoc(docRef, {
+      deletedAt,
+      deletedBy: userId,
+      deleteReason,
+      updatedAt: deletedAt,
+    });
+    await addDoc(collection(db, FIT_TEST_DELETION_LOGS_COLLECTION), {
+      fitTestId,
+      userId: existing.userId || '',
+      deletedAt,
+      deletedBy: userId,
+      deleteReason,
+    });
     notifyFitTestActivity();
   } catch (error) {
     console.error('Error deleting fit test:', error);
-    // Re-throw permission denied errors
     if (error.code === 'PERMISSION_DENIED') {
+      throw error;
+    }
+    if (error.message === 'A reason is required to remove a fit test from the list.'
+      || error.message === 'The reason must be 500 characters or fewer.'
+      || error.message === 'Fit test record not found.'
+      || error.message === 'This fit test record is already hidden.') {
       throw error;
     }
     throw new Error('Failed to delete fit test record. Please try again.');
