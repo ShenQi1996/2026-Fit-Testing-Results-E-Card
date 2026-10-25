@@ -98,7 +98,7 @@ Collections:
 
 - `users` — testers/admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin)
+- `fitTests` — records (owner or admin). New records must include respirator make, model, style, and size, plus qualitative or quantitative method. A quantitative test also stores a fit factor (OSHA 1910.134(m)(2)).
 - `fitTestLookups/{lookupKey}` — public get for resend
 - `fitTestVerifications/{token}` — public get for verify
 

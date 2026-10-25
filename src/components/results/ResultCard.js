@@ -64,9 +64,13 @@ const ResultCardView = ({ test, expanded, onToggleExpand }) => (
         <div className="result-section">
           <h4 className="result-section-title">Respirator Details</h4>
           <ResultRow label="Respirator MFG:" value={test.respiratorMfg || 'N/A'} />
+          <ResultRow label="Model:" value={test.model || 'N/A'} />
+          <ResultRow label="Style:" value={test.style || 'N/A'} />
           <ResultRow label="Testing Agent:" value={test.testingAgent || 'N/A'} />
           <ResultRow label="Mask Size:" value={test.maskSize || 'N/A'} />
-          {test.model && <ResultRow label="Model:" value={test.model} />}
+          {test.fitTestMethod === 'Quantitative' && (
+            <ResultRow label="Fit factor:" value={test.fitFactor ?? 'N/A'} />
+          )}
         </div>
 
         {(test.schoolsOnFile !== undefined || test.schoolsList || test.programAdministratorName || test.programAdministratorContact) && (

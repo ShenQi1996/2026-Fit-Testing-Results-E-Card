@@ -150,7 +150,11 @@ const FitTestForm = () => {
             formData.testerAttestationConsentWitnessed === false ||
             formData.testerAttestationRespiratorMatchesRecord === false ||
             (formData.testerMedicalRestrictionsReceived !== true && formData.testerMedicalRestrictionsReceived !== false) ||
-            (formData.testerMedicalRestrictionsReceived === true && !formData.testerMedicalRestrictionsNote?.trim())
+            (formData.testerMedicalRestrictionsReceived === true && !formData.testerMedicalRestrictionsNote?.trim()) ||
+            !formData.model?.trim() ||
+            !formData.style?.trim() ||
+            (formData.fitTestMethod !== 'Qualitative' && formData.fitTestMethod !== 'Quantitative') ||
+            (formData.fitTestMethod === 'Quantitative' && !(Number(formData.fitFactor) > 0))
           }
         />
       </div>

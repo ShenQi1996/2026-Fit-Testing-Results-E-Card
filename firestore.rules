@@ -404,11 +404,40 @@ service cloud.firestore {
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin());
+      // OSHA 1910.134(m)(2): make, model, style, size, test type, and fit factor.
+      function respiratorRecordOk() {
+        return request.resource.data.keys().hasAny(['respiratorMfg'])
+          && request.resource.data.respiratorMfg is string
+          && request.resource.data.respiratorMfg.size() > 0
+          && request.resource.data.respiratorMfg.size() <= 200
+          && request.resource.data.keys().hasAny(['model'])
+          && request.resource.data.model is string
+          && request.resource.data.model.size() > 0
+          && request.resource.data.model.size() <= 200
+          && request.resource.data.keys().hasAny(['style'])
+          && request.resource.data.style is string
+          && request.resource.data.style.size() > 0
+          && request.resource.data.style.size() <= 100
+          && request.resource.data.keys().hasAny(['maskSize'])
+          && request.resource.data.maskSize is string
+          && request.resource.data.maskSize.size() > 0
+          && request.resource.data.maskSize.size() <= 50
+          && request.resource.data.keys().hasAny(['fitTestMethod'])
+          && (request.resource.data.fitTestMethod == 'Qualitative'
+            || request.resource.data.fitTestMethod == 'Quantitative')
+          && (request.resource.data.fitTestMethod == 'Quantitative'
+            ? (request.resource.data.keys().hasAny(['fitFactor'])
+              && request.resource.data.fitFactor is number
+              && request.resource.data.fitFactor > 0)
+            : true);
+      }
+
       allow create: if
         isSignedIn() &&
         isApproved() &&
         request.auth.uid == request.resource.data.userId
-        && fitTestSchoolOkOnCreate();
+        && fitTestSchoolOkOnCreate()
+        && respiratorRecordOk();
     }
 
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.

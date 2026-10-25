@@ -73,6 +73,15 @@ const testerAt = (school, extra = {}) => ({
   ...extra,
 });
 
+const respiratorRecord = (extra = {}) => ({
+  respiratorMfg: '3M',
+  model: '1860',
+  style: 'Filtering facepiece',
+  maskSize: 'Regular',
+  fitTestMethod: 'Qualitative',
+  ...extra,
+});
+
 test('a regular admin can approve a tester', async () => {
   await seed([
     ['users/admin-1', scopedAdmin()],
@@ -835,14 +844,17 @@ test('renamed or removed school names stay readable until the field changes', as
   await assertSucceeds(setDoc(doc(testerDb, 'fitTests/new-1'), {
     userId: 'tester-1',
     schoolsList: HELENE,
+    ...respiratorRecord(),
   }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/new-2'), {
     userId: 'tester-1',
     schoolsList: 'Not On The List',
+    ...respiratorRecord(),
   }));
   await assertSucceeds(setDoc(doc(testerDb, 'fitTests/blank-1'), {
     userId: 'tester-1',
     schoolsList: '',
+    ...respiratorRecord(),
   }));
 });
 
@@ -868,4 +880,32 @@ test('fitTests count queries follow the same read rules as document reads', asyn
     collection(adminDb, 'fitTests'),
     where('userId', '==', 'tester-1'),
   )));
+});
+
+test('new fit tests require make, model, style, size, test type, and a fit factor when quantitative', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+
+  await assertFails(setDoc(doc(testerDb, 'fitTests/missing-model'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ model: '' }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/quant-missing'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative' }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/quant-string'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: '100' }),
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/quant-ok'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100 }),
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/qual-ok'), {
+    userId: 'tester-1',
+    ...respiratorRecord(),
+  }));
 });

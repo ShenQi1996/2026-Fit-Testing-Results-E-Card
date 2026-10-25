@@ -10,6 +10,7 @@ import {
   MASK_SIZE_OPTIONS,
   RESULT_OPTIONS,
   FIT_TEST_METHOD_OPTIONS,
+  RESPIRATOR_STYLE_OPTIONS,
   isCustomOptionValue,
 } from '../../constants/fitTestOptions';
 
@@ -79,11 +80,24 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
         <FormSelect
           id="fitTestMethod"
           label="Fit test method"
-          value={formData.fitTestMethod || 'Locked to Qualitative'}
-          onChange={() => {}}
+          value={formData.fitTestMethod || ''}
+          onChange={(e) => onChange('fitTestMethod', e.target.value)}
           options={FIT_TEST_METHOD_OPTIONS}
-          disabled
+          placeholder="Select method"
+          required
+          disabled={isLoading}
           error={fieldErrors?.fitTestMethod}
+        />
+        <FormSelect
+          id="style"
+          label="Style"
+          value={formData.style || ''}
+          onChange={(e) => onChange('style', e.target.value)}
+          options={RESPIRATOR_STYLE_OPTIONS}
+          placeholder="Select style"
+          required
+          disabled={isLoading}
+          error={fieldErrors?.style}
         />
       </div>
 
@@ -150,9 +164,27 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           value={formData.model}
           onChange={(e) => onChange('model', e.target.value)}
           placeholder="e.g., 1870+"
+          required
           disabled={isLoading}
+          error={fieldErrors?.model}
         />
       </div>
+
+      {formData.fitTestMethod === 'Quantitative' && (
+        <div className="form-row">
+          <FormInput
+            id="fitFactor"
+            label="Fit factor"
+            type="number"
+            value={formData.fitFactor}
+            onChange={(e) => onChange('fitFactor', e.target.value)}
+            placeholder="e.g., 100"
+            required
+            disabled={isLoading}
+            error={fieldErrors?.fitFactor}
+          />
+        </div>
+      )}
 
       <div className="form-row">
         <FormSelect
