@@ -13,6 +13,8 @@ import {
   query,
   where,
   orderBy,
+  limit,
+  getCountFromServer,
   Timestamp,
   deleteField,
   writeBatch,
@@ -40,6 +42,7 @@ import {
 import {
   USER_ROLES,
   USER_ROLE_ADMIN,
+  USER_ROLE_FACULTY,
   USER_ROLE_SUPERADMIN,
   USER_ROLE_TESTER,
   accessBoundaryDate,
@@ -233,6 +236,28 @@ const assertAdmin = async (userId) => {
 // Firestore `in` filters accept at most 30 values.
 const FIRESTORE_IN_LIMIT = 30;
 
+// Faculty results page. Schools with more live tests than this see the newest page.
+export const FACULTY_RESULTS_LIMIT = 100;
+
+export const CREATOR_ROLE_FIELD = 'creatorRole';
+export const CREATOR_SCHOOL_FIELD = 'creatorSchool';
+
+/** School names a faculty account may read. One `school` string, plus `schools` if present. */
+export const facultySchoolNames = (value) => {
+  if (typeof value === 'string') {
+    const school = value.trim();
+    return school ? [school] : [];
+  }
+  if (Array.isArray(value)) return normalizeSchoolList(value);
+  const names = [];
+  const single = typeof value?.school === 'string' ? value.school.trim() : '';
+  if (single) names.push(single);
+  normalizeSchoolList(value?.schools).forEach((school) => {
+    if (!names.includes(school)) names.push(school);
+  });
+  return names;
+};
+
 const chunkValues = (values, size) => {
   const chunks = [];
   for (let i = 0; i < values.length; i += size) {
@@ -251,8 +276,9 @@ const docsById = (snapshots) => {
   return [...byId.values()];
 };
 
-// Scoped admins may list only testers whose school is in their own schools.
-const listScopedTesters = async (schools, extraConstraints = []) => {
+// Scoped admins list one role at a time. Two `in` filters are not a valid query,
+// and role == tester plus role == faculty reuse the same role + school index.
+const listScopedRole = async (schools, role, extraConstraints = []) => {
   const scopedSchools = normalizeSchoolList(schools);
   if (scopedSchools.length === 0) return [];
   const snapshots = await Promise.all(
@@ -261,7 +287,7 @@ const listScopedTesters = async (schools, extraConstraints = []) => {
         return await getDocs(query(
           collection(db, USERS_COLLECTION),
           ...extraConstraints,
-          where('role', '==', USER_ROLE_TESTER),
+          where('role', '==', role),
           where('school', 'in', chunk),
         ));
       } catch (error) {
@@ -279,6 +305,16 @@ const listScopedTesters = async (schools, extraConstraints = []) => {
   return docsById(snapshots);
 };
 
+const listScopedSchoolStaff = async (schools, extraConstraints = []) => {
+  const testers = await listScopedRole(schools, USER_ROLE_TESTER, extraConstraints);
+  const faculty = await listScopedRole(schools, USER_ROLE_FACULTY, extraConstraints);
+  const byId = new Map();
+  [...testers, ...faculty].forEach((docSnap) => byId.set(docSnap.id, docSnap));
+  return [...byId.values()];
+};
+
+const singleSchoolRole = (role) => role === USER_ROLE_TESTER || role === USER_ROLE_FACULTY;
+
 const assertSuperAdmin = async (userId) => {
   const access = await getUserAccessProfile(userId);
   if (access.status !== USER_STATUS_APPROVED || !isSuperAdmin(access.role)) {
@@ -291,12 +327,13 @@ const assertCanAssignRole = async (actorUserId, actorRole, targetUserId, current
   const current = currentRole || USER_ROLE_TESTER;
   const next = nextRole || current;
   if (!USER_ROLES.includes(next)) {
-    throw new Error('Invalid role. Must be tester, admin, or superadmin.');
+    throw new Error('Invalid role. Must be tester, faculty, admin, or superadmin.');
   }
   if (actorUserId === targetUserId && isSuperAdmin(actorRole) && next !== USER_ROLE_SUPERADMIN) {
     throw permissionError('You cannot remove your own super admin role.');
   }
-  if (current !== USER_ROLE_TESTER || next !== USER_ROLE_TESTER) {
+  // Tester and faculty stay with a scoped admin. Admin and superadmin do not.
+  if (!singleSchoolRole(current) || !singleSchoolRole(next)) {
     await assertSuperAdmin(actorUserId);
   }
 };
@@ -330,13 +367,31 @@ const serializeUserDoc = (docSnap) => {
  * @param {object} fitTestData - Fit test form data
  * @returns {Promise<string>} Document ID of the saved record
  */
+const creatorStampFor = (profile, schoolsList) => {
+  const role = profile?.role || USER_ROLE_TESTER;
+  const ownSchool = typeof profile?.school === 'string' ? profile.school.trim() : '';
+  const listed = typeof schoolsList === 'string' ? schoolsList.trim() : '';
+  return {
+    [CREATOR_ROLE_FIELD]: role,
+    [CREATOR_SCHOOL_FIELD]: ownSchool || listed,
+  };
+};
+
 export const saveFitTest = async (userId, fitTestData) => {
   try {
-    const lookupKey = await resolveLookupKey(fitTestData);
-    const verificationToken = resolveVerificationToken(fitTestData);
+    const access = await getUserAccessProfile(userId);
+    if (access.role === USER_ROLE_FACULTY) {
+      throw permissionError('Faculty cannot create fit test records.');
+    }
+    const clientData = { ...(fitTestData || {}) };
+    delete clientData[CREATOR_ROLE_FIELD];
+    delete clientData[CREATOR_SCHOOL_FIELD];
+    const lookupKey = await resolveLookupKey(clientData);
+    const verificationToken = resolveVerificationToken(clientData);
     const recordToSave = {
-      ...fitTestData,
+      ...clientData,
       verificationToken,
+      ...creatorStampFor(access, clientData.schoolsList),
     };
     const createdAt = Timestamp.now();
     const retentionDate = retentionDateValue({ ...recordToSave, createdAt });
@@ -356,6 +411,7 @@ export const saveFitTest = async (userId, fitTestData) => {
     return docRef.id;
   } catch (error) {
     console.error('Error saving fit test:', error);
+    if (error.code === 'PERMISSION_DENIED') throw error;
     throw new Error('Failed to save fit test record. Please try again.');
   }
 };
@@ -371,6 +427,14 @@ const isIndexError = (error) => (
   || error?.message?.toLowerCase().includes('index')
   || error?.message?.toLowerCase().includes('query requires an index')
 );
+
+const indexRequiredError = (error) => {
+  const indexUrlMatch = error.message?.match(/https:\/\/[^\s)]+/);
+  const indexError = new Error('FIREBASE_INDEX_REQUIRED');
+  indexError.indexUrl = indexUrlMatch ? indexUrlMatch[0] : null;
+  indexError.originalError = error;
+  return indexError;
+};
 
 const mapFitTestDoc = (docSnap) => {
   const data = docSnap.data() || {};
@@ -445,13 +509,7 @@ export const getUserFitTests = async (userId, options = {}) => {
         'Firestore fitTests query needs a composite index on userId and createdAt. Deploy firestore.indexes.json.',
         error,
       );
-      const indexUrlMatch = error.message?.match(/https:\/\/[^\s)]+/);
-      const indexUrl = indexUrlMatch ? indexUrlMatch[0] : null;
-      
-      const indexError = new Error('FIREBASE_INDEX_REQUIRED');
-      indexError.indexUrl = indexUrl;
-      indexError.originalError = error;
-      throw indexError;
+      throw indexRequiredError(error);
     }
     
     throw new Error('Failed to fetch fit test records. Please try again.');
@@ -488,6 +546,79 @@ export const countFitTestsForUser = async (userId, options = {}) => {
     throw error;
   }
   return snapshot.docs.filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now)).length;
+};
+
+const facultySchoolConstraint = (chunk) => (
+  chunk.length === 1
+    ? where(CREATOR_SCHOOL_FIELD, '==', chunk[0])
+    : where(CREATOR_SCHOOL_FIELD, 'in', chunk)
+);
+
+/**
+ * Fit tests whose creatorSchool is one of the faculty member's schools.
+ * Matches the creatorSchool + createdAt composite index. Legacy tests with no
+ * creatorSchool are not returned. Does not read the whole collection.
+ * @param {string|string[]|object} schools
+ * @param {{ now?: Date, limit?: number }} [options]
+ * @returns {Promise<Array>}
+ */
+export const getFacultyFitTests = async (schools, options = {}) => {
+  const scopedSchools = facultySchoolNames(schools);
+  if (scopedSchools.length === 0) return [];
+  const now = options.now instanceof Date ? options.now : new Date();
+  const pageLimit = Number.isInteger(options.limit) && options.limit > 0
+    ? options.limit
+    : FACULTY_RESULTS_LIMIT;
+  try {
+    const snapshots = [];
+    for (const chunk of chunkValues(scopedSchools, FIRESTORE_IN_LIMIT)) {
+      snapshots.push(await getDocs(query(
+        collection(db, FIT_TESTS_COLLECTION),
+        facultySchoolConstraint(chunk),
+        orderBy('createdAt', 'desc'),
+        limit(pageLimit),
+      )));
+    }
+    const byId = new Map();
+    snapshots.forEach((snapshot) => {
+      snapshot.docs.forEach((docSnap) => byId.set(docSnap.id, docSnap));
+    });
+    return [...byId.values()]
+      .map(mapFitTestDoc)
+      .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
+      .filter((record) => !isFitTestPastRetention(record, now))
+      .slice(0, pageLimit);
+  } catch (error) {
+    console.error('Error fetching faculty fit tests:', error);
+    if (isIndexError(error)) {
+      console.error(
+        'Firestore fitTests query needs a composite index on creatorSchool and createdAt. That index is deployed separately from this change.',
+        error,
+      );
+      throw indexRequiredError(error);
+    }
+    throw new Error('Failed to fetch fit test records. Please try again.');
+  }
+};
+
+/**
+ * Server count of fit tests stamped with one of these schools.
+ * Single-field aggregation, so it does not use the createdAt composite index.
+ * @param {string|string[]|object} schools
+ * @returns {Promise<number>}
+ */
+export const countFacultyFitTests = async (schools) => {
+  const scopedSchools = facultySchoolNames(schools);
+  if (scopedSchools.length === 0) return 0;
+  let total = 0;
+  for (const chunk of chunkValues(scopedSchools, FIRESTORE_IN_LIMIT)) {
+    const snapshot = await getCountFromServer(query(
+      collection(db, FIT_TESTS_COLLECTION),
+      facultySchoolConstraint(chunk),
+    ));
+    total += snapshot.data().count;
+  }
+  return total;
 };
 
 /**
@@ -719,8 +850,11 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     nextRecord.verificationToken = verificationToken;
 
     const retentionDate = retentionDateValue(nextRecord);
+    const safeUpdates = { ...(updates || {}) };
+    delete safeUpdates[CREATOR_ROLE_FIELD];
+    delete safeUpdates[CREATOR_SCHOOL_FIELD];
     await updateDoc(docRef, {
-      ...updates,
+      ...safeUpdates,
       lookupKey: nextKey || null,
       verificationToken,
       updatedAt: Timestamp.now(),
@@ -806,7 +940,7 @@ export const deleteFitTest = async (fitTestId, userId) => {
 /**
  * Get user role from Firestore
  * @param {string} userId - User ID
- * @returns {Promise<string>} User role ('tester', 'admin', or 'superadmin')
+ * @returns {Promise<string>} User role ('tester', 'faculty', 'admin', or 'superadmin')
  */
 export const getUserRole = async (userId) => {
   try {
@@ -930,7 +1064,7 @@ export const getPendingUsers = async (adminUserId) => {
       querySnapshot.forEach((docSnap) => docSnaps.push(docSnap));
     } else {
       const { schools } = await getUserAccessProfile(adminUserId);
-      docSnaps = await listScopedTesters(schools, [pendingConstraint]);
+      docSnaps = await listScopedSchoolStaff(schools, [pendingConstraint]);
     }
 
     const users = [];
@@ -969,7 +1103,7 @@ export const getAllUsers = async (adminUserId) => {
       querySnapshot.forEach((docSnap) => docSnaps.push(docSnap));
     } else {
       const { schools } = await getUserAccessProfile(adminUserId);
-      docSnaps = await listScopedTesters(schools);
+      docSnaps = await listScopedSchoolStaff(schools);
     }
 
     const users = [];
@@ -1180,18 +1314,18 @@ export const createManagedUserProfile = async (adminUserId, targetUserId, userDa
       updatedAt: now,
     };
 
-    if (role === USER_ROLE_TESTER) {
+    if (singleSchoolRole(role)) {
       const requestedSchool = typeof userData.school === 'string' ? userData.school.trim() : '';
       if (isSuperAdmin(actorRole)) {
         if (requestedSchool) profile.school = requestedSchool;
       } else {
         const { schools } = await getUserAccessProfile(adminUserId);
         if (schools.length === 0) {
-          throw permissionError('You have no schools assigned, so you cannot add a tester.');
+          throw permissionError('You have no schools assigned, so you cannot add this user.');
         }
         const school = requestedSchool || (schools.length === 1 ? schools[0] : '');
         if (!schools.includes(school)) {
-          throw permissionError('Choose one of your schools before adding a tester.');
+          throw permissionError('Choose one of your schools before adding this user.');
         }
         profile.school = school;
       }

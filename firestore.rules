@@ -63,6 +63,12 @@ service cloud.firestore {
         : false;
     }
 
+    // Faculty read fit tests for their school. They are not admins.
+    function isFaculty() {
+      return isSignedIn() && isApproved() &&
+        currentUserDoc().data.get('role', null) == 'faculty';
+    }
+
     // Missing role is treated as tester when an admin edits someone else's doc.
     function roleOf(data) {
       return data.get('role', 'tester');
@@ -93,6 +99,18 @@ service cloud.firestore {
         && schoolOf(data) in actorSchools();
     }
 
+    // Faculty docs store one school, the same shape as a tester.
+    function facultyInScope(data) {
+      return roleOf(data) == 'faculty'
+        && schoolOf(data) != ''
+        && schoolOf(data) in actorSchools();
+    }
+
+    // Tester or faculty: a scoped admin may move a user between those two roles.
+    function singleSchoolStaffInScope(data) {
+      return testerInScope(data) || facultyInScope(data);
+    }
+
     // Admin docs store schools. Every one of them must sit inside the actor's list.
     function adminInScope(data) {
       return roleOf(data) == 'admin'
@@ -101,7 +119,45 @@ service cloud.firestore {
     }
 
     function userInScope(data) {
-      return testerInScope(data) || adminInScope(data);
+      return testerInScope(data) || facultyInScope(data) || adminInScope(data);
+    }
+
+    // Faculty read schools: the profile `school` string, plus `schools` when set.
+    function facultySchools() {
+      return schoolsOf(currentUserDoc().data).concat(
+        schoolOf(currentUserDoc().data).size() > 0
+          ? [schoolOf(currentUserDoc().data)]
+          : []
+      );
+    }
+
+    // Missing or blank creatorSchool is not readable by faculty. Legacy tests stay hidden.
+    function facultyCanReadFitTest() {
+      return isFaculty()
+        && resource.data.keys().hasAny(['creatorSchool'])
+        && resource.data.creatorSchool is string
+        && resource.data.creatorSchool.size() > 0
+        && resource.data.creatorSchool in facultySchools();
+    }
+
+    function creatorStampUnchanged() {
+      return request.resource.data.get('creatorRole', null) == resource.data.get('creatorRole', null)
+        && request.resource.data.get('creatorSchool', null) == resource.data.get('creatorSchool', null);
+    }
+
+    // creatorRole is the writer's current role. creatorSchool is their profile school
+    // when that string is set, otherwise the schoolsList on the card.
+    function creatorStampMatchesProfile() {
+      return request.resource.data.keys().hasAny(['creatorRole'])
+        && request.resource.data.keys().hasAny(['creatorSchool'])
+        && request.resource.data.creatorRole is string
+        && request.resource.data.creatorSchool is string
+        && request.resource.data.creatorRole == currentUserDoc().data.get('role', 'tester')
+        && (
+          schoolOf(currentUserDoc().data) != ''
+            ? request.resource.data.creatorSchool == schoolOf(currentUserDoc().data)
+            : request.resource.data.creatorSchool == schoolsListOf(request.resource.data)
+        );
     }
 
     function schoolChanged() {
@@ -208,7 +264,8 @@ service cloud.firestore {
         || (
           isScopedAdmin()
           && request.auth.uid != userId
-          && request.resource.data.role == 'tester'
+          && (request.resource.data.role == 'tester'
+            || request.resource.data.role == 'faculty')
           && createdTesterSchoolOk()
           && createSchoolMembershipOk()
         );
@@ -288,19 +345,22 @@ service cloud.firestore {
 
     match /users/{userId} {
       // Single-document reads are school-scoped for a plain admin.
-      // A scoped admin may list only testers whose school is one of theirs.
+      // A scoped admin may list testers or faculty whose school is one of theirs.
       // Firestore `in` queries accept at most 30 values. A super admin is not filtered.
       allow get: if isOwner(userId) || isSuperAdmin()
         || (isScopedAdmin() && userInScope(resource.data));
       allow list: if isSuperAdmin()
         || (isScopedAdmin()
             && resource.data.role == 'tester'
+            && resource.data.school in actorSchools())
+        || (isScopedAdmin()
+            && resource.data.role == 'faculty'
             && resource.data.school in actorSchools());
       // No client create may set role to superadmin.
       // Owners may create only their own pending tester profile.
-      // Admins may create a tester profile for someone else.
-      // A super admin may create a tester or admin profile for someone else.
-      // A scoped admin creating a tester must set school to one of their schools.
+      // Admins may create a tester or faculty profile for someone else.
+      // A super admin may create a tester, faculty, or admin profile for someone else.
+      // A scoped admin creating a tester or faculty must set school to one of their schools.
       // A super admin may omit school or set school or schools, and not on their own doc.
       // Only a super admin may set startDate or endDate, and not on their own doc.
       allow create: if schoolTagsOkOnCreate(userId) &&
@@ -313,10 +373,12 @@ service cloud.firestore {
           || (isSuperAdmin()
             && request.auth.uid != userId
             && (request.resource.data.role == 'tester'
+              || request.resource.data.role == 'faculty'
               || request.resource.data.role == 'admin'))
           || (isScopedAdmin()
             && request.auth.uid != userId
-            && request.resource.data.role == 'tester')
+            && (request.resource.data.role == 'tester'
+              || request.resource.data.role == 'faculty'))
         );
       // Owners cannot change role, status, approvedBy, approvedAt, school,
       // schools, startDate, or endDate, so nobody can self-escalate, retag
@@ -325,7 +387,8 @@ service cloud.firestore {
       // demote or delete themselves. No client update may set role to superadmin
       // unless that role is unchanged. Role changes to or from admin are
       // super-admin only. A scoped admin may update role and status on a tester
-      // in their schools (role stays tester) and on an admin whose schools are
+      // or faculty in their schools (role stays tester or faculty, including a
+      // switch between those two) and on an admin whose schools are
       // inside their list (role stays admin), plus approval bookkeeping.
       allow update: if schoolTagsOkOnUpdate(userId) &&
         accessDatesOkOnUpdate(userId) &&
@@ -340,9 +403,8 @@ service cloud.firestore {
           || (isSuperAdmin() && request.auth.uid != userId)
           || (isScopedAdmin()
             && request.auth.uid != userId
-            && testerInScope(resource.data)
-            && testerInScope(request.resource.data)
-            && roleOf(request.resource.data) == 'tester'
+            && singleSchoolStaffInScope(resource.data)
+            && singleSchoolStaffInScope(request.resource.data)
             && scopedAdminFieldUpdate())
           || (isScopedAdmin()
             && request.auth.uid != userId
@@ -355,8 +417,7 @@ service cloud.firestore {
         (isSuperAdmin() && request.auth.uid != userId)
         || (isScopedAdmin()
           && request.auth.uid != userId
-          && roleOf(resource.data) == 'tester'
-          && testerInScope(resource.data));
+          && singleSchoolStaffInScope(resource.data));
 
       match /solutionProfiles/{profileId} {
         allow read, write: if isOwner(userId) && isApproved();
@@ -391,24 +452,37 @@ service cloud.firestore {
     }
 
     match /fitTests/{fitTestId} {
+      // Faculty read only when creatorSchool is one of their schools.
+      // Their own userId does not grant access, so a later role change
+      // cannot reveal tests stamped for another school. Testers still read
+      // their own userId. Admins still read every test.
       allow read: if
         isSignedIn() &&
         isApproved() &&
-        (request.auth.uid == resource.data.userId || isAdmin());
+        (
+          isAdmin()
+          || facultyCanReadFitTest()
+          || (!isFaculty() && request.auth.uid == resource.data.userId)
+        );
       allow update: if
         isSignedIn() &&
         isApproved() &&
+        !isFaculty() &&
         (request.auth.uid == resource.data.userId || isAdmin())
-        && fitTestSchoolOkOnUpdate();
+        && fitTestSchoolOkOnUpdate()
+        && creatorStampUnchanged();
       allow delete: if
         isSignedIn() &&
         isApproved() &&
+        !isFaculty() &&
         (request.auth.uid == resource.data.userId || isAdmin());
       allow create: if
         isSignedIn() &&
         isApproved() &&
+        !isFaculty() &&
         request.auth.uid == request.resource.data.userId
-        && fitTestSchoolOkOnCreate();
+        && fitTestSchoolOkOnCreate()
+        && creatorStampMatchesProfile();
     }
 
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.
@@ -416,10 +490,11 @@ service cloud.firestore {
     match /fitTestLookups/{lookupKey} {
       allow get: if true;
       allow list: if false;
-      allow create, update: if isSignedIn() && isApproved();
+      allow create, update: if isSignedIn() && isApproved() && !isFaculty();
       allow delete: if
         isSignedIn() &&
         isApproved() &&
+        !isFaculty() &&
         (isAdmin() || request.auth.uid == resource.data.userId);
     }
 
@@ -428,10 +503,11 @@ service cloud.firestore {
     match /fitTestVerifications/{token} {
       allow get: if true;
       allow list: if false;
-      allow create, update: if isSignedIn() && isApproved();
+      allow create, update: if isSignedIn() && isApproved() && !isFaculty();
       allow delete: if
         isSignedIn() &&
         isApproved() &&
+        !isFaculty() &&
         (isAdmin() || request.auth.uid == resource.data.userId);
     }
 
@@ -439,7 +515,7 @@ service cloud.firestore {
     match /emailSendLog/{userId} {
       allow get: if isOwner(userId) && isApproved();
       allow list: if false;
-      allow create, update: if isOwner(userId) && isApproved();
+      allow create, update: if isOwner(userId) && isApproved() && !isFaculty();
       allow delete: if false;
     }
   }

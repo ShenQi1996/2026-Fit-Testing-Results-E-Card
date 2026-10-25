@@ -19,6 +19,7 @@ import {
 } from '../../services/masterSchools';
 import {
   USER_ROLE_ADMIN,
+  USER_ROLE_FACULTY,
   USER_ROLE_SUPERADMIN,
   USER_ROLE_TESTER,
   accessDateInputValue,
@@ -87,7 +88,7 @@ const withAssignedNames = (masterNames, assignedNames) => {
   return [...masterNames, ...extras];
 };
 
-const NO_SCHOOLS_CREATE_MESSAGE = 'You have no schools assigned, so you cannot add a tester. Ask a super admin to assign a school.';
+const NO_SCHOOLS_CREATE_MESSAGE = 'You have no schools assigned, so you cannot add this user. Ask a super admin to assign a school.';
 const SCHOOL_REQUIRED_MESSAGE = 'At least one school is required.';
 const FIELD_REQUIRED_MESSAGES = {
   name: 'Name is required.',
@@ -488,13 +489,13 @@ const UsersManagement = () => {
 
   const actorSchools = normalizeSchoolList(user?.schools);
   const createRole = creatableRoles.includes(createForm.role) ? createForm.role : 'tester';
-  const creatingTester = createRole === USER_ROLE_TESTER;
+  const creatingSingleSchool = createRole === USER_ROLE_TESTER || createRole === USER_ROLE_FACULTY;
   const createSchoolMissing = !superAdmin
-    && creatingTester
+    && creatingSingleSchool
     && actorSchools.length > 1
     && !actorSchools.includes(createForm.school);
   const creatingAdmin = superAdmin && createRole === USER_ROLE_ADMIN;
-  const createBlocked = !superAdmin && creatingTester && actorSchools.length === 0;
+  const createBlocked = !superAdmin && creatingSingleSchool && actorSchools.length === 0;
 
   const setCreateValue = (field, value) => {
     const fixed = field === 'schools'
@@ -527,12 +528,13 @@ const UsersManagement = () => {
     setError('');
     setSuccess('');
     try {
-      if (!superAdmin && role === USER_ROLE_TESTER && actorSchools.length === 0) {
+      const singleSchoolRole = role === USER_ROLE_TESTER || role === USER_ROLE_FACULTY;
+      if (!superAdmin && singleSchoolRole && actorSchools.length === 0) {
         throw new Error(NO_SCHOOLS_CREATE_MESSAGE);
       }
-      if (!superAdmin && role === USER_ROLE_TESTER && actorSchools.length > 1
+      if (!superAdmin && singleSchoolRole && actorSchools.length > 1
         && !actorSchools.includes(createForm.school)) {
-        throw new Error('Choose one of your schools before adding a tester.');
+        throw new Error('Choose one of your schools before adding this user.');
       }
       const school = superAdmin
         ? (createForm.school || '').trim()
@@ -544,7 +546,7 @@ const UsersManagement = () => {
         role,
         status: createForm.status,
       };
-      if (role === USER_ROLE_TESTER && school) payload.school = school;
+      if (singleSchoolRole && school) payload.school = school;
       if (role === USER_ROLE_ADMIN) {
         payload.schools = normalizeSchoolList(createForm.schools);
       }
@@ -804,7 +806,7 @@ const UsersManagement = () => {
                   ))}
                 </select>
               </label>
-              {creatingTester && superAdmin && (
+              {creatingSingleSchool && superAdmin && (
                 <label>
                   School
                   <select
@@ -822,7 +824,7 @@ const UsersManagement = () => {
                   </select>
                 </label>
               )}
-              {creatingTester && !superAdmin && actorSchools.length === 1 && (
+              {creatingSingleSchool && !superAdmin && actorSchools.length === 1 && (
                 <label>
                   School
                   <div className="user-school-readonly" aria-label="School">
@@ -830,7 +832,7 @@ const UsersManagement = () => {
                   </div>
                 </label>
               )}
-              {creatingTester && !superAdmin && actorSchools.length > 1 && (
+              {creatingSingleSchool && !superAdmin && actorSchools.length > 1 && (
                 <label>
                   School
                   <select

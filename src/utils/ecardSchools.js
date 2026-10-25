@@ -1,4 +1,4 @@
-import { isSuperAdmin, USER_ROLE_ADMIN, USER_ROLE_TESTER } from './roles';
+import { isFaculty, isSuperAdmin, USER_ROLE_ADMIN, USER_ROLE_TESTER } from './roles';
 import { normalizeSchoolList } from './schoolScope';
 
 export const NO_ASSIGNED_SCHOOL_MESSAGE = 'You have no school assigned, so you cannot send an e-card.';
@@ -11,6 +11,7 @@ const testerSchool = (user) => (
 
 /** Schools the signed-in user may put on a fit test. Super admins use the master list. */
 export const schoolsForSignedInUser = (user, masterSchools = []) => {
+  if (isFaculty(user)) return [];
   if (isSuperAdmin(user?.role)) return normalizeSchoolList(masterSchools);
   if (user?.role === USER_ROLE_ADMIN) return normalizeSchoolList(user?.schools);
   const school = testerSchool(user);

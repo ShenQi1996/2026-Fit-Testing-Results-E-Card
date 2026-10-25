@@ -1,8 +1,21 @@
-import { getDoc, getDocs, where, writeBatch } from 'firebase/firestore';
 import {
+  addDoc,
+  getCountFromServer,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  where,
+  writeBatch,
+} from 'firebase/firestore';
+import {
+  countFacultyFitTests,
   countFitTestsForUser,
+  FACULTY_RESULTS_LIMIT,
+  getFacultyFitTests,
   getFitTestCountsByUser,
   getUserFitTests,
+  saveFitTest,
 } from './firebaseDb';
 
 const userDoc = (role, extra = {}) => ({
@@ -38,6 +51,10 @@ beforeEach(() => {
   getDoc.mockReset();
   getDocs.mockReset();
   where.mockClear();
+  orderBy.mockClear();
+  limit.mockClear();
+  addDoc.mockClear();
+  getCountFromServer.mockClear();
   writeBatch.mockClear();
   getDocs.mockResolvedValue({ docs: [] });
 });
@@ -94,4 +111,84 @@ test('a missing composite index is surfaced instead of an empty results list', a
     indexUrl: 'https://console.firebase.google.com/example',
   });
   await expect(countFitTestsForUser('tester-1', { now: NOW })).rejects.toBe(indexError);
+});
+
+test('saveFitTest stamps the creator profile and ignores a client stamp', async () => {
+  getDoc.mockResolvedValue(userDoc('tester', { school: 'Helene College of Nursing' }));
+  await saveFitTest('tester-1', {
+    schoolsList: 'Other School',
+    creatorRole: 'admin',
+    creatorSchool: 'Spoofed',
+  });
+  const saved = addDoc.mock.calls[0][1];
+  expect(saved.creatorRole).toBe('tester');
+  expect(saved.creatorSchool).toBe('Helene College of Nursing');
+  expect(saved.schoolsList).toBe('Other School');
+
+  addDoc.mockClear();
+  getDoc.mockResolvedValue(userDoc('admin'));
+  await saveFitTest('admin-1', { schoolsList: 'Helene College of Nursing', creatorSchool: 'Spoofed' });
+  expect(addDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+    creatorRole: 'admin',
+    creatorSchool: 'Helene College of Nursing',
+  }));
+});
+
+test('faculty cannot create a fit test', async () => {
+  getDoc.mockResolvedValue(userDoc('faculty', { school: 'Helene College of Nursing' }));
+  await expect(saveFitTest('faculty-1', { schoolsList: 'Helene College of Nursing' })).rejects.toThrow(
+    /faculty cannot create/i
+  );
+  expect(addDoc).not.toHaveBeenCalled();
+});
+
+test('faculty results use creatorSchool equality or in, createdAt desc, and a limit', async () => {
+  getDocs.mockResolvedValue({ docs: [] });
+  await getFacultyFitTests('Helene College of Nursing');
+  expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'Helene College of Nursing');
+  expect(orderBy).toHaveBeenCalledWith('createdAt', 'desc');
+  expect(limit).toHaveBeenCalledWith(FACULTY_RESULTS_LIMIT);
+  expect(getDocs).toHaveBeenCalledTimes(1);
+
+  where.mockClear();
+  orderBy.mockClear();
+  limit.mockClear();
+  getDocs.mockClear();
+  await getFacultyFitTests(['Helene College of Nursing', 'Example Second School']);
+  expect(where).toHaveBeenCalledWith(
+    'creatorSchool',
+    'in',
+    ['Helene College of Nursing', 'Example Second School'],
+  );
+  expect(orderBy).toHaveBeenCalledWith('createdAt', 'desc');
+  expect(limit).toHaveBeenCalledWith(FACULTY_RESULTS_LIMIT);
+
+  where.mockClear();
+  const manySchools = Array.from({ length: 31 }, (_, index) => `School ${index}`);
+  await getFacultyFitTests(manySchools);
+  const inCalls = where.mock.calls.filter((call) => call[1] === 'in');
+  expect(inCalls.map((call) => call[2].length)).toEqual([30]);
+  expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'School 30');
+});
+
+test('a missing faculty index is surfaced instead of an empty list', async () => {
+  const indexError = new Error(
+    'The query requires an index. You can create it here: https://console.firebase.google.com/faculty'
+  );
+  indexError.code = 'failed-precondition';
+  getDocs.mockRejectedValue(indexError);
+
+  await expect(getFacultyFitTests(['Helene College of Nursing'])).rejects.toMatchObject({
+    message: 'FIREBASE_INDEX_REQUIRED',
+    indexUrl: 'https://console.firebase.google.com/faculty',
+  });
+  expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'Helene College of Nursing');
+});
+
+test('faculty sidebar count aggregates creatorSchool without ordering', async () => {
+  getCountFromServer.mockResolvedValue({ data: () => ({ count: 5 }) });
+  await expect(countFacultyFitTests({ school: 'Helene College of Nursing', schools: [] })).resolves.toBe(5);
+  expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'Helene College of Nursing');
+  expect(orderBy).not.toHaveBeenCalled();
+  expect(getDocs).not.toHaveBeenCalled();
 });

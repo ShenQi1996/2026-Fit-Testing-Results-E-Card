@@ -1,9 +1,11 @@
 export const USER_ROLE_TESTER = 'tester';
+export const USER_ROLE_FACULTY = 'faculty';
 export const USER_ROLE_ADMIN = 'admin';
 export const USER_ROLE_SUPERADMIN = 'superadmin';
 
 export const USER_ROLES = [
   USER_ROLE_TESTER,
+  USER_ROLE_FACULTY,
   USER_ROLE_ADMIN,
   USER_ROLE_SUPERADMIN,
 ];
@@ -37,6 +39,9 @@ export const isAccessWindowOpen = (user, now = new Date()) => {
 const roleOf = (userOrRole) => (
   typeof userOrRole === 'string' ? userOrRole : userOrRole?.role
 );
+
+/** Faculty see school-scoped results and are not admins. */
+export const isFaculty = (userOrRole) => roleOf(userOrRole) === USER_ROLE_FACULTY;
 
 /**
  * Admin screens and admin checks. A super admin is included.
@@ -129,26 +134,29 @@ export const accountStatusLabel = (user, now = new Date()) => {
 
 /**
  * Roles a manager may set on an existing user from the client.
- * Never superadmin. A plain admin only keeps tester. A super admin may
- * set tester or admin.
+ * Never superadmin. A plain admin may set tester or faculty. A super admin
+ * may set tester, faculty, or admin.
  */
-export const rolesAssignableBy = (actorRole) => (
-  isSuperAdmin(actorRole) ? [USER_ROLE_TESTER, USER_ROLE_ADMIN] : [USER_ROLE_TESTER]
-);
+export const rolesAssignableBy = (actorRole) => {
+  if (isSuperAdmin(actorRole)) return [USER_ROLE_TESTER, USER_ROLE_FACULTY, USER_ROLE_ADMIN];
+  if (actorRole === USER_ROLE_ADMIN) return [USER_ROLE_TESTER, USER_ROLE_FACULTY];
+  return [USER_ROLE_TESTER];
+};
 
 /** Roles that may be written on a new user document. Never superadmin. */
-export const rolesCreatableBy = (actorRole) => (
-  isSuperAdmin(actorRole)
-    ? [USER_ROLE_TESTER, USER_ROLE_ADMIN]
-    : [USER_ROLE_TESTER]
-);
+export const rolesCreatableBy = (actorRole) => {
+  if (isSuperAdmin(actorRole)) return [USER_ROLE_TESTER, USER_ROLE_FACULTY, USER_ROLE_ADMIN];
+  if (actorRole === USER_ROLE_ADMIN) return [USER_ROLE_TESTER, USER_ROLE_FACULTY];
+  return [USER_ROLE_TESTER];
+};
 
 /**
- * Regular admins may change tester profiles only.
- * Super admins may change any profile.
+ * Regular admins may change tester and faculty profiles only.
+ * Super admins may change any profile. Faculty cannot manage users.
  */
 export const canModifyManagedUser = (actorRole, targetRole) => {
   if (!isAdminOrAbove(actorRole)) return false;
   if (isSuperAdmin(actorRole)) return true;
-  return (targetRole || USER_ROLE_TESTER) === USER_ROLE_TESTER;
+  const target = targetRole || USER_ROLE_TESTER;
+  return target === USER_ROLE_TESTER || target === USER_ROLE_FACULTY;
 };

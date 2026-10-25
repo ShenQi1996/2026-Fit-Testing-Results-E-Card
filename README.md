@@ -96,9 +96,17 @@ Until `fitTestVerifications` rules are published, `/verify` cannot confirm cards
 
 Collections:
 
-- `users` — testers/admins (`role`, `status`)
+- `users` — testers, faculty, and admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin)
+- `fitTests` — records (owner or admin). Faculty read by `creatorSchool`
+
+## Faculty
+
+Faculty see fit-test results for their own school. They cannot send e-cards, edit, delete, resend, or manage users. An admin assigns the faculty role in Users. A faculty profile stores one `school` string, the same shape as a tester.
+
+Each new fit test stores `creatorRole` and `creatorSchool` from the signed-in profile at save time. Those fields stay as they were if that person later changes role or school. Faculty may read a result only when `creatorSchool` is one of their schools. The results query is `creatorSchool` equal to one school, or `in` a school list, ordered by `createdAt` descending, with a limit of 100. Tests saved before these fields existed have no `creatorSchool` and stay hidden from faculty. This change does not backfill them.
+
+The composite index for that query (`creatorSchool` ascending, `createdAt` descending) is a separate change. It is not in this branch and is not deployed from here.
 - `fitTestLookups/{lookupKey}` — public get for resend
 - `fitTestVerifications/{token}` — public get for verify
 
