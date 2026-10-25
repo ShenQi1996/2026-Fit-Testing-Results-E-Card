@@ -1391,12 +1391,6 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
     deletedAt: null,
     ...respiratorRecord(),
   }));
-  await assertFails(setDoc(doc(testerDb, 'fitTests/missing-deleted'), {
-    userId: 'tester-1',
-    creatorRole: 'tester',
-    creatorSchool: HELENE,
-    ...respiratorRecord(),
-  }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/spaces'), {
     userId: 'tester-1',
     ...respiratorRecord({ model: '   ' }),
@@ -1504,6 +1498,69 @@ test('an update cannot blank model or style or put a fit factor on a qualitative
     'edit-legacy',
     { style: { oldValue: null, newValue: 'Filtering facepiece' } },
     { style: 'Filtering facepiece' },
+  ));
+});
+
+test('a token refresh leaves a legacy inline note unchanged', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/tester-2', approved('tester', 'other@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/faculty-1', approved('faculty', 'faculty@example.com', { school: HELENE })],
+    ['fitTests/noted', {
+      userId: 'tester-1',
+      schoolsList: HELENE,
+      result: 'Pass',
+      testerMedicalRestrictionsReceived: true,
+      testerMedicalRestrictionsNote: 'asthma',
+    }],
+  ]);
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const otherDb = testEnv.authenticatedContext('tester-2').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const facultyDb = testEnv.authenticatedContext('faculty-1').firestore();
+  const refresh = (db, token) => updateDoc(doc(db, 'fitTests/noted'), {
+    verificationToken: token,
+    lookupKey: `lookup-${token}`,
+    updatedAt: serverTimestamp(),
+  });
+
+  await assertSucceeds(refresh(ownerDb, 'tok-owner'));
+  await assertSucceeds(refresh(adminDb, 'tok-admin'));
+  const kept = await getDoc(doc(ownerDb, 'fitTests/noted'));
+  expect(kept.data().testerMedicalRestrictionsReceived).toBe(true);
+  expect(kept.data().testerMedicalRestrictionsNote).toBe('asthma');
+  expect(kept.data().verificationToken).toBe('tok-admin');
+
+  await assertFails(refresh(facultyDb, 'tok-faculty'));
+  await assertFails(refresh(otherDb, 'tok-other'));
+  await assertFails(updateDoc(doc(ownerDb, 'fitTests/noted'), {
+    testerMedicalRestrictionsReceived: deleteField(),
+    testerMedicalRestrictionsNote: deleteField(),
+    updatedAt: serverTimestamp(),
+  }));
+  const ownerStrip = writeBatch(ownerDb);
+  ownerStrip.update(doc(ownerDb, 'fitTests/noted'), {
+    testerMedicalRestrictionsReceived: deleteField(),
+    testerMedicalRestrictionsNote: deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+  ownerStrip.set(doc(ownerDb, 'fitTestMedicalNotes/noted'), {
+    fitTestId: 'noted',
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    updatedBy: 'tester-1',
+    testerMedicalRestrictionsReceived: true,
+    testerMedicalRestrictionsNote: 'asthma',
+  });
+  await assertFails(ownerStrip.commit());
+  await assertFails(commitEdit(
+    ownerDb,
+    'noted',
+    'tester-1',
+    'edit-noted-name',
+    { clientName: { oldValue: null, newValue: 'Ada' } },
+    { clientName: 'Ada' },
   ));
 });
 

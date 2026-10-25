@@ -641,7 +641,7 @@ const facultySchoolConstraint = (chunk) => (
 
 /**
  * Fit tests whose creatorSchool is one of the faculty member's schools.
- * Matches the creatorSchool + createdAt composite index. Legacy tests with no
+ * Matches the creatorSchool + deletedAt + createdAt composite index. Legacy tests with no
  * creatorSchool are not returned. Does not read the whole collection.
  * @param {string|string[]|object} schools
  * @param {{ now?: Date, limit?: number }} [options]

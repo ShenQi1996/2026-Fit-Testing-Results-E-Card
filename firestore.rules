@@ -577,15 +577,30 @@ service cloud.firestore {
         return request.resource.data.get('testerMedicalRestrictionsReceived', null) == null
           && request.resource.data.get('testerMedicalRestrictionsNote', null) == null;
       }
+      // Token and lookup refresh. Note fields may stay as they are. Stripping
+      // them is allowed only when the separate note doc exists after the batch.
       function onlyHousekeeping() {
-        return request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly([
+        let affected = request.resource.data.diff(resource.data).affectedKeys();
+        return affected.hasOnly([
             'updatedAt',
             'lookupKey',
             'verificationToken',
             'testerMedicalRestrictionsReceived',
             'testerMedicalRestrictionsNote'
-          ]);
+          ])
+          && (
+            !affected.hasAny(['testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'])
+            || (
+              medicalNoteFieldsAbsent()
+              && existsAfter(/databases/$(database)/documents/fitTestMedicalNotes/$(fitTestId))
+            )
+          );
+      }
+      function noteFieldsUnchanged() {
+        return request.resource.data.get('testerMedicalRestrictionsReceived', null)
+            == resource.data.get('testerMedicalRestrictionsReceived', null)
+          && request.resource.data.get('testerMedicalRestrictionsNote', null)
+            == resource.data.get('testerMedicalRestrictionsNote', null);
       }
       function lastEditChanged() {
         return request.resource.data.get('lastEditId', '') != resource.data.get('lastEditId', '');
@@ -600,8 +615,9 @@ service cloud.firestore {
           && !exists(historyPath)
           && existsAfter(historyPath);
       }
-      // Inline notes must be absent after the write. The owner may edit only
-      // once those fields are already gone. An in-scope admin may remove them.
+      // A material edit still requires the inline notes to be gone before the
+      // owner may change the record. An in-scope admin may remove them. A
+      // housekeeping write is checked separately and may leave the notes in place.
       function canEditThisFitTest() {
         let actor = currentUserDoc().data;
         let school = resource.data.get('schoolsList', '');
@@ -697,44 +713,54 @@ service cloud.firestore {
       // Every material edit, including one that does not touch the method.
       // A legacy record that never stored a method may leave it blank. Once a
       // method is stored, the edit has to keep Qualitative or Quantitative.
+      // The stored read is only needed when the new value is blank. An eager
+      // let would run it on every edit and cross the expression limit.
       function methodStillOk() {
         let method = request.resource.data.get('fitTestMethod', '');
-        let stored = resource.data.get('fitTestMethod', '');
         let factor = request.resource.data.get('fitFactor', null);
         return (
-            hadStoredText(stored)
-              ? (method == 'Qualitative' || method == 'Quantitative')
-              : (method == 'Qualitative' || method == 'Quantitative' || !hadStoredText(method))
+            method == 'Qualitative'
+            || method == 'Quantitative'
+            || (
+              !hadStoredText(method)
+              && !hadStoredText(resource.data.get('fitTestMethod', ''))
+            )
           )
           && (method == 'Quantitative'
             ? (factor is number && factor >= 1 && factor <= 100000)
             : method != 'Qualitative' || factor == null);
       }
-      // Stripping a legacy inline note has to leave the separate note doc behind.
-      function legacyNoteMoved() {
-        return (
-          !resource.data.keys().hasAny(['testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'])
-          || existsAfter(/databases/$(database)/documents/fitTestMedicalNotes/$(fitTestId))
-        );
-      }
       // One allow rule. Extra allow update rules are all evaluated, and their
       // expression counts add up past the limit on a full record.
+      // Housekeeping (resend or token refresh) may leave a legacy inline note
+      // unchanged, including for the owner. Faculty cannot write. Stripping the
+      // note still requires the separate note doc, and the owner cannot strip it.
       allow update: if isSignedIn() && isApproved() && (
         (softDeleteUpdate() && deletionLogAfterOk(fitTestId))
         || (
-          canEditThisFitTest()
-          && notSoftDeleted()
+          notSoftDeleted()
           && fitTestSchoolOkOnUpdate()
           && (
             lastEditChanged()
               ? (
-                editHistoryAfterOk()
+                canEditThisFitTest()
+                && editHistoryAfterOk()
                 && historyShapeOk()
                 && historyValuesOk()
                 && textOk(request.resource.data.get('style', ''), 100)
                 && methodStillOk()
               )
-              : (onlyHousekeeping() && legacyNoteMoved() && medicalNoteFieldsAbsent())
+              : (
+                onlyHousekeeping()
+                && !isFacultyRole()
+                && (
+                  canEditThisFitTest()
+                  || (
+                    request.auth.uid == resource.data.userId
+                    && noteFieldsUnchanged()
+                  )
+                )
+              )
           )
         )
       );
