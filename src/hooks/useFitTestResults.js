@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { deleteField } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
-import { getUserFitTests, deleteFitTest, updateFitTest, ensureFitTestVerification } from '../services/firebaseDb';
+import {
+  getUserFitTests,
+  getFacultyFitTests,
+  deleteFitTest,
+  updateFitTest,
+  ensureFitTestVerification,
+} from '../services/firebaseDb';
+import { isAccessWindowOpen, isFaculty } from '../utils/roles';
 import { sendFitTestCard } from '../services/emailService';
 import { calculateExpirationDate } from '../utils/dateUtils';
 import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
@@ -35,14 +42,25 @@ export const useFitTestResults = () => {
   const [locationFilter, setLocationFilter] = useState(FILTER_ALL);
 
   const userId = user?.uid;
+  const faculty = isFaculty(user);
+  const facultySchoolsKey = faculty ? (user?.school || '') : '';
 
   const loadFitTests = useCallback(async () => {
     if (!userId) return;
+    if (faculty && !isAccessWindowOpen(user)) {
+      setFitTests([]);
+      setLoading(false);
+      setError('');
+      setIndexError(null);
+      return;
+    }
     try {
       setLoading(true);
       setError('');
       setIndexError(null);
-      const tests = await getUserFitTests(userId);
+      const tests = faculty
+        ? await getFacultyFitTests(user)
+        : await getUserFitTests(userId);
       setFitTests(tests);
     } catch (err) {
       console.error('Error loading fit tests:', err);
@@ -60,7 +78,7 @@ export const useFitTestResults = () => {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, faculty, facultySchoolsKey, user]);
 
   useEffect(() => {
     if (userId) {

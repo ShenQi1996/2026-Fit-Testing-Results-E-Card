@@ -16,7 +16,7 @@ import {
   medicalRestrictionsReceivedAnswer,
 } from './resultsUtils';
 import ResultCardEditForm from './ResultCardEditForm';
-import { isAdminOrAbove } from '../../utils/roles';
+import { isAdminOrAbove, isFaculty } from '../../utils/roles';
 
 const ResultRow = ({ label, value, wrap = false, style }) => (
   <div className="result-row">
@@ -313,6 +313,7 @@ const ResultCard = ({
 }) => {
   const isEditing = editing === test.id;
   const busy = deleting || resending === test.id || editing !== null || (pdfLoading && pdfLoading.id === test.id);
+  const facultyView = isFaculty(user);
 
   return (
     <div className={`result-card ${isEditing ? 'editing' : ''}`}>
@@ -417,15 +418,17 @@ const ResultCard = ({
                 ? 'Preparing...'
                 : 'Download PDF'}
             </button>
-            <button
-              onClick={() => onResend(test)}
-              className="resend-button"
-              disabled={busy || !test.recipientEmail}
-              title={!test.recipientEmail ? 'No recipient email available' : 'Resend e-card'}
-            >
-              {resending === test.id ? 'Sending...' : '📧 Resend'}
-            </button>
-            {!isAdminOrAbove(user) && (
+            {!facultyView && (
+              <button
+                onClick={() => onResend(test)}
+                className="resend-button"
+                disabled={busy || !test.recipientEmail}
+                title={!test.recipientEmail ? 'No recipient email available' : 'Resend e-card'}
+              >
+                {resending === test.id ? 'Sending...' : '📧 Resend'}
+              </button>
+            )}
+            {!isAdminOrAbove(user) && !facultyView && (
               <div style={{ fontSize: '12px', color: '#666', marginTop: '8px', fontStyle: 'italic' }}>
                 Only admin users can edit or delete test results.
               </div>
