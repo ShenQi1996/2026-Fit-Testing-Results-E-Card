@@ -275,6 +275,42 @@
   min-width: 0;
 }
 
+.users-schools-section .school-add-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.users-schools-section .school-add-fields .users-search {
+  height: 44px;
+  min-height: 44px;
+  margin-bottom: 0;
+}
+
+.users-schools-section .solution-profile-item.school-edit-open {
+  height: auto;
+  min-height: 44px;
+  align-items: flex-start;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.users-schools-section .school-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.users-schools-section .school-edit-fields .users-search {
+  width: 100%;
+  height: 36px;
+  min-height: 36px;
+  margin-bottom: 0;
+}
+
 @media (max-width: 768px) {
   .users-schools-section .solution-profile-item {
     flex-direction: row;

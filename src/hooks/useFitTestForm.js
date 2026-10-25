@@ -14,13 +14,15 @@ import {
   getUserSolutionProfiles,
   saveUserSolutionProfile,
 } from '../services/firebaseDb';
-import { listMasterSchools } from '../services/masterSchools';
+import { getMasterSchoolRecord, listMasterSchoolRecords } from '../services/masterSchools';
 import { TESTING_AGENT_OPTIONS } from '../constants/fitTestOptions';
 import { isSuperAdmin } from '../utils/roles';
 import {
   SELECT_SCHOOL_MESSAGE,
   ecardSchoolChoices,
+  schoolsForSignedInUser,
 } from '../utils/ecardSchools';
+import { programAdminForSchool } from '../utils/programAdmin';
 import { createInitialFormData } from '../constants/initialFitTestForm';
 import { createVerificationToken } from '../utils/verificationToken';
 import { useSelectableProfiles } from './useSelectableProfiles';
@@ -89,7 +91,8 @@ export const useFitTestForm = () => {
   });
 
   const [masterSchools, setMasterSchools] = useState([]);
-  const [masterSchoolsLoading, setMasterSchoolsLoading] = useState(false);
+  const [schoolRecords, setSchoolRecords] = useState([]);
+  const [masterSchoolsLoading, setMasterSchoolsLoading] = useState(true);
   const superAdmin = isSuperAdmin(user?.role);
   const schoolChoice = useMemo(
     () => ecardSchoolChoices(user, masterSchools),
@@ -98,20 +101,29 @@ export const useFitTestForm = () => {
   const allowedSchools = schoolChoice.options;
 
   useEffect(() => {
-    if (!superAdmin) {
+    if (!user?.uid) {
       setMasterSchools([]);
+      setSchoolRecords([]);
       setMasterSchoolsLoading(false);
       return undefined;
     }
     let cancelled = false;
     setMasterSchoolsLoading(true);
-    listMasterSchools()
-      .then((names) => {
-        if (!cancelled) setMasterSchools(names);
+    const loadRecords = superAdmin
+      ? listMasterSchoolRecords()
+      : Promise.all(schoolsForSignedInUser(user, []).map((name) => getMasterSchoolRecord(name)));
+    loadRecords
+      .then((records) => {
+        if (cancelled) return;
+        setSchoolRecords(records);
+        setMasterSchools(superAdmin ? records.map((record) => record.name) : []);
       })
       .catch((error) => {
         console.error('Could not load schools', error);
-        if (!cancelled) setMasterSchools([]);
+        if (!cancelled) {
+          setSchoolRecords([]);
+          setMasterSchools([]);
+        }
       })
       .finally(() => {
         if (!cancelled) setMasterSchoolsLoading(false);
@@ -119,7 +131,7 @@ export const useFitTestForm = () => {
     return () => {
       cancelled = true;
     };
-  }, [superAdmin, user?.uid]);
+  }, [superAdmin, user]);
 
   useEffect(() => {
     setFormData((prev) => {
@@ -133,6 +145,23 @@ export const useFitTestForm = () => {
   }, [allowedSchools]);
 
   useEffect(() => {
+    const chosen = (formData.schoolsList || '').trim();
+    const next = programAdminForSchool(
+      schoolRecords.find((record) => record.name === chosen),
+      user,
+    );
+    setFormData((prev) => {
+      if (
+        prev.programAdministratorName === next.programAdministratorName
+        && prev.programAdministratorContact === next.programAdministratorContact
+      ) {
+        return prev;
+      }
+      return { ...prev, ...next };
+    });
+  }, [formData.schoolsList, schoolRecords, user]);
+
+  useEffect(() => {
     if (user && user.name) {
       setFormData((prev) => ({
         ...prev,
@@ -142,7 +171,12 @@ export const useFitTestForm = () => {
   }, [user]);
 
   const handleInputChange = (field, value) => {
-    if (field === 'fitTester' || field === 'fitTestMethod') {
+    if (
+      field === 'fitTester'
+      || field === 'fitTestMethod'
+      || field === 'programAdministratorName'
+      || field === 'programAdministratorContact'
+    ) {
       return;
     }
 
@@ -262,7 +296,7 @@ export const useFitTestForm = () => {
 
     const shouldSaveProfile = solutionProfilesState.isAddingNew;
 
-    if (masterSchoolsLoading && superAdmin) {
+    if (masterSchoolsLoading) {
       setStatus({ type: 'error', message: 'Schools are still loading. Please try again.' });
       return;
     }
@@ -359,8 +393,14 @@ export const useFitTestForm = () => {
 
       const showFailureReasonUI =
         formData.facialHairInterfering === true || formData.respiratorDonnedCorrectly === false;
+      const chosenForProgram = (formData.schoolsList || '').trim();
+      const program = programAdminForSchool(
+        schoolRecords.find((record) => record.name === chosenForProgram),
+        user,
+      );
       const cleanedFormData = {
         ...formData,
+        ...program,
         printedName: formData.printedName.trim(),
         testLocation: formData.testLocation?.trim() || '',
         fitTester: user?.name || formData.fitTester || '',
@@ -437,7 +477,7 @@ export const useFitTestForm = () => {
   };
 
   const chosenSchool = (formData.schoolsList || '').trim();
-  const schoolSubmitBlocked = (superAdmin && masterSchoolsLoading)
+  const schoolSubmitBlocked = masterSchoolsLoading
     || Boolean(schoolChoice.blockedMessage)
     || !allowedSchools.includes(chosenSchool);
 
