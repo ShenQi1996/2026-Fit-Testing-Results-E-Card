@@ -484,7 +484,7 @@ service cloud.firestore {
     }
 
     function notSoftDeleted() {
-      return !resource.data.keys().hasAny(['deletedAt']);
+      return resource.data.get('deletedAt', null) == null;
     }
 
     function deletionFieldsUnchanged() {
@@ -685,7 +685,8 @@ service cloud.firestore {
         !isFacultyRole() &&
         request.auth.uid == request.resource.data.userId
         && fitTestSchoolOkOnCreate()
-        && !request.resource.data.keys().hasAny(['deletedAt', 'deletedBy', 'deleteReason'])
+        && request.resource.data.deletedAt == null
+        && !request.resource.data.keys().hasAny(['deletedBy', 'deleteReason'])
         && respiratorRecordOk()
         && creatorStampMatchesProfile();
     }

@@ -850,6 +850,7 @@ test('renamed or removed school names stay readable until the field changes', as
     schoolsList: HELENE,
     creatorRole: 'tester',
     creatorSchool: oldName,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/new-2'), {
@@ -864,6 +865,7 @@ test('renamed or removed school names stay readable until the field changes', as
     schoolsList: '',
     creatorRole: 'tester',
     creatorSchool: oldName,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
 });
@@ -922,6 +924,13 @@ test('fit test records are soft-deleted with a reason and cannot be hard-deleted
     ['fitTests/own-2', { userId: 'tester-1', result: 'Fail', schoolsList: HELENE }],
     ['fitTests/second-1', { userId: 'other-1', result: 'Pass', schoolsList: SECOND }],
     ['fitTests/blank-school', { userId: 'tester-1', result: 'Pass' }],
+    ['fitTests/stamped-live', {
+      userId: 'tester-1',
+      result: 'Pass',
+      schoolsList: HELENE,
+      deletedAt: null,
+      style: 'Filtering facepiece',
+    }],
     ['fitTestLookups/lookup-1', { userId: 'tester-1', fitTestId: 'own-1' }],
     ['fitTestVerifications/abc', { userId: 'tester-1', fitTestId: 'own-1', result: 'Pass' }],
   ]);
@@ -972,6 +981,8 @@ test('fit test records are soft-deleted with a reason and cannot be hard-deleted
     deleteReason: 'Log without the delete',
   }));
 
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTests/stamped-live'), { result: 'Fail' }));
+  await assertSucceeds(commitSoftDelete(adminDb, 'stamped-live', 'admin-1', 'tester-1', 'Null stamp is still live'));
   await assertSucceeds(commitSoftDelete(adminDb, 'own-1', 'admin-1', 'tester-1', 'Wrong participant'));
   await assertSucceeds(getDoc(doc(adminDb, 'fitTests/own-1')));
   await assertSucceeds(getDoc(doc(adminDb, 'fitTestDeletionLogs/own-1')));
@@ -1022,9 +1033,17 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
     userId: 'tester-1',
     creatorRole: 'tester',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100 }),
   }));
   await assertSucceeds(setDoc(doc(testerDb, 'fitTests/qual-ok'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    deletedAt: null,
+    ...respiratorRecord(),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/missing-deleted'), {
     userId: 'tester-1',
     creatorRole: 'tester',
     creatorSchool: HELENE,
@@ -1046,6 +1065,7 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
     userId: 'tester-1',
     creatorRole: 'tester',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100000 }),
   }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/qual-factor'), {
@@ -1137,6 +1157,7 @@ test('a new fit test stamps the creator role and school, and those stamps stay p
     schoolsList: SECOND,
     creatorRole: 'tester',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertFails(updateDoc(doc(testerDb, 'fitTests/ok'), { creatorSchool: SECOND }));
@@ -1148,6 +1169,7 @@ test('a new fit test stamps the creator role and school, and those stamps stay p
     schoolsList: HELENE,
     creatorRole: 'admin',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertFails(setDoc(doc(adminDb, 'fitTests/admin-spoof'), {
@@ -1302,6 +1324,7 @@ test('creatorSchool cannot be taken from the card, and a tester with no school c
     schoolsList: SECOND,
     creatorRole: 'tester',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertSucceeds(setDoc(doc(adminDb, 'fitTests/admin-second'), {
@@ -1309,6 +1332,7 @@ test('creatorSchool cannot be taken from the card, and a tester with no school c
     schoolsList: HELENE,
     creatorRole: 'admin',
     creatorSchool: SECOND,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertFails(setDoc(doc(secondDb, 'fitTests/not-mine'), {

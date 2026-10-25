@@ -234,6 +234,7 @@ test('saveFitTest stamps the creator profile and ignores a client stamp', async 
   expect(saved.creatorRole).toBe('tester');
   expect(saved.creatorSchool).toBe('Helene College of Nursing');
   expect(saved.schoolsList).toBe('Other School');
+  expect(saved.deletedAt).toBeNull();
 
   addDoc.mockClear();
   getDoc.mockResolvedValue(userDoc('admin'));
