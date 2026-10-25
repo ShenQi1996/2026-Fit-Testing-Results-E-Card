@@ -1193,6 +1193,61 @@ test('owner, in-scope admin, and super admin can edit 1, 3, 6, and 10 fields', a
   }
 });
 
+test('an edit cannot blank or delete a stored fit test method', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin()],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['fitTests/method-1', {
+      userId: 'tester-1',
+      schoolsList: HELENE,
+      deletedAt: null,
+      ...respiratorRecord(),
+    }],
+    ['fitTests/legacy-method', {
+      userId: 'tester-1',
+      schoolsList: HELENE,
+      deletedAt: null,
+      respiratorMfg: '3M',
+      model: '1860',
+      style: 'Filtering facepiece',
+      maskSize: 'Regular',
+    }],
+  ]);
+  const actors = [
+    ['tester-1', testEnv.authenticatedContext('tester-1').firestore()],
+    ['admin-1', testEnv.authenticatedContext('admin-1').firestore()],
+    ['super-1', testEnv.authenticatedContext('super-1').firestore()],
+  ];
+  for (const [actorId, db] of actors) {
+    await assertFails(commitEdit(
+      db,
+      'method-1',
+      actorId,
+      `${actorId}-blank-method`,
+      { fitTestMethod: { oldValue: 'Qualitative', newValue: '' } },
+      { fitTestMethod: '' },
+    ));
+    await assertFails(commitEdit(
+      db,
+      'method-1',
+      actorId,
+      `${actorId}-delete-method`,
+      { fitTestMethod: { oldValue: 'Qualitative', newValue: null } },
+      { fitTestMethod: deleteField() },
+    ));
+  }
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+  await assertSucceeds(commitEdit(
+    ownerDb,
+    'legacy-method',
+    'tester-1',
+    'legacy-name',
+    { clientName: { oldValue: null, newValue: 'Ada' } },
+    { clientName: 'Ada' },
+  ));
+});
+
 test('fit test records are soft-deleted with a reason and cannot be hard-deleted', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
@@ -1204,6 +1259,13 @@ test('fit test records are soft-deleted with a reason and cannot be hard-deleted
     ['fitTests/own-2', { userId: 'tester-1', result: 'Fail', schoolsList: HELENE }],
     ['fitTests/second-1', { userId: 'other-1', result: 'Pass', schoolsList: SECOND }],
     ['fitTests/blank-school', { userId: 'tester-1', result: 'Pass' }],
+    ['fitTests/stamped-live', {
+      userId: 'tester-1',
+      result: 'Pass',
+      schoolsList: HELENE,
+      deletedAt: null,
+      style: 'Filtering facepiece',
+    }],
     ['fitTestLookups/lookup-1', { userId: 'tester-1', fitTestId: 'own-1' }],
     ['fitTestVerifications/abc', { userId: 'tester-1', fitTestId: 'own-1', result: 'Pass' }],
   ]);
@@ -1254,6 +1316,15 @@ test('fit test records are soft-deleted with a reason and cannot be hard-deleted
     deleteReason: 'Log without the delete',
   }));
 
+  await assertSucceeds(commitEdit(
+    adminDb,
+    'stamped-live',
+    'admin-1',
+    'stamped-name',
+    { clientName: { oldValue: null, newValue: 'Ada' } },
+    { clientName: 'Ada' },
+  ));
+  await assertSucceeds(commitSoftDelete(adminDb, 'stamped-live', 'admin-1', 'tester-1', 'Null stamp is still live'));
   await assertSucceeds(commitSoftDelete(adminDb, 'own-1', 'admin-1', 'tester-1', 'Wrong participant'));
   await assertSucceeds(getDoc(doc(adminDb, 'fitTests/own-1')));
   await assertSucceeds(getDoc(doc(adminDb, 'fitTestDeletionLogs/own-1')));
@@ -1318,6 +1389,12 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
     creatorRole: 'tester',
     creatorSchool: HELENE,
     deletedAt: null,
+    ...respiratorRecord(),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/missing-deleted'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
     ...respiratorRecord(),
   }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/spaces'), {
