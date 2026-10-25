@@ -869,3 +869,64 @@ test('fitTests count queries follow the same read rules as document reads', asyn
     where('userId', '==', 'tester-1'),
   )));
 });
+
+test('medical restriction notes stay off the fit test and are limited to the owner and admins', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/tester-2', approved('tester', 'other@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin()],
+    ['fitTests/own-1', {
+      userId: 'tester-1',
+      testerMedicalRestrictionsReceived: true,
+      testerMedicalRestrictionsNote: 'legacy note',
+    }],
+  ]);
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const otherDb = testEnv.authenticatedContext('tester-2').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const note = {
+    fitTestId: 'own-1',
+    userId: 'tester-1',
+    updatedBy: 'tester-1',
+    testerMedicalRestrictionsReceived: true,
+    testerMedicalRestrictionsNote: 'asthma',
+  };
+
+  await assertFails(setDoc(doc(ownerDb, 'fitTests/new-note'), {
+    userId: 'tester-1',
+    testerMedicalRestrictionsNote: 'asthma',
+    testerMedicalRestrictionsReceived: true,
+  }));
+  await assertSucceeds(updateDoc(doc(ownerDb, 'fitTests/own-1'), { model: '1860' }));
+  await assertFails(updateDoc(doc(ownerDb, 'fitTests/own-1'), {
+    testerMedicalRestrictionsNote: 'changed',
+  }));
+  const kept = await assertSucceeds(getDoc(doc(ownerDb, 'fitTests/own-1')));
+  expect(kept.data().testerMedicalRestrictionsNote).toBe('legacy note');
+
+  await assertFails(setDoc(doc(otherDb, 'fitTestMedicalNotes/own-1'), {
+    ...note,
+    updatedBy: 'tester-2',
+  }));
+  await assertFails(setDoc(doc(ownerDb, 'fitTestMedicalNotes/own-1'), {
+    ...note,
+    testerMedicalRestrictionsReceived: false,
+    testerMedicalRestrictionsNote: 'should be empty',
+  }));
+  await assertSucceeds(setDoc(doc(ownerDb, 'fitTestMedicalNotes/own-1'), note));
+  await assertSucceeds(getDoc(doc(adminDb, 'fitTestMedicalNotes/own-1')));
+  await assertFails(getDoc(doc(otherDb, 'fitTestMedicalNotes/own-1')));
+  await assertFails(getDocs(query(
+    collection(otherDb, 'fitTestMedicalNotes'),
+    where('userId', '==', 'tester-1'),
+  )));
+  await assertSucceeds(getDocs(query(
+    collection(ownerDb, 'fitTestMedicalNotes'),
+    where('userId', '==', 'tester-1'),
+  )));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTestMedicalNotes/own-1'), {
+    updatedBy: 'admin-1',
+    testerMedicalRestrictionsNote: 'updated by admin',
+  }));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTestMedicalNotes/own-1')));
+});

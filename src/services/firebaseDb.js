@@ -54,7 +54,9 @@ import { normalizeSchoolList } from '../utils/schoolScope';
 const FIT_TESTS_COLLECTION = 'fitTests';
 const FIT_TEST_LOOKUPS_COLLECTION = 'fitTestLookups';
 const FIT_TEST_VERIFICATIONS_COLLECTION = 'fitTestVerifications';
+const FIT_TEST_MEDICAL_NOTES_COLLECTION = 'fitTestMedicalNotes';
 const USERS_COLLECTION = 'users';
+const MEDICAL_NOTE_MAX_LENGTH = 2000;
 
 const LOOKUP_CARD_FIELDS = [
   'recipientEmail',
@@ -85,6 +87,57 @@ const VERIFY_CARD_FIELDS = [
   'result',
   'fitTester',
 ];
+
+const MEDICAL_NOTE_FIELDS = [
+  'testerMedicalRestrictionsReceived',
+  'testerMedicalRestrictionsNote',
+];
+
+const withoutMedicalNote = (data = {}) => {
+  const rest = { ...data };
+  MEDICAL_NOTE_FIELDS.forEach((field) => {
+    delete rest[field];
+  });
+  return rest;
+};
+
+const medicalNoteFromRecord = (data = {}) => {
+  const received = data.testerMedicalRestrictionsReceived === true;
+  const note = received ? String(data.testerMedicalRestrictionsNote || '').trim() : '';
+  if (note.length > MEDICAL_NOTE_MAX_LENGTH) {
+    throw new Error('Medical restriction notes must be 2000 characters or fewer.');
+  }
+  return {
+    testerMedicalRestrictionsReceived: received,
+    testerMedicalRestrictionsNote: note,
+  };
+};
+
+const hasMedicalNoteInput = (data = {}) => MEDICAL_NOTE_FIELDS.some((field) => (
+  Object.prototype.hasOwnProperty.call(data, field)
+));
+
+const writeMedicalNote = async (fitTestId, ownerUserId, actorUserId, note, updatedAt) => {
+  await setDoc(doc(db, FIT_TEST_MEDICAL_NOTES_COLLECTION, fitTestId), {
+    fitTestId,
+    userId: ownerUserId,
+    updatedBy: actorUserId,
+    updatedAt,
+    ...note,
+  });
+};
+
+const applyMedicalNote = (test, note) => {
+  if (!note) return test;
+  if (note.testerMedicalRestrictionsReceived !== true && note.testerMedicalRestrictionsReceived !== false) {
+    return test;
+  }
+  return {
+    ...test,
+    testerMedicalRestrictionsReceived: note.testerMedicalRestrictionsReceived,
+    testerMedicalRestrictionsNote: note.testerMedicalRestrictionsNote || '',
+  };
+};
 
 const toLookupCardData = (record = {}) => {
   const data = {};
@@ -332,10 +385,13 @@ const serializeUserDoc = (docSnap) => {
  */
 export const saveFitTest = async (userId, fitTestData) => {
   try {
-    const lookupKey = await resolveLookupKey(fitTestData);
-    const verificationToken = resolveVerificationToken(fitTestData);
+    const notePresent = hasMedicalNoteInput(fitTestData);
+    const note = notePresent ? medicalNoteFromRecord(fitTestData) : null;
+    const fitTestFields = withoutMedicalNote(fitTestData);
+    const lookupKey = await resolveLookupKey(fitTestFields);
+    const verificationToken = resolveVerificationToken(fitTestFields);
     const recordToSave = {
-      ...fitTestData,
+      ...fitTestFields,
       verificationToken,
     };
     const createdAt = Timestamp.now();
@@ -348,6 +404,9 @@ export const saveFitTest = async (userId, fitTestData) => {
       updatedAt: createdAt,
       ...(retentionDate ? { retentionDate } : {}),
     });
+    if (note) {
+      await writeMedicalNote(docRef.id, userId, userId, note, createdAt);
+    }
     if (lookupKey) {
       await upsertFitTestLookup(lookupKey, recordToSave, docRef.id, userId);
     }
@@ -356,6 +415,9 @@ export const saveFitTest = async (userId, fitTestData) => {
     return docRef.id;
   } catch (error) {
     console.error('Error saving fit test:', error);
+    if (error.message === 'Medical restriction notes must be 2000 characters or fewer.') {
+      throw error;
+    }
     throw new Error('Failed to save fit test record. Please try again.');
   }
 };
@@ -433,10 +495,17 @@ export const getUserFitTests = async (userId, options = {}) => {
     );
     
     const querySnapshot = await getDocs(q);
+    const notesSnap = await getDocs(query(
+      collection(db, FIT_TEST_MEDICAL_NOTES_COLLECTION),
+      where('userId', '==', userId),
+    ));
+    const notesById = new Map(
+      notesSnap.docs.map((noteSnap) => [noteSnap.id, noteSnap.data() || {}])
+    );
 
     return querySnapshot.docs
       .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now))
-      .map(mapFitTestDoc);
+      .map((docSnap) => applyMedicalNote(mapFitTestDoc(docSnap), notesById.get(docSnap.id)));
   } catch (error) {
     console.error('Error fetching fit tests:', error);
 
@@ -712,20 +781,27 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const docRef = doc(db, FIT_TESTS_COLLECTION, fitTestId);
     const existingSnap = await getDoc(docRef);
     const existing = existingSnap.exists() ? existingSnap.data() : {};
-    const nextRecord = { ...existing, ...updates };
+    const notePresent = hasMedicalNoteInput(updates);
+    const note = notePresent ? medicalNoteFromRecord(updates) : null;
+    const writable = withoutMedicalNote(updates);
+    const nextRecord = { ...existing, ...writable };
     const previousKey = await resolveLookupKey(existing);
     const nextKey = await resolveLookupKey(nextRecord);
     const verificationToken = resolveVerificationToken(nextRecord);
     nextRecord.verificationToken = verificationToken;
 
     const retentionDate = retentionDateValue(nextRecord);
+    const updatedAt = Timestamp.now();
     await updateDoc(docRef, {
-      ...updates,
+      ...writable,
       lookupKey: nextKey || null,
       verificationToken,
-      updatedAt: Timestamp.now(),
+      updatedAt,
       ...(retentionDate ? { retentionDate } : {}),
     });
+    if (note) {
+      await writeMedicalNote(fitTestId, existing.userId || userId, userId, note, updatedAt);
+    }
 
     // Release lookups this record no longer owns, including any older key format.
     const releasedKeys = new Set(
@@ -752,7 +828,10 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
   } catch (error) {
     console.error('Error updating fit test:', error);
     // Re-throw permission denied errors
-    if (error.code === 'PERMISSION_DENIED') {
+    if (
+      error.code === 'PERMISSION_DENIED'
+      || error.message === 'Medical restriction notes must be 2000 characters or fewer.'
+    ) {
       throw error;
     }
     throw new Error('Failed to update fit test record. Please try again.');

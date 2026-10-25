@@ -1,8 +1,9 @@
-import { getDoc, getDocs, where, writeBatch } from 'firebase/firestore';
+import { addDoc, getDoc, getDocs, setDoc, where, writeBatch } from 'firebase/firestore';
 import {
   countFitTestsForUser,
   getFitTestCountsByUser,
   getUserFitTests,
+  saveFitTest,
 } from './firebaseDb';
 
 const userDoc = (role, extra = {}) => ({
@@ -94,4 +95,72 @@ test('a missing composite index is surfaced instead of an empty results list', a
     indexUrl: 'https://console.firebase.google.com/example',
   });
   await expect(countFitTestsForUser('tester-1', { now: NOW })).rejects.toBe(indexError);
+});
+
+test('medical restriction notes are stored apart from the fit test and preferred on read', async () => {
+  addDoc.mockClear();
+  setDoc.mockClear();
+
+  await saveFitTest('tester-1', {
+    clientName: 'Ada Lovelace',
+    testerMedicalRestrictionsReceived: true,
+    testerMedicalRestrictionsNote: '  asthma  ',
+  });
+
+  const storedFitTest = addDoc.mock.calls[0][1];
+  expect(storedFitTest.testerMedicalRestrictionsReceived).toBeUndefined();
+  expect(storedFitTest.testerMedicalRestrictionsNote).toBeUndefined();
+  const noteWrite = setDoc.mock.calls.map((call) => call[1]).find((data) => data.testerMedicalRestrictionsNote);
+  expect(noteWrite).toEqual(expect.objectContaining({
+    fitTestId: 'mock-id',
+    userId: 'tester-1',
+    updatedBy: 'tester-1',
+    testerMedicalRestrictionsReceived: true,
+    testerMedicalRestrictionsNote: 'asthma',
+  }));
+
+  const fitDocs = [
+    {
+      id: 'ft-1',
+      data: () => ({
+        userId: 'tester-1',
+        issueDate: '10/24/2026',
+        createdAt: recentCreatedAt,
+        testerMedicalRestrictionsReceived: false,
+        testerMedicalRestrictionsNote: 'legacy',
+      }),
+    },
+    {
+      id: 'ft-2',
+      data: () => ({
+        userId: 'tester-1',
+        issueDate: '10/24/2026',
+        createdAt: recentCreatedAt,
+        testerMedicalRestrictionsReceived: false,
+        testerMedicalRestrictionsNote: 'kept on the old record',
+      }),
+    },
+  ];
+  let reads = 0;
+  getDocs.mockImplementation(async () => {
+    reads += 1;
+    if (reads === 1) return { docs: fitDocs };
+    return {
+      docs: [{
+        id: 'ft-1',
+        data: () => ({
+          userId: 'tester-1',
+          testerMedicalRestrictionsReceived: true,
+          testerMedicalRestrictionsNote: 'side note',
+        }),
+      }],
+    };
+  });
+
+  const listed = await getUserFitTests('tester-1', { now: NOW });
+  const byId = Object.fromEntries(listed.map((record) => [record.id, record]));
+  expect(byId['ft-1'].testerMedicalRestrictionsReceived).toBe(true);
+  expect(byId['ft-1'].testerMedicalRestrictionsNote).toBe('side note');
+  expect(byId['ft-2'].testerMedicalRestrictionsReceived).toBe(false);
+  expect(byId['ft-2'].testerMedicalRestrictionsNote).toBe('kept on the old record');
 });

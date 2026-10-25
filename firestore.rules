@@ -395,11 +395,22 @@ service cloud.firestore {
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin());
+      function medicalNoteFieldsAbsent() {
+        return !request.resource.data.keys().hasAny(['testerMedicalRestrictionsReceived'])
+          && !request.resource.data.keys().hasAny(['testerMedicalRestrictionsNote']);
+      }
+      function medicalNoteFieldsUnchanged() {
+        return request.resource.data.get('testerMedicalRestrictionsReceived', null)
+            == resource.data.get('testerMedicalRestrictionsReceived', null)
+          && request.resource.data.get('testerMedicalRestrictionsNote', null)
+            == resource.data.get('testerMedicalRestrictionsNote', null);
+      }
       allow update: if
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin())
-        && fitTestSchoolOkOnUpdate();
+        && fitTestSchoolOkOnUpdate()
+        && medicalNoteFieldsUnchanged();
       allow delete: if
         isSignedIn() &&
         isApproved() &&
@@ -408,7 +419,33 @@ service cloud.firestore {
         isSignedIn() &&
         isApproved() &&
         request.auth.uid == request.resource.data.userId
-        && fitTestSchoolOkOnCreate();
+        && fitTestSchoolOkOnCreate()
+        && medicalNoteFieldsAbsent();
+    }
+
+    // Medical restriction notes are not on the fit test. Only the record owner and admins can read them.
+    match /fitTestMedicalNotes/{fitTestId} {
+      function noteOwner() {
+        return get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.userId;
+      }
+      function noteShapeOk() {
+        return request.resource.data.fitTestId == fitTestId
+          && request.resource.data.userId == noteOwner()
+          && request.resource.data.updatedBy == request.auth.uid
+          && request.resource.data.testerMedicalRestrictionsReceived is bool
+          && request.resource.data.testerMedicalRestrictionsNote is string
+          && request.resource.data.testerMedicalRestrictionsNote.size() <= 2000
+          && (
+            request.resource.data.testerMedicalRestrictionsReceived == true
+            || request.resource.data.testerMedicalRestrictionsNote.size() == 0
+          );
+      }
+      allow read: if isSignedIn() && isApproved() &&
+        (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create, update: if isSignedIn() && isApproved() &&
+        (isAdmin() || request.auth.uid == noteOwner()) &&
+        noteShapeOk();
+      allow delete: if false;
     }
 
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.

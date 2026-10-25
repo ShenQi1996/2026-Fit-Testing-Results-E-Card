@@ -98,7 +98,7 @@ Collections:
 
 - `users` — testers/admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin)
+- `fitTests` — records (owner or admin). Medical restriction notes are stored in `fitTestMedicalNotes`, readable by the record owner and admins, so they are not part of the fit test document (medical privacy). Older notes already on a fit test are left in place.
 - `fitTestLookups/{lookupKey}` — public get for resend
 - `fitTestVerifications/{token}` — public get for verify
 
