@@ -14,6 +14,9 @@ export const generateFitTestCard = (formData) => {
     testingAgent,
     maskSize,
     model,
+    style,
+    fitTestMethod,
+    fitFactor,
     result,
     fitTester,
     recipientEmail,
@@ -168,6 +171,20 @@ export const generateFitTestCard = (formData) => {
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Model:</td>
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${model || '[Model]'}</td>
                                 </tr>
+                                <tr>
+                                  <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Style:</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${style || '[Style]'}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Test Method:</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${fitTestMethod || '[Method]'}</td>
+                                </tr>
+                                ${fitTestMethod === 'Quantitative' ? `
+                                <tr>
+                                  <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Factor:</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${fitFactor ?? '[Fit factor]'}</td>
+                                </tr>
+                                ` : ''}
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Result:</td>
                                   <td style="padding: 8px 0; color: ${result === 'Pass' ? '#0F9A8A' : result === 'Fail' ? '#dc3545' : '#0B2D4A'}; text-align: right; font-weight: bold;">${result || '[Result]'}</td>

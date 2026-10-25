@@ -908,4 +908,42 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
     userId: 'tester-1',
     ...respiratorRecord(),
   }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/spaces'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ model: '   ' }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/factor-zero'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 0 }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/factor-high'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100001 }),
+  }));
+  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/factor-max'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100000 }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/qual-factor'), {
+    userId: 'tester-1',
+    ...respiratorRecord({ fitFactor: 10 }),
+  }));
+});
+
+test('an update cannot blank model or style or put a fit factor on a qualitative test', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/stamped', {
+      userId: 'tester-1',
+      ...respiratorRecord(),
+    }],
+    ['fitTests/legacy', { userId: 'tester-1', result: 'Pass' }],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { model: '' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { style: '   ' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitFactor: 100 }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/stamped'), { model: '1870' }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/legacy'), { result: 'Fail' }));
 });

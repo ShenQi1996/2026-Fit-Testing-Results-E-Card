@@ -83,9 +83,13 @@ export const validateFitTestForm = (formData, hasStrokes = false, hasTesterStrok
 
   if (formData.fitTestMethod === 'Quantitative') {
     const fitFactor = Number(formData.fitFactor);
-    if (!Number.isFinite(fitFactor) || fitFactor <= 0) {
-      fieldErrors.fitFactor = 'Please enter the fit factor for a quantitative test.';
+    if (!Number.isFinite(fitFactor) || fitFactor < 1 || fitFactor > 100000) {
+      fieldErrors.fitFactor = 'Enter a fit factor from 1 to 100000.';
     }
+  }
+
+  if (formData.fitTestMethod === 'Qualitative' && String(formData.fitFactor || '').trim()) {
+    fieldErrors.fitFactor = 'A qualitative test does not record a fit factor.';
   }
 
   // Validate result

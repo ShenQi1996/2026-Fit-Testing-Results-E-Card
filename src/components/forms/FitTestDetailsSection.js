@@ -178,7 +178,9 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
             type="number"
             value={formData.fitFactor}
             onChange={(e) => onChange('fitFactor', e.target.value)}
-            placeholder="e.g., 100"
+            placeholder="1 to 100000"
+            min="1"
+            max="100000"
             required
             disabled={isLoading}
             error={fieldErrors?.fitFactor}

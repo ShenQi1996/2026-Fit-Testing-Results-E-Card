@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { deleteField } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 import { getUserFitTests, deleteFitTest, updateFitTest, ensureFitTestVerification } from '../services/firebaseDb';
 import { sendFitTestCard } from '../services/emailService';
@@ -289,6 +290,9 @@ export const useFitTestResults = () => {
       testingAgent: test.testingAgent || '',
       maskSize: test.maskSize || '',
       model: test.model || '',
+      style: test.style || '',
+      fitTestMethod: test.fitTestMethod || '',
+      fitFactor: test.fitFactor ?? '',
       result: test.result || '',
       fitTester: test.fitTester || '',
     });
@@ -312,14 +316,44 @@ export const useFitTestResults = () => {
       flashMessage(setError, 'Please select or enter a test location before saving.', 4000);
       return;
     }
+    const original = fitTests.find((test) => test.id === testId);
+    const nextModel = (editData.model || '').trim();
+    const nextStyle = (editData.style || '').trim();
+    if ((editData.model && !nextModel) || (editData.style && !nextStyle)) {
+      flashMessage(setError, 'Model and style cannot be blank.', 4000);
+      return;
+    }
+    if ((original?.model || '').trim() && !nextModel) {
+      flashMessage(setError, 'Model cannot be cleared after it is saved.', 4000);
+      return;
+    }
+    if ((original?.style || '').trim() && !nextStyle) {
+      flashMessage(setError, 'Style cannot be cleared after it is saved.', 4000);
+      return;
+    }
+    if (editData.fitTestMethod === 'Quantitative') {
+      const fitFactor = Number(editData.fitFactor);
+      if (!Number.isFinite(fitFactor) || fitFactor < 1 || fitFactor > 100000) {
+        flashMessage(setError, 'Enter a fit factor from 1 to 100000.', 4000);
+        return;
+      }
+    }
 
     try {
       setSaving(true);
       setSuccessMessage('');
       setError('');
 
-      const updates = { ...editData };
+      const updates = { ...editData, model: nextModel, style: nextStyle };
       updates.testLocation = nextLocation;
+      delete updates.fitFactor;
+      if (editData.fitTestMethod === 'Quantitative') {
+        updates.fitFactor = Number(editData.fitFactor);
+      } else if (editData.fitTestMethod === 'Qualitative') {
+        updates.fitFactor = deleteField();
+      } else {
+        delete updates.fitTestMethod;
+      }
       if (editData.issueDate) {
         updates.expirationDate = calculateExpirationDate(editData.issueDate);
       }

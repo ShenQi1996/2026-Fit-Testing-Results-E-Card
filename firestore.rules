@@ -399,37 +399,71 @@ service cloud.firestore {
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin())
-        && fitTestSchoolOkOnUpdate();
+        && fitTestSchoolOkOnUpdate()
+        && respiratorFieldsOkOnUpdate();
       allow delete: if
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin());
+      function textOk(value, maxSize) {
+        return value is string
+          && value.size() > 0
+          && value.size() <= maxSize
+          && value.matches('.*\\S.*');
+      }
+
+      function hadText(data, field) {
+        return data.keys().hasAny([field])
+          && data[field] is string
+          && data[field].matches('.*\\S.*');
+      }
+
+      // A stored model or style cannot be cleared or replaced with spaces.
+      // A legacy record that never had the field may stay blank.
+      function textNotBlanked(field, maxSize) {
+        return request.resource.data.keys().hasAny([field])
+          ? (
+            textOk(request.resource.data[field], maxSize)
+            || (
+              !hadText(resource.data, field)
+              && request.resource.data[field] is string
+              && request.resource.data[field].size() == 0
+            )
+          )
+          : !hadText(resource.data, field);
+      }
+
+      function fitFactorInRange(value) {
+        return value is number && value >= 1 && value <= 100000;
+      }
+
+      function fitFactorOkOnWrite() {
+        return request.resource.data.get('fitTestMethod', '') == 'Quantitative'
+          ? fitFactorInRange(request.resource.data.get('fitFactor', null))
+          : request.resource.data.get('fitTestMethod', '') == 'Qualitative'
+            ? !request.resource.data.keys().hasAny(['fitFactor'])
+            : (
+              request.resource.data.keys().hasAny(['fitFactor'])
+                ? fitFactorInRange(request.resource.data.fitFactor)
+                : true
+            );
+      }
+
+      function respiratorFieldsOkOnUpdate() {
+        return textNotBlanked('model', 200)
+          && textNotBlanked('style', 100)
+          && fitFactorOkOnWrite();
+      }
+
       // OSHA 1910.134(m)(2): make, model, style, size, test type, and fit factor.
       function respiratorRecordOk() {
-        return request.resource.data.keys().hasAny(['respiratorMfg'])
-          && request.resource.data.respiratorMfg is string
-          && request.resource.data.respiratorMfg.size() > 0
-          && request.resource.data.respiratorMfg.size() <= 200
-          && request.resource.data.keys().hasAny(['model'])
-          && request.resource.data.model is string
-          && request.resource.data.model.size() > 0
-          && request.resource.data.model.size() <= 200
-          && request.resource.data.keys().hasAny(['style'])
-          && request.resource.data.style is string
-          && request.resource.data.style.size() > 0
-          && request.resource.data.style.size() <= 100
-          && request.resource.data.keys().hasAny(['maskSize'])
-          && request.resource.data.maskSize is string
-          && request.resource.data.maskSize.size() > 0
-          && request.resource.data.maskSize.size() <= 50
-          && request.resource.data.keys().hasAny(['fitTestMethod'])
-          && (request.resource.data.fitTestMethod == 'Qualitative'
-            || request.resource.data.fitTestMethod == 'Quantitative')
-          && (request.resource.data.fitTestMethod == 'Quantitative'
-            ? (request.resource.data.keys().hasAny(['fitFactor'])
-              && request.resource.data.fitFactor is number
-              && request.resource.data.fitFactor > 0)
-            : true);
+        return textOk(request.resource.data.get('respiratorMfg', ''), 200)
+          && textOk(request.resource.data.get('model', ''), 200)
+          && textOk(request.resource.data.get('style', ''), 100)
+          && textOk(request.resource.data.get('maskSize', ''), 50)
+          && (request.resource.data.get('fitTestMethod', '') == 'Qualitative'
+            || request.resource.data.get('fitTestMethod', '') == 'Quantitative')
+          && fitFactorOkOnWrite();
       }
 
       allow create: if

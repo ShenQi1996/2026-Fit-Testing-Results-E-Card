@@ -154,7 +154,8 @@ const FitTestForm = () => {
             !formData.model?.trim() ||
             !formData.style?.trim() ||
             (formData.fitTestMethod !== 'Qualitative' && formData.fitTestMethod !== 'Quantitative') ||
-            (formData.fitTestMethod === 'Quantitative' && !(Number(formData.fitFactor) > 0))
+            (formData.fitTestMethod === 'Quantitative'
+              && !(Number(formData.fitFactor) >= 1 && Number(formData.fitFactor) <= 100000))
           }
         />
       </div>

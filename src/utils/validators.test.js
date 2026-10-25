@@ -74,7 +74,19 @@ describe('form validators', () => {
       fitTestMethod: 'Quantitative',
       fitFactor: '',
     }, true, true);
-    expect(quantitative.fieldErrors.fitFactor).toMatch(/fit factor/i);
+    expect(quantitative.fieldErrors.fitFactor).toMatch(/1 to 100000/i);
+    const tooHigh = validateFitTestForm({
+      ...validForm(),
+      fitTestMethod: 'Quantitative',
+      fitFactor: '100001',
+    }, true, true);
+    expect(tooHigh.fieldErrors.fitFactor).toMatch(/1 to 100000/i);
+    const qualitativeWithFactor = validateFitTestForm({
+      ...validForm(),
+      fitTestMethod: 'Qualitative',
+      fitFactor: '100',
+    }, true, true);
+    expect(qualitativeWithFactor.fieldErrors.fitFactor).toMatch(/does not record/i);
 
     const withFactor = validateFitTestForm({
       ...validForm(),
