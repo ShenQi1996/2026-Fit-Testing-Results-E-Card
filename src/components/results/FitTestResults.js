@@ -17,6 +17,7 @@ const FitTestResults = () => {
     resending,
     editing,
     editData,
+    editError,
     saving,
     successMessage,
     pdfLoading,
@@ -215,6 +216,7 @@ const FitTestResults = () => {
                       user={user}
                       editing={editing}
                       editData={editData}
+                      editError={editError}
                       saving={saving}
                       deleting={deleting}
                       resending={resending}

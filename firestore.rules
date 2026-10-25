@@ -571,10 +571,15 @@ service cloud.firestore {
           );
       }
 
+      // Style is required on every create and update. A blank or missing style is rejected.
+      function styleRequired() {
+        return textOk(request.resource.data.get('style', ''), 100);
+      }
+
       function respiratorFieldsOkOnUpdate() {
         return textNotBlanked('respiratorMfg', 200)
           && textNotBlanked('model', 200)
-          && textNotBlanked('style', 100)
+          && styleRequired()
           && textNotBlanked('maskSize', 50)
           && methodNotBlanked()
           && fitFactorOkOnWrite();
@@ -584,7 +589,7 @@ service cloud.firestore {
       function respiratorRecordOk() {
         return textOk(request.resource.data.get('respiratorMfg', ''), 200)
           && textOk(request.resource.data.get('model', ''), 200)
-          && textOk(request.resource.data.get('style', ''), 100)
+          && styleRequired()
           && textOk(request.resource.data.get('maskSize', ''), 50)
           && (request.resource.data.get('fitTestMethod', '') == 'Qualitative'
             || request.resource.data.get('fitTestMethod', '') == 'Quantitative')

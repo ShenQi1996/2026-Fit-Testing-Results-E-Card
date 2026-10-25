@@ -11,7 +11,7 @@ import {
   isCustomOptionValue,
 } from '../../constants/fitTestOptions';
 
-const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
+const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editError }) => {
   const isCustomMfg = isCustomOptionValue(editData.respiratorMfg, RESPIRATOR_MFG_OPTIONS);
 
   return (
@@ -187,8 +187,14 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
             onChange={(e) => onChange('fitFactor', e.target.value)}
             placeholder="1 to 100000"
           />
+          {editData.fitTestMethod === 'Quantitative' && editError ? (
+            <span className="form-error-message">{editError}</span>
+          ) : null}
         </div>
       )}
+      {editError && editData.fitTestMethod !== 'Quantitative' ? (
+        <span className="form-error-message">{editError}</span>
+      ) : null}
       <div className="edit-form-row">
         <label>Fit Tester:</label>
         <input
