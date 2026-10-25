@@ -832,7 +832,7 @@ test('renamed or removed school names stay readable until the field changes', as
     ['users/super-1', approved('superadmin', 'sam@example.com')],
     ['users/tester-1', testerAt(oldName, { status: 'approved', name: 'Tess' })],
     ['users/admin-1', scopedAdmin([oldName])],
-    ['fitTests/old-1', { userId: 'tester-1', schoolsList: oldName }],
+    ['fitTests/old-1', { userId: 'tester-1', schoolsList: oldName, style: 'Filtering facepiece' }],
     ['schoolDirectory/names', { names: [HELENE] }],
   ]);
   const testerDb = testEnv.authenticatedContext('tester-1').firestore();
@@ -1052,6 +1052,18 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
     userId: 'tester-1',
     ...respiratorRecord({ fitFactor: 10 }),
   }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/empty-style'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    ...respiratorRecord({ style: '' }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/missing-style'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    ...respiratorRecord({ style: '   ' }),
+  }));
 });
 
 test('an update cannot blank model or style or put a fit factor on a qualitative test', async () => {
@@ -1074,7 +1086,32 @@ test('an update cannot blank model or style or put a fit factor on a qualitative
   await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitFactor: 100 }));
   await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/stamped'), { model: '1870' }));
   await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/stamped'), { respiratorMfg: 'Honeywell' }));
-  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/legacy'), { result: 'Fail' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { style: '' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { style: deleteField() }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/legacy'), { result: 'Fail' }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/legacy'), {
+    style: 'Filtering facepiece',
+  }));
+});
+
+test('a legacy Locked to Qualitative method saves as Qualitative', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/legacy-method', {
+      userId: 'tester-1',
+      ...respiratorRecord({ fitTestMethod: 'Locked to Qualitative' }),
+    }],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/legacy-method'), { clientName: 'Ada' }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/legacy-method'), {
+    fitTestMethod: 'Qualitative',
+    fitFactor: deleteField(),
+  }));
+  const saved = await getDoc(doc(testerDb, 'fitTests/legacy-method'));
+  expect(saved.data().fitTestMethod).toBe('Qualitative');
+  expect(saved.data().fitFactor).toBeUndefined();
 });
 
 test('a new fit test stamps the creator role and school, and those stamps stay put', async () => {
@@ -1442,13 +1479,130 @@ test('lookup and verification copies match the fit test and stay inside the admi
     ...lookup,
     revokedAt: Timestamp.now(),
   }));
-  await assertSucceeds(updateDoc(doc(adminDb, 'fitTestLookups/lookup-1'), {
+  await assertFails(updateDoc(doc(adminDb, 'fitTestLookups/lookup-1'), {
+    revokedAt: Timestamp.now(),
+  }));
+  await assertFails(updateDoc(doc(adminDb, `fitTestVerifications/${token}`), {
     revokedAt: Timestamp.now(),
   }));
   await assertFails(updateDoc(doc(adminDb, 'fitTestLookups/lookup-1'), {
-    revokedAt: deleteField(),
+    ...lookup,
+    revokedAt: Timestamp.now(),
   }));
   await assertFails(updateDoc(doc(adminDb, `fitTestVerifications/${token}`), {
     userId: 'admin-1',
+  }));
+});
+
+test('a hidden fit test cannot gain a card, and a revoke is allowed only after it is hidden', async () => {
+  const hiddenToken = 'b'.repeat(32);
+  const liveToken = 'c'.repeat(32);
+  const hiddenParent = {
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    lookupKey: 'hidden-lookup',
+    verificationToken: hiddenToken,
+    clientName: 'Ada',
+    result: 'Pass',
+    deletedAt: Timestamp.fromDate(new Date('2026-10-25T12:00:00Z')),
+    deletedBy: 'admin-1',
+    deleteReason: 'Duplicate entry',
+    ...respiratorRecord(),
+  };
+  const liveParent = {
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    lookupKey: 'live-lookup',
+    verificationToken: liveToken,
+    clientName: 'Ada',
+    result: 'Pass',
+    ...respiratorRecord(),
+  };
+  const hiddenLookup = {
+    recipientEmail: '',
+    clientName: 'Ada',
+    dob: '',
+    testLocation: '',
+    issueDate: '',
+    expirationDate: '',
+    fitTestType: '',
+    testingAgent: '',
+    fitFactor: '',
+    result: 'Pass',
+    fitTester: '',
+    verificationToken: hiddenToken,
+    userId: 'tester-1',
+    fitTestId: 'hidden-1',
+    lookupKey: 'hidden-lookup',
+    ...respiratorRecord(),
+  };
+  const hiddenVerification = {
+    clientName: 'Ada',
+    testLocation: '',
+    issueDate: '',
+    expirationDate: '',
+    fitTestType: '',
+    fitFactor: '',
+    result: 'Pass',
+    fitTester: '',
+    userId: 'tester-1',
+    fitTestId: 'hidden-1',
+    verificationToken: hiddenToken,
+    ...respiratorRecord(),
+  };
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/admin-2', scopedAdmin([SECOND], 'other-admin@example.com')],
+    ['fitTests/hidden-1', hiddenParent],
+    ['fitTests/live-1', liveParent],
+    ['fitTestLookups/live-lookup', {
+      ...hiddenLookup,
+      verificationToken: liveToken,
+      fitTestId: 'live-1',
+      lookupKey: 'live-lookup',
+    }],
+    [`fitTestVerifications/${liveToken}`, {
+      ...hiddenVerification,
+      fitTestId: 'live-1',
+      verificationToken: liveToken,
+    }],
+  ]);
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const outsideDb = testEnv.authenticatedContext('admin-2').firestore();
+
+  await assertFails(setDoc(doc(ownerDb, 'fitTestLookups/hidden-lookup'), hiddenLookup));
+  await assertFails(setDoc(doc(adminDb, 'fitTestLookups/hidden-lookup'), hiddenLookup));
+  await assertFails(setDoc(doc(ownerDb, `fitTestVerifications/${hiddenToken}`), hiddenVerification));
+  await assertFails(setDoc(doc(adminDb, `fitTestVerifications/${hiddenToken}`), hiddenVerification));
+
+  const hideAndRevoke = writeBatch(adminDb);
+  hideAndRevoke.update(doc(adminDb, 'fitTests/live-1'), {
+    deletedAt: serverTimestamp(),
+    deletedBy: 'admin-1',
+    deleteReason: 'Duplicate entry',
+    updatedAt: serverTimestamp(),
+  });
+  hideAndRevoke.set(doc(adminDb, 'fitTestDeletionLogs/live-1'), {
+    fitTestId: 'live-1',
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    deletedAt: serverTimestamp(),
+    deletedBy: 'admin-1',
+    deleteReason: 'Duplicate entry',
+  });
+  hideAndRevoke.update(doc(adminDb, 'fitTestLookups/live-lookup'), {
+    revokedAt: serverTimestamp(),
+  });
+  hideAndRevoke.update(doc(adminDb, `fitTestVerifications/${liveToken}`), {
+    revokedAt: serverTimestamp(),
+  });
+  await assertSucceeds(hideAndRevoke.commit());
+  await assertFails(updateDoc(doc(adminDb, 'fitTestLookups/live-lookup'), {
+    revokedAt: deleteField(),
+  }));
+  await assertFails(updateDoc(doc(outsideDb, 'fitTestLookups/live-lookup'), {
+    revokedAt: serverTimestamp(),
   }));
 });

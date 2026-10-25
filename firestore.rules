@@ -654,10 +654,15 @@ service cloud.firestore {
           );
       }
 
+      // Style is required on every create and update. A blank or missing style is rejected.
+      function styleRequired() {
+        return textOk(request.resource.data.get('style', ''), 100);
+      }
+
       function respiratorFieldsOkOnUpdate() {
         return textNotBlanked('respiratorMfg', 200)
           && textNotBlanked('model', 200)
-          && textNotBlanked('style', 100)
+          && styleRequired()
           && textNotBlanked('maskSize', 50)
           && methodNotBlanked()
           && fitFactorOkOnWrite();
@@ -667,7 +672,7 @@ service cloud.firestore {
       function respiratorRecordOk() {
         return textOk(request.resource.data.get('respiratorMfg', ''), 200)
           && textOk(request.resource.data.get('model', ''), 200)
-          && textOk(request.resource.data.get('style', ''), 100)
+          && styleRequired()
           && textOk(request.resource.data.get('maskSize', ''), 50)
           && (request.resource.data.get('fitTestMethod', '') == 'Qualitative'
             || request.resource.data.get('fitTestMethod', '') == 'Quantitative')
@@ -725,12 +730,25 @@ service cloud.firestore {
         || (isScopedAdmin() && school is string && school.size() > 0 && school in actorSchools());
     }
 
+    // Create reads the parent as stored. A fit test that is already hidden cannot gain a card.
+    function parentLive(fitTestId) {
+      return get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedAt', null) == null;
+    }
+
+    // Revoke reads the parent after this batch, so the hide and the revoke can commit together.
+    function parentHidden(fitTestId) {
+      return getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedAt', null) != null;
+    }
+
     function revokedAtNotCleared() {
       return resource.data.keys().hasAny(['revokedAt'])
         ? request.resource.data.get('revokedAt', null) == resource.data.get('revokedAt', null)
         : (
           request.resource.data.keys().hasAny(['revokedAt'])
-            ? (isSuperAdmin() || isScopedAdmin())
+            ? (
+              (isSuperAdmin() || isScopedAdmin())
+              && parentHidden(request.resource.data.get('fitTestId', ''))
+            )
             : true
         );
     }
@@ -745,7 +763,8 @@ service cloud.firestore {
         && (isSuperAdmin() || isScopedAdmin())
         && request.resource.data.get('userId', '') == resource.data.get('userId', '')
         && cardParentReady(fitTestId)
-        && canWriteParentId(fitTestId);
+        && canWriteParentId(fitTestId)
+        && parentHidden(fitTestId);
     }
 
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.
@@ -783,7 +802,8 @@ service cloud.firestore {
       allow list: if false;
       allow create: if isSignedIn() && isApproved() && !isFacultyRole()
         && !request.resource.data.keys().hasAny(['revokedAt'])
-        && lookupMatchesParent();
+        && lookupMatchesParent()
+        && parentLive(request.resource.data.fitTestId);
       allow update: if isSignedIn() && isApproved() && !isFacultyRole()
         && (
           canRevokeStoredCard()
@@ -828,7 +848,8 @@ service cloud.firestore {
       allow list: if false;
       allow create: if isSignedIn() && isApproved() && !isFacultyRole()
         && !request.resource.data.keys().hasAny(['revokedAt'])
-        && verificationMatchesParent();
+        && verificationMatchesParent()
+        && parentLive(request.resource.data.fitTestId);
       allow update: if isSignedIn() && isApproved() && !isFacultyRole()
         && (
           canRevokeStoredCard()

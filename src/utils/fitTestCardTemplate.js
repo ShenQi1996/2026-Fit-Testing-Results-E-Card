@@ -1,4 +1,5 @@
 // Fit Testing Results E-Card Template
+import { canonicalFitTestMethod } from '../constants/fitTestOptions';
 import { calculateExpirationDate } from './dateUtils';
 import { getVerifyUrl } from './verificationToken';
 
@@ -24,6 +25,7 @@ export const generateFitTestCard = (formData) => {
   } = formData;
 
   const displayExpirationDate = expirationDate || calculateExpirationDate(issueDate);
+  const displayMethod = canonicalFitTestMethod(fitTestMethod) || '';
 
   // Follow-up booking links by testing location. The QR itself verifies the card.
   const LOCATION_BOOKING_URLS = {
@@ -177,11 +179,13 @@ export const generateFitTestCard = (formData) => {
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${style}</td>
                                 </tr>
                                 ` : ''}
+                                ${displayMethod ? `
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Test Method:</td>
-                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${fitTestMethod || '[Method]'}</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${displayMethod}</td>
                                 </tr>
-                                ${fitTestMethod === 'Quantitative' && fitFactor != null && fitFactor !== '' ? `
+                                ` : ''}
+                                ${displayMethod === 'Quantitative' && fitFactor != null && fitFactor !== '' ? `
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Factor:</td>
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${fitFactor}</td>

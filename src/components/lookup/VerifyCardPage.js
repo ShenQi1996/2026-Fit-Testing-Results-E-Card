@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { canonicalFitTestMethod } from '../../constants/fitTestOptions';
 import { lookupFitTestForVerification } from '../../services/firebaseDb';
 import {
   isValidVerificationToken,
@@ -188,7 +189,7 @@ const VerifyCardPage = ({ initialToken = '' }) => {
                 <div className="verify-details-row" key={key}>
                   <dt>{label}</dt>
                   <dd className={key === 'result' ? `verify-result verify-result--${(card.result || '').toLowerCase()}` : undefined}>
-                    {card[key] || '—'}
+                    {(key === 'fitTestMethod' ? canonicalFitTestMethod(card[key]) : card[key]) || '—'}
                   </dd>
                 </div>
               ))}

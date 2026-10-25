@@ -13,7 +13,7 @@ import { sendFitTestCard } from '../services/emailService';
 import { calculateExpirationDate } from '../utils/dateUtils';
 import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../utils/csvUtils';
-import { TEST_LOCATION_OPTIONS } from '../constants/fitTestOptions';
+import { TEST_LOCATION_OPTIONS, canonicalFitTestMethod } from '../constants/fitTestOptions';
 import {
   FILTER_ALL,
   getMonthKeyFromTest,
@@ -32,6 +32,7 @@ export const useFitTestResults = () => {
   const [resending, setResending] = useState(null);
   const [editing, setEditing] = useState(null);
   const [editData, setEditData] = useState({});
+  const [editError, setEditError] = useState('');
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [expandedCards, setExpandedCards] = useState(new Set());
@@ -317,7 +318,7 @@ export const useFitTestResults = () => {
       maskSize: test.maskSize || '',
       model: test.model || '',
       style: test.style || '',
-      fitTestMethod: test.fitTestMethod || '',
+      fitTestMethod: canonicalFitTestMethod(test.fitTestMethod) || '',
       fitFactor: test.fitFactor ?? '',
       result: test.result || '',
       fitTester: test.fitTester || '',
@@ -327,9 +328,11 @@ export const useFitTestResults = () => {
   const handleEditCancel = () => {
     setEditing(null);
     setEditData({});
+    setEditError('');
   };
 
   const handleEditChange = (field, value) => {
+    setEditError('');
     setEditData((prev) => ({
       ...prev,
       [field]: value,
@@ -339,28 +342,29 @@ export const useFitTestResults = () => {
   const handleEditSave = async (testId) => {
     const nextLocation = (editData.testLocation || '').trim();
     if (!nextLocation || nextLocation === 'Other') {
-      flashMessage(setError, 'Please select or enter a test location before saving.', 4000);
+      setEditError('Please select or enter a test location before saving.');
       return;
     }
     const original = fitTests.find((test) => test.id === testId);
     const nextModel = (editData.model || '').trim();
     const nextStyle = (editData.style || '').trim();
-    if ((editData.model && !nextModel) || (editData.style && !nextStyle)) {
-      flashMessage(setError, 'Model and style cannot be blank.', 4000);
+    if (!nextStyle) {
+      setEditError('Please select the respirator style.');
+      return;
+    }
+    if (editData.model && !nextModel) {
+      setEditError('Model cannot be blank.');
       return;
     }
     if ((original?.model || '').trim() && !nextModel) {
-      flashMessage(setError, 'Model cannot be cleared after it is saved.', 4000);
+      setEditError('Model cannot be cleared after it is saved.');
       return;
     }
-    if ((original?.style || '').trim() && !nextStyle) {
-      flashMessage(setError, 'Style cannot be cleared after it is saved.', 4000);
-      return;
-    }
-    if (editData.fitTestMethod === 'Quantitative') {
+    const method = canonicalFitTestMethod(editData.fitTestMethod) || '';
+    if (method === 'Quantitative') {
       const fitFactor = Number(editData.fitFactor);
       if (!Number.isFinite(fitFactor) || fitFactor < 1 || fitFactor > 100000) {
-        flashMessage(setError, 'Enter a fit factor from 1 to 100000.', 4000);
+        setEditError('Enter a fit factor from 1 to 100000.');
         return;
       }
     }
@@ -370,12 +374,12 @@ export const useFitTestResults = () => {
       setSuccessMessage('');
       setError('');
 
-      const updates = { ...editData, model: nextModel, style: nextStyle };
+      const updates = { ...editData, model: nextModel, style: nextStyle, fitTestMethod: method };
       updates.testLocation = nextLocation;
       delete updates.fitFactor;
-      if (editData.fitTestMethod === 'Quantitative') {
+      if (method === 'Quantitative') {
         updates.fitFactor = Number(editData.fitFactor);
-      } else if (editData.fitTestMethod === 'Qualitative') {
+      } else if (method === 'Qualitative') {
         updates.fitFactor = deleteField();
       } else {
         delete updates.fitTestMethod;
@@ -402,6 +406,7 @@ export const useFitTestResults = () => {
       setSuccessMessage('Record updated successfully!');
       setEditing(null);
       setEditData({});
+      setEditError('');
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
       console.error('Error updating fit test:', err);
@@ -426,6 +431,7 @@ export const useFitTestResults = () => {
     resending,
     editing,
     editData,
+    editError,
     saving,
     successMessage,
     pdfLoading,
