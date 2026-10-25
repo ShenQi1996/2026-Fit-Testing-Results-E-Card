@@ -140,3 +140,21 @@ test('faculty load results by school instead of user id', async () => {
   expect(getUserFitTests).not.toHaveBeenCalled();
   expect(apiRef.current.fitTests.map((test) => test.id)).toEqual(['ft-1']);
 });
+
+test('faculty outside the access window do not load results', async () => {
+  useAuth.mockReturnValue({
+    user: {
+      uid: 'faculty-1',
+      role: 'faculty',
+      school: 'Helene College of Nursing',
+      endDate: '2020-01-01T00:00:00.000Z',
+    },
+  });
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  expect(getFacultyFitTests).not.toHaveBeenCalled();
+  expect(getUserFitTests).not.toHaveBeenCalled();
+  expect(apiRef.current.fitTests).toEqual([]);
+  expect(apiRef.current.loading).toBe(false);
+});

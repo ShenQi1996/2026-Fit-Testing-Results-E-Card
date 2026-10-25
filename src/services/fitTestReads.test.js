@@ -196,6 +196,21 @@ test('an admin stamp must be one of that admin\'s schools', async () => {
   expect(addDoc).not.toHaveBeenCalled();
 });
 
+test('faculty outside the access window do not query results', async () => {
+  getDocs.mockClear();
+  await expect(getFacultyFitTests({
+    role: 'faculty',
+    school: 'Helene College of Nursing',
+    endDate: '2020-01-01T00:00:00.000Z',
+  })).resolves.toEqual([]);
+  await expect(getFacultyFitTests({
+    role: 'faculty',
+    school: 'Helene College of Nursing',
+    startDate: '2099-01-01T00:00:00.000Z',
+  })).resolves.toEqual([]);
+  expect(getDocs).not.toHaveBeenCalled();
+});
+
 test('faculty sidebar count uses the same limit and retention filter as the list', async () => {
   getDocs.mockResolvedValue({
     docs: [

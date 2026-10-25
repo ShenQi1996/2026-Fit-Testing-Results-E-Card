@@ -23,12 +23,13 @@ const parseAccessInstant = (value) => {
 };
 
 /**
- * Admin access window. A missing start or end leaves that side open.
- * Super admins and non-admins are always open. A string role has no dates.
+ * Admin and faculty access window. A missing start or end leaves that side open.
+ * Super admins and other roles are always open. A string role has no dates.
  */
 export const isAccessWindowOpen = (user, now = new Date()) => {
   if (!user || typeof user !== 'object') return true;
-  if (user.role === USER_ROLE_SUPERADMIN || user.role !== USER_ROLE_ADMIN) return true;
+  if (user.role === USER_ROLE_SUPERADMIN) return true;
+  if (user.role !== USER_ROLE_ADMIN && user.role !== USER_ROLE_FACULTY) return true;
   const start = parseAccessInstant(user.startDate);
   const end = parseAccessInstant(user.endDate);
   if (start && now < start) return false;

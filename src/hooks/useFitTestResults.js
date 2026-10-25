@@ -7,7 +7,7 @@ import {
   updateFitTest,
   ensureFitTestVerification,
 } from '../services/firebaseDb';
-import { isFaculty } from '../utils/roles';
+import { isAccessWindowOpen, isFaculty } from '../utils/roles';
 import { sendFitTestCard } from '../services/emailService';
 import { calculateExpirationDate } from '../utils/dateUtils';
 import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
@@ -46,6 +46,13 @@ export const useFitTestResults = () => {
 
   const loadFitTests = useCallback(async () => {
     if (!userId) return;
+    if (faculty && !isAccessWindowOpen(user)) {
+      setFitTests([]);
+      setLoading(false);
+      setError('');
+      setIndexError(null);
+      return;
+    }
     try {
       setLoading(true);
       setError('');

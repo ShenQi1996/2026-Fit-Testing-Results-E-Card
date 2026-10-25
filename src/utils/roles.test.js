@@ -4,6 +4,7 @@ import {
   accessEndLocksAccount,
   accountStatusLabel,
   canModifyManagedUser,
+  isAccessWindowOpen,
   isAdminOrAbove,
   isFaculty,
   isSuperAdmin,
@@ -55,6 +56,15 @@ describe('role helpers', () => {
       startDate: '2026-11-01T00:00:00',
       endDate: '2026-10-01T00:00:00',
     }, now)).toBe(true);
+    expect(isAccessWindowOpen({ role: 'faculty' }, now)).toBe(true);
+    expect(isAccessWindowOpen({
+      role: 'faculty',
+      startDate: '2026-10-01T00:00:00',
+      endDate: '2026-10-31T23:59:59',
+    }, now)).toBe(true);
+    expect(isAccessWindowOpen({ role: 'faculty', endDate: '2026-10-01T00:00:00' }, now)).toBe(false);
+    expect(isAccessWindowOpen({ role: 'faculty', startDate: '2026-11-01T00:00:00' }, now)).toBe(false);
+    expect(isFaculty({ role: 'faculty', endDate: '2026-10-01T00:00:00' })).toBe(true);
     expect(accessDateInputValue('2026-06-01T12:00:00')).toMatch(/^2026-06-0[12]$/);
     expect(accessWindowOrderError('2026-10-10', '2026-10-01'))
       .toBe('Access end date cannot be before the start date.');

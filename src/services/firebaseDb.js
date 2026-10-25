@@ -48,6 +48,7 @@ import {
   accessDateInputValue,
   accessWindowOrderError,
   canModifyManagedUser,
+  isAccessWindowOpen,
   isAdminOrAbove,
   isSuperAdmin,
 } from '../utils/roles';
@@ -580,9 +581,18 @@ const facultySchoolConstraint = (chunk) => (
  * @returns {Promise<Array>}
  */
 export const getFacultyFitTests = async (schools, options = {}) => {
+  const now = options.now instanceof Date ? options.now : new Date();
+  if (
+    schools
+    && typeof schools === 'object'
+    && !Array.isArray(schools)
+    && schools.role === USER_ROLE_FACULTY
+    && !isAccessWindowOpen(schools, now)
+  ) {
+    return [];
+  }
   const scopedSchools = facultySchoolNames(schools);
   if (scopedSchools.length === 0) return [];
-  const now = options.now instanceof Date ? options.now : new Date();
   const pageLimit = Number.isInteger(options.limit) && options.limit > 0
     ? options.limit
     : FACULTY_RESULTS_LIMIT;
@@ -1231,7 +1241,7 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
           && nextSchools.every((school, index) => school === currentSchools[index]);
         if (!sameSchools) payload.schools = nextSchools;
       }
-      if (nextRole === USER_ROLE_ADMIN) {
+      if (nextRole === USER_ROLE_ADMIN || nextRole === USER_ROLE_FACULTY) {
         const currentStart = accessDateInputValue(current.startDate);
         const currentEnd = accessDateInputValue(current.endDate);
         const nextStart = updates.startDate !== undefined ? String(updates.startDate || '') : currentStart;

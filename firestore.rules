@@ -63,10 +63,16 @@ service cloud.firestore {
         : false;
     }
 
-    // Faculty read fit tests for their school. They are not admins.
-    function isFaculty() {
+    // Faculty role, whether or not the access window is open. Writes stay denied.
+    function isFacultyRole() {
       return isSignedIn() && isApproved() &&
         currentUserDoc().data.get('role', null) == 'faculty';
+    }
+
+    // Faculty read fit tests for their school only inside startDate/endDate.
+    // A missing start or end leaves that side open, same as an admin.
+    function isFaculty() {
+      return isFacultyRole() && adminWindowOpen(currentUserDoc().data);
     }
 
     // Missing role is treated as tester when an admin edits someone else's doc.
@@ -478,34 +484,35 @@ service cloud.firestore {
     }
 
     match /fitTests/{fitTestId} {
-      // Faculty read only when creatorSchool equals their profile school.
-      // Their own userId does not grant access, so a later role change
-      // cannot reveal tests stamped for another school. Testers still read
-      // their own userId. Admins still read every test.
+      // Faculty read only when creatorSchool equals their profile school
+      // and their startDate/endDate window is open. A missing start or end
+      // leaves that side open. Their own userId does not grant access, so a
+      // later role change cannot reveal tests stamped for another school.
+      // Testers still read their own userId. Admins still read every test.
       allow read: if
         isSignedIn() &&
         isApproved() &&
         (
           isAdmin()
           || facultyCanReadFitTest()
-          || (!isFaculty() && request.auth.uid == resource.data.userId)
+          || (!isFacultyRole() && request.auth.uid == resource.data.userId)
         );
       allow update: if
         isSignedIn() &&
         isApproved() &&
-        !isFaculty() &&
+        !isFacultyRole() &&
         (request.auth.uid == resource.data.userId || isAdmin())
         && fitTestSchoolOkOnUpdate()
         && creatorStampUnchanged();
       allow delete: if
         isSignedIn() &&
         isApproved() &&
-        !isFaculty() &&
+        !isFacultyRole() &&
         (request.auth.uid == resource.data.userId || isAdmin());
       allow create: if
         isSignedIn() &&
         isApproved() &&
-        !isFaculty() &&
+        !isFacultyRole() &&
         request.auth.uid == request.resource.data.userId
         && fitTestSchoolOkOnCreate()
         && creatorStampMatchesProfile();
@@ -516,11 +523,11 @@ service cloud.firestore {
     match /fitTestLookups/{lookupKey} {
       allow get: if true;
       allow list: if false;
-      allow create, update: if isSignedIn() && isApproved() && !isFaculty();
+      allow create, update: if isSignedIn() && isApproved() && !isFacultyRole();
       allow delete: if
         isSignedIn() &&
         isApproved() &&
-        !isFaculty() &&
+        !isFacultyRole() &&
         (isAdmin() || request.auth.uid == resource.data.userId);
     }
 
@@ -529,11 +536,11 @@ service cloud.firestore {
     match /fitTestVerifications/{token} {
       allow get: if true;
       allow list: if false;
-      allow create, update: if isSignedIn() && isApproved() && !isFaculty();
+      allow create, update: if isSignedIn() && isApproved() && !isFacultyRole();
       allow delete: if
         isSignedIn() &&
         isApproved() &&
-        !isFaculty() &&
+        !isFacultyRole() &&
         (isAdmin() || request.auth.uid == resource.data.userId);
     }
 
@@ -541,7 +548,7 @@ service cloud.firestore {
     match /emailSendLog/{userId} {
       allow get: if isOwner(userId) && isApproved();
       allow list: if false;
-      allow create, update: if isOwner(userId) && isApproved() && !isFaculty();
+      allow create, update: if isOwner(userId) && isApproved() && !isFacultyRole();
       allow delete: if false;
     }
   }

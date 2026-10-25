@@ -1120,3 +1120,54 @@ test('faculty have one school, and a schools list does not widen what they can r
     limit(100),
   )));
 });
+
+test('faculty outside the access window cannot read results', async () => {
+  const past = Timestamp.fromDate(new Date('2020-01-01T00:00:00Z'));
+  const future = Timestamp.fromDate(new Date('2099-01-01T00:00:00Z'));
+  await seed([
+    ['users/faculty-expired', approved('faculty', 'expired@example.com', {
+      school: HELENE,
+      endDate: past,
+    })],
+    ['users/faculty-future', approved('faculty', 'future@example.com', {
+      school: HELENE,
+      startDate: future,
+    })],
+    ['users/faculty-open', approved('faculty', 'open@example.com', {
+      school: HELENE,
+      startDate: past,
+      endDate: future,
+    })],
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/stamped', {
+      userId: 'tester-1',
+      creatorRole: 'tester',
+      creatorSchool: HELENE,
+    }],
+    ['fitTests/owned-by-expired', {
+      userId: 'faculty-expired',
+      creatorRole: 'tester',
+      creatorSchool: HELENE,
+    }],
+  ]);
+  const expiredDb = testEnv.authenticatedContext('faculty-expired').firestore();
+  const futureDb = testEnv.authenticatedContext('faculty-future').firestore();
+  const openDb = testEnv.authenticatedContext('faculty-open').firestore();
+
+  await assertFails(getDoc(doc(expiredDb, 'fitTests/stamped')));
+  await assertFails(getDoc(doc(expiredDb, 'fitTests/owned-by-expired')));
+  await assertFails(getDocs(query(
+    collection(expiredDb, 'fitTests'),
+    where('creatorSchool', '==', HELENE),
+    orderBy('createdAt', 'desc'),
+    limit(100),
+  )));
+  await assertFails(getDoc(doc(futureDb, 'fitTests/stamped')));
+  await assertFails(setDoc(doc(expiredDb, 'fitTests/new'), {
+    userId: 'faculty-expired',
+    schoolsList: HELENE,
+    creatorRole: 'faculty',
+    creatorSchool: HELENE,
+  }));
+  await assertSucceeds(getDoc(doc(openDb, 'fitTests/stamped')));
+});

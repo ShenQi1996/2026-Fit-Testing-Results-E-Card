@@ -404,7 +404,7 @@ const UsersManagement = () => {
         } else {
           updates.school = draft.school || '';
         }
-        if (tagRole === USER_ROLE_ADMIN) {
+        if (tagRole === USER_ROLE_ADMIN || tagRole === USER_ROLE_FACULTY) {
           const orderError = accessWindowOrderError(draft.startDate, draft.endDate);
           if (orderError) {
             setError(orderError);
@@ -1122,7 +1122,7 @@ const UsersManagement = () => {
                         )}
                       </label>
                     )}
-                    {superAdmin && !isSelf && currentRole === USER_ROLE_ADMIN && (
+                    {superAdmin && !isSelf && (currentRole === USER_ROLE_ADMIN || currentRole === USER_ROLE_FACULTY) && (
                       <>
                         <label>
                           Access start

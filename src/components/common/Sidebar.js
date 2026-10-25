@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { countFacultyFitTests, countFitTestsForUser } from '../../services/firebaseDb';
 import { subscribeFitTestActivity } from '../../utils/fitTestActivity';
-import { isAdminOrAbove, isFaculty } from '../../utils/roles';
+import { isAccessWindowOpen, isAdminOrAbove, isFaculty } from '../../utils/roles';
 import './Sidebar.css';
 
 export const SIDEBAR_COUNT_CACHE_MS = 30 * 1000;
@@ -17,6 +17,12 @@ const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
 
   const loadTestCount = useCallback(async (force = false) => {
     if (!user?.uid) {
+      setTestCount(null);
+      countCache.current = { uid: '', at: 0 };
+      return;
+    }
+
+    if (faculty && !isAccessWindowOpen(user)) {
       setTestCount(null);
       countCache.current = { uid: '', at: 0 };
       return;

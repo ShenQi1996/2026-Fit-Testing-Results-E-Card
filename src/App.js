@@ -37,9 +37,13 @@ const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }
       />
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>}
       <div className="main-content">
-        {user?.role === 'admin' && !isAccessWindowOpen(user) && (
+        {(user?.role === 'admin' || user?.role === 'faculty') && !isAccessWindowOpen(user) && (
           <div className="container">
-            <p role="status">Your admin access has expired or has not started.</p>
+            <p role="status">
+              {user.role === 'faculty'
+                ? 'Your faculty access has expired or has not started.'
+                : 'Your admin access has expired or has not started.'}
+            </p>
           </div>
         )}
         {page === 'editAccount' ? (
@@ -49,7 +53,7 @@ const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }
               onManageSchools={() => onNavigate('users')}
             />
           </div>
-        ) : page === 'results' ? (
+        ) : page === 'results' && faculty && !isAccessWindowOpen(user) ? null : page === 'results' ? (
           <FitTestResults />
         ) : page === 'users' && isAdminOrAbove(user) ? (
           <div className="container">
