@@ -1105,6 +1105,92 @@ test('result and issue date cannot change, and edit history matches the diff', a
   await assertFails(deleteDoc(doc(adminDb, 'fitTests/own-1/editHistory/entry-1')));
 });
 
+const WIDE_EDIT_FIELDS = [
+  ['clientName', 'Ada', 'Bea'],
+  ['dob', '01/01/1990', '02/02/1991'],
+  ['recipientEmail', 'ada@example.com', 'bea@example.com'],
+  ['testLocation', 'Lab', 'Clinic'],
+  ['fitTestType', 'Initial', 'Annual'],
+  ['respiratorMfg', '3M', 'Honeywell'],
+  ['model', '1860', '1870'],
+  ['maskSize', 'Regular', 'Small'],
+  ['testingAgent', 'Bitrex', 'Saccharin'],
+  ['fitTester', 'Sam', 'Jo'],
+];
+
+const wideFitTest = () => ({
+  userId: 'tester-1',
+  schoolsList: HELENE,
+  creatorRole: 'tester',
+  creatorSchool: HELENE,
+  result: 'Pass',
+  issueDate: '01/15/2026',
+  expirationDate: '01/15/2027',
+  clientName: 'Ada',
+  dob: '01/01/1990',
+  recipientEmail: 'ada@example.com',
+  testLocation: 'Lab',
+  fitTestType: 'Initial',
+  respiratorMfg: '3M',
+  model: '1860',
+  style: 'Filtering facepiece',
+  maskSize: 'Regular',
+  fitTestMethod: 'Qualitative',
+  testingAgent: 'Bitrex',
+  fitTester: 'Sam',
+  failureReason: '',
+  correctiveActionNote: '',
+  lookupKey: 'lookup-wide',
+  verificationToken: 'token-wide',
+  comments: 'Kept for the expression budget',
+  protocol: 'OSHA 1910.134',
+  employer: 'Helene Clinic',
+  department: 'Clinical',
+  jobTitle: 'Student',
+  approvalNumber: 'TC-84A',
+  exerciseSet: 'Standard',
+  facialHairInterfering: false,
+  respiratorDonnedCorrectly: true,
+  employeeSealCheckInstructionProvided: true,
+  qualitativeAgent: 'Bitrex',
+  notes: 'A full record, so the history rule is not only proven on a tiny document.',
+});
+
+const wideEdit = (count) => {
+  const changes = {};
+  const extra = {};
+  WIDE_EDIT_FIELDS.slice(0, count).forEach(([field, oldValue, newValue]) => {
+    changes[field] = { oldValue, newValue };
+    extra[field] = newValue;
+  });
+  return { changes, extra };
+};
+
+test('owner, in-scope admin, and super admin can edit 1, 3, 6, and 10 fields', async () => {
+  const seeds = [
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin()],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+  ];
+  ['owner', 'admin', 'super'].forEach((who) => {
+    [1, 3, 6, 10].forEach((count) => {
+      seeds.push([`fitTests/${who}-${count}`, wideFitTest()]);
+    });
+  });
+  await seed(seeds);
+  const actors = [
+    ['owner', 'tester-1', testEnv.authenticatedContext('tester-1').firestore()],
+    ['admin', 'admin-1', testEnv.authenticatedContext('admin-1').firestore()],
+    ['super', 'super-1', testEnv.authenticatedContext('super-1').firestore()],
+  ];
+  for (const [who, actorId, db] of actors) {
+    for (const count of [1, 3, 6, 10]) {
+      const { changes, extra } = wideEdit(count);
+      await assertSucceeds(commitEdit(db, `${who}-${count}`, actorId, `edit-${count}`, changes, extra));
+    }
+  }
+});
+
 test('fit test records are soft-deleted with a reason and cannot be hard-deleted', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
@@ -1310,6 +1396,11 @@ test('an update cannot blank model or style or put a fit factor on a qualitative
     { respiratorMfg: { oldValue: '3M', newValue: 'Honeywell' } },
     { respiratorMfg: 'Honeywell' },
   ));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/legacy'), {
+    verificationToken: 'tok-legacy',
+    lookupKey: 'lookup-legacy',
+    updatedAt: serverTimestamp(),
+  }));
   await assertFails(commitEdit(
     testerDb,
     'legacy',
