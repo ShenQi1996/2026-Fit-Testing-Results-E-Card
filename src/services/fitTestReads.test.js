@@ -6,6 +6,7 @@ import {
   getDocs,
   limit,
   orderBy,
+  setDoc,
   updateDoc,
   where,
   writeBatch,
@@ -14,6 +15,7 @@ import {
   countFacultyFitTests,
   countFitTestsForUser,
   deleteFitTest,
+  ensureFitTestVerification,
   FACULTY_RESULTS_LIMIT,
   getFacultyFitTests,
   getFitTestCountsByUser,
@@ -303,6 +305,7 @@ test('saveFitTest stamps the creator profile and ignores a client stamp', async 
   expect(saved.creatorRole).toBe('tester');
   expect(saved.creatorSchool).toBe('Helene College of Nursing');
   expect(saved.schoolsList).toBe('Other School');
+  expect(saved.deletedAt).toBeNull();
 
   writeBatch.mockClear();
   addDoc.mockClear();
@@ -328,6 +331,7 @@ test('faculty results read only the profile school, newest first, with a limit',
   getDocs.mockResolvedValue({ docs: [] });
   await getFacultyFitTests('Helene College of Nursing');
   expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'Helene College of Nursing');
+  expect(where).toHaveBeenCalledWith('deletedAt', '==', null);
   expect(orderBy).toHaveBeenCalledWith('createdAt', 'desc');
   expect(limit).toHaveBeenCalledWith(FACULTY_RESULTS_LIMIT);
   expect(getDocs).toHaveBeenCalledTimes(1);
@@ -420,6 +424,7 @@ test('faculty sidebar count uses the same limit and retention filter as the list
     schools: ['Example Second School'],
   }, { now: NOW })).resolves.toBe(1);
   expect(where).toHaveBeenCalledWith('creatorSchool', '==', 'Helene College of Nursing');
+  expect(where).toHaveBeenCalledWith('deletedAt', '==', null);
   expect(where).not.toHaveBeenCalledWith('creatorSchool', 'in', expect.anything());
   expect(orderBy).toHaveBeenCalledWith('createdAt', 'desc');
   expect(limit).toHaveBeenCalledWith(FACULTY_RESULTS_LIMIT);
@@ -619,4 +624,36 @@ test('an admin outside the record school does not clear legacy inline notes', as
   expect(payload.testerMedicalRestrictionsReceived).toBeUndefined();
   expect(payload.testerMedicalRestrictionsNote).toBeUndefined();
   expect(payload.model).toBe('1870');
+});
+
+test('token refresh on a style-less record writes the lookup key and keeps the owner', async () => {
+  const stored = {
+    userId: 'tester-1',
+    schoolsList: 'Helene College of Nursing',
+    clientName: 'Legacy Plain',
+    dob: '03/03/1981',
+    recipientEmail: 'legacy-plain@example.com',
+    result: 'Pass',
+    respiratorMfg: '3M',
+    model: '1860',
+    maskSize: 'Regular',
+    fitTestMethod: 'Qualitative',
+  };
+  getDoc.mockResolvedValue({ exists: () => false, data: () => null });
+  setDoc.mockClear();
+
+  const next = await ensureFitTestVerification({ id: 'legacy-plain', ...stored }, 'admin-1');
+
+  expect(next.verificationToken).toMatch(/^[a-f0-9]{32}$/);
+  expect(updateDoc).toHaveBeenCalledTimes(1);
+  const patch = updateDoc.mock.calls[0][1];
+  expect(patch.verificationToken).toBe(next.verificationToken);
+  expect(patch.lookupKey).toEqual(expect.any(String));
+  expect(patch.lookupKey.length).toBeGreaterThan(0);
+  expect(patch).not.toHaveProperty('style');
+  const writes = setDoc.mock.calls.map((call) => call[1]);
+  expect(writes).toEqual(expect.arrayContaining([
+    expect.objectContaining({ userId: 'tester-1', fitTestId: 'legacy-plain' }),
+  ]));
+  expect(writes.every((write) => write.userId === 'tester-1')).toBe(true);
 });

@@ -183,15 +183,17 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editErro
           <label>Fit Factor:</label>
           <input
             type="number"
-            className="edit-input"
+            className={`edit-input${editError ? ' form-input-error' : ''}`}
             min="1"
             max="100000"
             value={editData.fitFactor ?? ''}
             onChange={(e) => onChange('fitFactor', e.target.value)}
             placeholder="1 to 100000"
+            aria-invalid={editError ? 'true' : 'false'}
+            aria-describedby={editError ? 'edit-fit-factor-error' : undefined}
           />
-          {editData.fitTestMethod === 'Quantitative' && editError ? (
-            <span className="form-error-message">{editError}</span>
+          {editError ? (
+            <span id="edit-fit-factor-error" className="form-error-message">{editError}</span>
           ) : null}
         </div>
       )}

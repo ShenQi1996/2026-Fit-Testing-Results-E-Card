@@ -480,6 +480,7 @@ export const saveFitTest = async (userId, fitTestData) => {
       userId,
       ...recordToSave,
       lookupKey: lookupKey || null,
+      deletedAt: null,
       createdAt,
       updatedAt: createdAt,
       ...(retentionDate ? { retentionDate } : {}),
@@ -668,6 +669,7 @@ export const getFacultyFitTests = async (schools, options = {}) => {
       snapshots.push(await getDocs(query(
         collection(db, FIT_TESTS_COLLECTION),
         facultySchoolConstraint(chunk),
+        where('deletedAt', '==', null),
         orderBy('createdAt', 'desc'),
         limit(pageLimit),
       )));
@@ -686,7 +688,7 @@ export const getFacultyFitTests = async (schools, options = {}) => {
     console.error('Error fetching faculty fit tests:', error);
     if (isIndexError(error)) {
       console.error(
-        'Firestore fitTests query needs a composite index on creatorSchool and createdAt. That index is deployed separately from this change.',
+        'Firestore fitTests query needs a composite index on creatorSchool, deletedAt, and createdAt. That index is deployed separately from this change.',
         error,
       );
       throw indexRequiredError(error);
@@ -881,12 +883,16 @@ export const ensureFitTestVerification = async (record, userId) => {
   if (!record) return record;
 
   const verificationToken = resolveVerificationToken(record);
-  const nextRecord = { ...record, verificationToken };
+  const lookupKey = await resolveLookupKey(record);
+  const nextRecord = { ...record, verificationToken, ...(lookupKey ? { lookupKey } : {}) };
+  const parentPatch = {};
+  if (record.verificationToken !== verificationToken) parentPatch.verificationToken = verificationToken;
+  if (lookupKey && record.lookupKey !== lookupKey) parentPatch.lookupKey = lookupKey;
 
-  if (record.id && record.verificationToken !== verificationToken) {
+  if (record.id && Object.keys(parentPatch).length > 0) {
     try {
       await updateDoc(doc(db, FIT_TESTS_COLLECTION, record.id), {
-        verificationToken,
+        ...parentPatch,
         updatedAt: Timestamp.now(),
       });
     } catch (error) {
@@ -895,15 +901,17 @@ export const ensureFitTestVerification = async (record, userId) => {
   }
 
   if (record.id) {
+    // The card belongs to the fit test owner. An admin refreshing a token is
+    // the signed-in writer, not a new owner.
+    const ownerId = record.userId || userId;
     await upsertFitTestVerification(
       verificationToken,
       nextRecord,
       record.id,
-      userId || record.userId
+      ownerId
     );
-    const lookupKey = await resolveLookupKey(nextRecord);
     if (lookupKey) {
-      await upsertFitTestLookup(lookupKey, nextRecord, record.id, userId || record.userId);
+      await upsertFitTestLookup(lookupKey, nextRecord, record.id, ownerId);
     }
   }
 

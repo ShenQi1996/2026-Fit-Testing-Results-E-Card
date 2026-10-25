@@ -9,6 +9,15 @@
       ]
     },
     {
+      "collectionGroup": "fitTests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "creatorSchool", "order": "ASCENDING" },
+        { "fieldPath": "deletedAt", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "users",
       "queryScope": "COLLECTION",
       "fields": [
