@@ -25,7 +25,7 @@ jest.mock('../../context/AuthContext', () => ({
 }));
 
 jest.mock('../../services/firebaseDb', () => ({
-  USER_ROLES: ['tester', 'admin', 'superadmin'],
+  USER_ROLES: ['tester', 'faculty', 'admin', 'superadmin'],
   USER_STATUSES: ['pending', 'approved', 'rejected'],
   getAllUsers: jest.fn(),
   getFitTestCountsByUser: jest.fn(),
@@ -248,7 +248,7 @@ test('role choices are tester or admin, and an existing superadmin stays read-on
     .not.toContain('superadmin');
 
   const filterOptions = optionValues(selectsByLabel(renderer, 'Role filter')[0]);
-  expect(filterOptions).toEqual(['all', 'tester', 'admin']);
+  expect(filterOptions).toEqual(['all', 'tester', 'faculty', 'admin']);
 
   const superCard = cardFor(renderer, 'super-1');
   expect(superCard.findAllByType('select').map((select) => select.props['aria-label']))
@@ -260,8 +260,8 @@ test('role choices are tester or admin, and an existing superadmin stays read-on
       (node) => node.type === 'select' && node.props['aria-label'] === 'Role',
     )[0]));
   expect(editableRoles).toEqual([
-    ['tester', 'admin'],
-    ['tester', 'admin'],
+    ['tester', 'faculty', 'admin'],
+    ['tester', 'faculty', 'admin'],
   ]);
 
   const addUser = renderer.root.findAllByType('button').find((button) => button.children.includes('Add User'));
@@ -269,7 +269,7 @@ test('role choices are tester or admin, and an existing superadmin stays read-on
     addUser.props.onClick();
   });
   const createForm = renderer.root.findByProps({ className: 'users-create-form' });
-  expect(optionValues(createForm.findByProps({ 'aria-label': 'Role' }))).toEqual(['tester', 'admin']);
+  expect(optionValues(createForm.findByProps({ 'aria-label': 'Role' }))).toEqual(['tester', 'faculty', 'admin']);
   expect(renderer.root.findAllByType('option').map((option) => option.props.value))
     .not.toContain('superadmin');
 });
@@ -279,18 +279,18 @@ test('a regular admin is not offered superadmin', async () => {
 
   expect(renderer.root.findAllByType('option').map((option) => option.props.value))
     .not.toContain('superadmin');
-  expect(optionValues(selectsByLabel(renderer, 'Role filter')[0])).toEqual(['all', 'tester', 'admin']);
+  expect(optionValues(selectsByLabel(renderer, 'Role filter')[0])).toEqual(['all', 'tester', 'faculty', 'admin']);
   expect(cardFor(renderer, 'super-1')).toBeUndefined();
   expect(optionValues(cardFor(renderer, 'tester-1').findAll(
     (node) => node.type === 'select' && node.props['aria-label'] === 'Role',
-  )[0])).toEqual(['tester']);
+  )[0])).toEqual(['tester', 'faculty']);
 
   const addUser = renderer.root.findAllByType('button').find((button) => button.children.includes('Add User'));
   await act(async () => {
     addUser.props.onClick();
   });
   const createForm = renderer.root.findByProps({ className: 'users-create-form' });
-  expect(optionValues(createForm.findByProps({ 'aria-label': 'Role' }))).toEqual(['tester']);
+  expect(optionValues(createForm.findByProps({ 'aria-label': 'Role' }))).toEqual(['tester', 'faculty']);
   expect(createForm.findAllByType('option').map((option) => option.props.value))
     .not.toContain('superadmin');
 });
@@ -340,7 +340,7 @@ test('a scoped admin sees only users in their schools and cannot edit school tag
   const editableRoles = renderer.root.findAll(
     (node) => node.type === 'select' && node.props['aria-label'] === 'Role' && !node.props.disabled,
   );
-  expect(editableRoles.map(optionValues)).toEqual([['tester']]);
+  expect(editableRoles.map(optionValues)).toEqual([['tester', 'faculty']]);
 });
 
 test('a super admin sees every user and can set school tags', async () => {
@@ -629,7 +629,7 @@ test('a scoped admin with no schools cannot create a tester', async () => {
   const form = await openCreateForm(renderer);
 
   expect(form.findAllByType('p').map((node) => node.children.join('')).join(' ')).toContain(
-    'You have no schools assigned, so you cannot add a tester.'
+    'You have no schools assigned, so you cannot add this user.'
   );
   expect(createUserButton(form).props.disabled).toBe(true);
   await submitCreateForm(form);
@@ -662,6 +662,31 @@ test('a super admin can leave a new tester school unset', async () => {
   expect(createManagedAuthUser).toHaveBeenCalledWith('super-1', expect.any(Object));
   expect(payload.role).toBe('tester');
   expect(payload).not.toHaveProperty('school');
+});
+
+test('a super admin must choose one school when creating faculty', async () => {
+  const renderer = await renderPage({
+    uid: 'super-1',
+    role: 'superadmin',
+    email: 'sam@example.com',
+  });
+  const form = await openCreateForm(renderer);
+  const roleSelect = form.findByProps({ 'aria-label': 'Role' });
+  await act(async () => {
+    roleSelect.props.onChange({ target: { value: 'faculty' } });
+  });
+  const schoolSelect = renderer.root.findByProps({ className: 'users-create-form' })
+    .findByProps({ 'aria-label': 'School' });
+
+  expect(optionValues(schoolSelect)).toEqual([HELENE]);
+  expect(createUserButton(renderer.root.findByProps({ className: 'users-create-form' })).props.disabled)
+    .toBe(true);
+
+  await act(async () => {
+    schoolSelect.props.onChange({ target: { value: HELENE } });
+  });
+  expect(createUserButton(renderer.root.findByProps({ className: 'users-create-form' })).props.disabled)
+    .toBe(false);
 });
 
 test('the schools section is only shown to a super admin', async () => {

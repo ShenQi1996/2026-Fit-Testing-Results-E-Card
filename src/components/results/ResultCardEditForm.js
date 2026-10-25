@@ -3,14 +3,21 @@ import { formatDateInput } from '../../utils/dateUtils';
 import {
   TEST_LOCATION_OPTIONS,
   FIT_TEST_TYPE_OPTIONS,
+  FIT_TEST_METHOD_OPTIONS,
   RESPIRATOR_MFG_OPTIONS,
+  RESPIRATOR_STYLE_OPTIONS,
   TESTING_AGENT_OPTIONS,
   MASK_SIZE_OPTIONS,
   isCustomOptionValue,
 } from '../../constants/fitTestOptions';
 
-const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
+const STYLE_REQUIRED_MESSAGE = 'Please select the respirator style.';
+
+const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editError }) => {
   const isCustomMfg = isCustomOptionValue(editData.respiratorMfg, RESPIRATOR_MFG_OPTIONS);
+  const styleError = editError === STYLE_REQUIRED_MESSAGE ? editError : '';
+  const fitFactorError = Boolean(editError) && !styleError && editData.fitTestMethod === 'Quantitative';
+  const otherError = Boolean(editError) && !styleError && editData.fitTestMethod !== 'Quantitative';
 
   return (
     <div className="result-card-body edit-mode">
@@ -56,7 +63,10 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
           type="text"
           className="edit-input"
           value={editData.issueDate || ''}
-          onChange={(e) => onChange('issueDate', e.target.value)}
+          readOnly
+          disabled
+          aria-disabled="true"
+          title="The test date cannot be changed after the record is saved."
           placeholder="MM/DD/YYYY"
         />
       </div>
@@ -147,6 +157,59 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
           placeholder="e.g., 1870+"
         />
       </div>
+      <div className="edit-form-row">
+        <label>Style:</label>
+        <select
+          className={`edit-select${styleError ? ' form-input-error' : ''}`}
+          value={editData.style || ''}
+          onChange={(e) => onChange('style', e.target.value)}
+          aria-invalid={styleError ? 'true' : 'false'}
+          aria-describedby={styleError ? 'edit-style-error' : undefined}
+        >
+          <option value="">Select style</option>
+          {RESPIRATOR_STYLE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+        {styleError ? (
+          <span id="edit-style-error" className="form-error-message">{styleError}</span>
+        ) : null}
+      </div>
+      <div className="edit-form-row">
+        <label>Fit Test Method:</label>
+        <select
+          className="edit-select"
+          value={editData.fitTestMethod || ''}
+          onChange={(e) => onChange('fitTestMethod', e.target.value)}
+        >
+          <option value="">Select method</option>
+          {FIT_TEST_METHOD_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
+      {editData.fitTestMethod === 'Quantitative' && (
+        <div className="edit-form-row">
+          <label>Fit Factor:</label>
+          <input
+            type="number"
+            className={`edit-input${fitFactorError ? ' form-input-error' : ''}`}
+            min="1"
+            max="100000"
+            value={editData.fitFactor ?? ''}
+            onChange={(e) => onChange('fitFactor', e.target.value)}
+            placeholder="1 to 100000"
+            aria-invalid={fitFactorError ? 'true' : 'false'}
+            aria-describedby={fitFactorError ? 'edit-fit-factor-error' : undefined}
+          />
+          {fitFactorError ? (
+            <span id="edit-fit-factor-error" className="form-error-message">{editError}</span>
+          ) : null}
+        </div>
+      )}
+      {otherError ? (
+        <span className="form-error-message">{editError}</span>
+      ) : null}
       <div className="edit-form-row">
         <label>Fit Tester:</label>
         <input

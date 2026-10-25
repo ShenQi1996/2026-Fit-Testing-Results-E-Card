@@ -14,10 +14,15 @@ import HomePage from './components/common/HomePage';
 import LoadingAnimation from './components/common/LoadingAnimation';
 import StagingBanner from './components/common/StagingBanner';
 import { resolveAppRoute } from './utils/appRoute';
-import { isAccessWindowOpen, isAdminOrAbove } from './utils/roles';
+import { isAccessWindowOpen, isAdminOrAbove, isFaculty } from './utils/roles';
 import './styles/App.css';
 
-const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }) => (
+const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }) => {
+  const faculty = isFaculty(user);
+  const page = faculty && currentPage !== 'results' && currentPage !== 'editAccount'
+    ? 'results'
+    : currentPage;
+  return (
   <div className="app">
     <Header
       onEditAccount={() => onNavigate('editAccount')}
@@ -26,27 +31,31 @@ const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }
     />
     <div className="app-layout">
       <Sidebar
-        currentPage={currentPage}
+        currentPage={page}
         onNavigate={onNavigate}
         isOpen={sidebarOpen}
       />
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>}
       <div className="main-content">
-        {user?.role === 'admin' && !isAccessWindowOpen(user) && (
+        {(user?.role === 'admin' || user?.role === 'faculty') && !isAccessWindowOpen(user) && (
           <div className="container">
-            <p role="status">Your admin access has expired or has not started.</p>
+            <p role="status">
+              {user.role === 'faculty'
+                ? 'Your faculty access has expired or has not started.'
+                : 'Your admin access has expired or has not started.'}
+            </p>
           </div>
         )}
-        {currentPage === 'editAccount' ? (
+        {page === 'editAccount' ? (
           <div className="container">
             <EditAccount
-              onBack={() => onNavigate('form')}
+              onBack={() => onNavigate(faculty ? 'results' : 'form')}
               onManageSchools={() => onNavigate('users')}
             />
           </div>
-        ) : currentPage === 'results' ? (
+        ) : page === 'results' && faculty && !isAccessWindowOpen(user) ? null : page === 'results' ? (
           <FitTestResults />
-        ) : currentPage === 'users' && isAdminOrAbove(user) ? (
+        ) : page === 'users' && isAdminOrAbove(user) ? (
           <div className="container">
             <UsersManagement />
           </div>
@@ -58,7 +67,8 @@ const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }
       </div>
     </div>
   </div>
-);
+  );
+};
 
 const PublicPage = ({ children }) => (
   <div className="app auth-page">{children}</div>
@@ -77,6 +87,11 @@ const AppContent = () => {
   }, [isAuthenticated, isPublicPage, setForceLight]);
 
   const handleNavigate = (page) => {
+    if (isFaculty(user) && page !== 'results' && page !== 'editAccount') {
+      setCurrentPage('results');
+      setSidebarOpen(false);
+      return;
+    }
     if (page === 'users' && !isAdminOrAbove(user)) {
       setCurrentPage('form');
       setSidebarOpen(false);
@@ -87,6 +102,10 @@ const AppContent = () => {
   };
 
   useEffect(() => {
+    if (isFaculty(user) && currentPage !== 'results' && currentPage !== 'editAccount') {
+      setCurrentPage('results');
+      return;
+    }
     if (currentPage === 'users' && !isAdminOrAbove(user)) {
       setCurrentPage('form');
     }

@@ -1,7 +1,7 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../../context/AuthContext';
-import { countFitTestsForUser } from '../../services/firebaseDb';
+import { countFacultyFitTests, countFitTestsForUser } from '../../services/firebaseDb';
 import { notifyFitTestActivity } from '../../utils/fitTestActivity';
 import Sidebar, { SIDEBAR_COUNT_CACHE_MS } from './Sidebar';
 
@@ -11,6 +11,7 @@ jest.mock('../../context/AuthContext', () => ({
 
 jest.mock('../../services/firebaseDb', () => ({
   countFitTestsForUser: jest.fn(() => Promise.resolve(2)),
+  countFacultyFitTests: jest.fn(() => Promise.resolve(4)),
 }));
 
 const renderSidebar = async (currentPage) => {
@@ -70,4 +71,20 @@ test('the sidebar recounts after a fit test is saved and skips navigation inside
   } finally {
     now.mockRestore();
   }
+});
+
+test('faculty see results only and count by school', async () => {
+  useAuth.mockReturnValue({
+    user: { uid: 'faculty-1', role: 'faculty', school: 'Helene College of Nursing', schools: [] },
+  });
+  const renderer = await renderSidebar('results');
+  const json = JSON.stringify(renderer.toJSON());
+  expect(json).not.toContain('Send e-card');
+  expect(json).not.toContain('Users');
+  expect(json).toContain('Test results (4)');
+  expect(countFacultyFitTests).toHaveBeenCalledWith(expect.objectContaining({
+    role: 'faculty',
+    school: 'Helene College of Nursing',
+  }));
+  expect(countFitTestsForUser).not.toHaveBeenCalled();
 });

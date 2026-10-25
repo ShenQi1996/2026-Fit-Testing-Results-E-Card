@@ -8,6 +8,9 @@ const validForm = () => ({
   issueDate: '01/15/2026',
   fitTestType: 'N95',
   respiratorMfg: '3M',
+  model: '1860',
+  style: 'Filtering facepiece',
+  fitTestMethod: 'Qualitative',
   testingAgent: 'Bitrex',
   maskSize: 'Regular',
   result: 'Pass',
@@ -54,5 +57,49 @@ describe('form validators', () => {
 
     expect(result.isValid).toBe(false);
     expect(result.fieldErrors.solutionExpirationDate).toMatch(/on or after open date/i);
+  });
+
+  test('respirator model, style, method, and quantitative fit factor are required', () => {
+    const missingModel = validateFitTestForm({ ...validForm(), model: ' ' }, true, true);
+    expect(missingModel.fieldErrors.model).toMatch(/model/i);
+
+    const missingStyle = validateFitTestForm({ ...validForm(), style: '' }, true, true);
+    expect(missingStyle.fieldErrors.style).toMatch(/style/i);
+
+    const missingMethod = validateFitTestForm({ ...validForm(), fitTestMethod: '' }, true, true);
+    expect(missingMethod.fieldErrors.fitTestMethod).toMatch(/qualitative or quantitative/i);
+
+    const quantitative = validateFitTestForm({
+      ...validForm(),
+      fitTestMethod: 'Quantitative',
+      fitFactor: '',
+    }, true, true);
+    expect(quantitative.fieldErrors.fitFactor).toMatch(/1 to 100000/i);
+    const tooHigh = validateFitTestForm({
+      ...validForm(),
+      fitTestMethod: 'Quantitative',
+      fitFactor: '100001',
+    }, true, true);
+    expect(tooHigh.fieldErrors.fitFactor).toMatch(/1 to 100000/i);
+    const qualitativeWithFactor = validateFitTestForm({
+      ...validForm(),
+      fitTestMethod: 'Qualitative',
+      fitFactor: '100',
+    }, true, true);
+    expect(qualitativeWithFactor.fieldErrors.fitFactor).toMatch(/does not record/i);
+
+    const withFactor = validateFitTestForm({
+      ...validForm(),
+      fitTestMethod: 'Quantitative',
+      fitFactor: '100',
+    }, true, true);
+    expect(withFactor.isValid).toBe(true);
+
+    const qualitative = validateFitTestForm({
+      ...validForm(),
+      fitTestMethod: 'Qualitative',
+      fitFactor: '',
+    }, true, true);
+    expect(qualitative.isValid).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../context/AuthContext';
-import { getUserFitTests, updateFitTest } from '../services/firebaseDb';
+import { getFacultyFitTests, getUserFitTests, updateFitTest } from '../services/firebaseDb';
 import { useFitTestResults } from './useFitTestResults';
 
 jest.mock('../context/AuthContext', () => ({
@@ -10,6 +10,7 @@ jest.mock('../context/AuthContext', () => ({
 
 jest.mock('../services/firebaseDb', () => ({
   getUserFitTests: jest.fn(),
+  getFacultyFitTests: jest.fn(),
   updateFitTest: jest.fn(),
   deleteFitTest: jest.fn(),
   ensureFitTestVerification: jest.fn(),
@@ -34,6 +35,8 @@ const record = {
   issueDate: '10/01/2026',
   testLocation: 'Harlem',
   recipientEmail: 'ada@example.com',
+  style: 'Filtering facepiece',
+  fitTestMethod: 'Qualitative',
 };
 
 const Probe = ({ apiRef }) => {
@@ -76,7 +79,7 @@ afterEach(() => {
   jest.clearAllTimers();
 });
 
-test('an issue-date edit reloads the results list', async () => {
+test('an issue-date or result edit is ignored and the list is not reloaded', async () => {
   const apiRef = { current: null };
   await renderProbe(apiRef);
 
@@ -84,25 +87,30 @@ test('an issue-date edit reloads the results list', async () => {
   expect(getUserFitTests).toHaveBeenCalledWith('admin-1');
 
   await act(async () => {
-    apiRef.current.handleEditClick(record);
+    apiRef.current.handleEditClick({ ...record, result: 'Pass' });
   });
   await act(async () => {
     apiRef.current.handleEditChange('issueDate', '09/01/2026');
+    apiRef.current.handleEditChange('result', 'Fail');
+    apiRef.current.handleEditChange('clientName', 'Ada King');
   });
 
-  getUserFitTests.mockResolvedValue([{ ...record, issueDate: '09/01/2026' }]);
+  expect(apiRef.current.editData.issueDate).toBe('10/01/2026');
+  expect(apiRef.current.editData.result).toBe('Pass');
+  expect(apiRef.current.editData.clientName).toBe('Ada King');
+
   await act(async () => {
     await apiRef.current.handleEditSave('ft-1');
   });
   await flush();
 
-  expect(updateFitTest).toHaveBeenCalledWith(
-    'ft-1',
-    expect.objectContaining({ issueDate: '09/01/2026' }),
-    'admin-1',
-  );
-  expect(getUserFitTests).toHaveBeenCalledTimes(2);
-  expect(apiRef.current.fitTests.map((test) => test.issueDate)).toEqual(['09/01/2026']);
+  const updates = updateFitTest.mock.calls[0][1];
+  expect(updateFitTest).toHaveBeenCalledWith('ft-1', updates, 'admin-1');
+  expect(updates.issueDate).toBeUndefined();
+  expect(updates.result).toBeUndefined();
+  expect(updates.clientName).toBe('Ada King');
+  expect(getUserFitTests).toHaveBeenCalledTimes(1);
+  expect(apiRef.current.fitTests.map((test) => test.issueDate)).toEqual(['10/01/2026']);
 });
 
 test('an edit that keeps the issue date does not reload the results list', async () => {
@@ -122,4 +130,94 @@ test('an edit that keeps the issue date does not reload the results list', async
   expect(updateFitTest).toHaveBeenCalledTimes(1);
   expect(getUserFitTests).toHaveBeenCalledTimes(1);
   expect(apiRef.current.fitTests.map((test) => test.clientName)).toEqual(['Ada King']);
+});
+
+test('a legacy edit with no style stays on the form', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, style: '' });
+  });
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
+  expect(updateFitTest).not.toHaveBeenCalled();
+  expect(apiRef.current.error).toBe('');
+  expect(apiRef.current.editError).toBe('Please select the respirator style.');
+  expect(apiRef.current.editing).toBe('ft-1');
+});
+
+test('a quantitative edit with no fit factor stays on the form', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, fitTestMethod: 'Quantitative', fitFactor: '' });
+  });
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
+  expect(updateFitTest).not.toHaveBeenCalled();
+  expect(apiRef.current.error).toBe('');
+  expect(apiRef.current.editError).toMatch(/fit factor/i);
+  expect(apiRef.current.editing).toBe('ft-1');
+});
+
+test('a legacy Locked to Qualitative value edits and saves as Qualitative', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, fitTestMethod: 'Locked to Qualitative' });
+  });
+  expect(apiRef.current.editData.fitTestMethod).toBe('Qualitative');
+
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
+  expect(updateFitTest).toHaveBeenCalledWith(
+    'ft-1',
+    expect.objectContaining({ fitTestMethod: 'Qualitative' }),
+    'admin-1',
+  );
+  const payload = updateFitTest.mock.calls[0][1];
+  expect(payload.fitTestMethod).not.toBe('Locked to Qualitative');
+});
+
+test('faculty load results by school instead of user id', async () => {
+  getFacultyFitTests.mockResolvedValue([record]);
+  useAuth.mockReturnValue({
+    user: { uid: 'faculty-1', role: 'faculty', school: 'Helene College of Nursing', schools: [] },
+  });
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  expect(getFacultyFitTests).toHaveBeenCalledWith(expect.objectContaining({
+    role: 'faculty',
+    school: 'Helene College of Nursing',
+  }));
+  expect(getUserFitTests).not.toHaveBeenCalled();
+  expect(apiRef.current.fitTests.map((test) => test.id)).toEqual(['ft-1']);
+});
+
+test('faculty outside the access window do not load results', async () => {
+  useAuth.mockReturnValue({
+    user: {
+      uid: 'faculty-1',
+      role: 'faculty',
+      school: 'Helene College of Nursing',
+      endDate: '2020-01-01T00:00:00.000Z',
+    },
+  });
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  expect(getFacultyFitTests).not.toHaveBeenCalled();
+  expect(getUserFitTests).not.toHaveBeenCalled();
+  expect(apiRef.current.fitTests).toEqual([]);
+  expect(apiRef.current.loading).toBe(false);
 });
