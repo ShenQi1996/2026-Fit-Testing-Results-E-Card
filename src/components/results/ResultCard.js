@@ -1,6 +1,6 @@
 import React from 'react';
 import { calculateExpirationDate } from '../../utils/dateUtils';
-import { RESULT_OPTIONS } from '../../constants/fitTestOptions';
+import { RESULT_OPTIONS, canonicalFitTestMethod } from '../../constants/fitTestOptions';
 import {
   PARTICIPANT_CONSENT_ITEMS,
   OPTIONAL_CONSENT_ITEMS,
@@ -49,8 +49,8 @@ const ResultCardView = ({ test, expanded, onToggleExpand }) => (
       )}
       <ResultRow label="Test Location:" value={test.testLocation || 'N/A'} />
       <ResultRow label="Fit Test Type:" value={test.fitTestType || 'N/A'} />
-      {test.fitTestMethod && (
-        <ResultRow label="Fit Test Method:" value={test.fitTestMethod} />
+      {canonicalFitTestMethod(test.fitTestMethod) && (
+        <ResultRow label="Fit Test Method:" value={canonicalFitTestMethod(test.fitTestMethod)} />
       )}
       <ResultRow label="Fit Tester:" value={test.fitTester || 'N/A'} />
       {test.recipientEmail && (
@@ -68,7 +68,7 @@ const ResultCardView = ({ test, expanded, onToggleExpand }) => (
           <ResultRow label="Style:" value={test.style || 'N/A'} />
           <ResultRow label="Testing Agent:" value={test.testingAgent || 'N/A'} />
           <ResultRow label="Mask Size:" value={test.maskSize || 'N/A'} />
-          {test.fitTestMethod === 'Quantitative' && (
+          {canonicalFitTestMethod(test.fitTestMethod) === 'Quantitative' && (
             <ResultRow label="Fit factor:" value={test.fitFactor ?? 'N/A'} />
           )}
         </div>
@@ -295,6 +295,7 @@ const ResultCard = ({
   user,
   editing,
   editData,
+  editError,
   saving,
   deleting,
   resending,
@@ -351,6 +352,7 @@ const ResultCard = ({
       {isEditing ? (
         <ResultCardEditForm
           editData={editData}
+          editError={editError}
           onChange={onEditChange}
           isCustomEditLocation={isCustomEditLocation}
         />

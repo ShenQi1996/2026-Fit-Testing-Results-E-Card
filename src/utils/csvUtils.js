@@ -1,6 +1,7 @@
 /**
  * CSV export helpers for fit test reporting
  */
+import { canonicalFitTestMethod } from '../constants/fitTestOptions';
 
 const STANDARD_REPORT_COLUMNS = [
   { key: 'clientName', label: 'Client Name' },
@@ -50,7 +51,11 @@ const formatFileDate = (date = new Date()) => {
 export const buildFitTestsCsv = (tests = []) => {
   const header = STANDARD_REPORT_COLUMNS.map((column) => escapeCsvValue(column.label)).join(',');
   const rows = tests.map((test) =>
-    STANDARD_REPORT_COLUMNS.map((column) => escapeCsvValue(test?.[column.key] ?? '')).join(',')
+    STANDARD_REPORT_COLUMNS.map((column) => {
+      const raw = test?.[column.key];
+      const value = column.key === 'fitTestMethod' ? (canonicalFitTestMethod(raw) || '') : raw;
+      return escapeCsvValue(value ?? '');
+    }).join(',')
   );
   return [header, ...rows].join('\n');
 };
