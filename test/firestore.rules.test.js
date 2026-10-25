@@ -870,23 +870,34 @@ test('fitTests count queries follow the same read rules as document reads', asyn
   )));
 });
 
-test('medical restriction notes stay off the fit test and are limited to the owner and admins', async () => {
+test('medical restriction notes stay off the fit test and follow the admin school scope', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
     ['users/tester-2', approved('tester', 'other@example.com', { school: HELENE })],
     ['users/admin-1', scopedAdmin()],
+    ['users/admin-2', scopedAdmin([SECOND], 'other-admin@example.com')],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
     ['fitTests/own-1', {
       userId: 'tester-1',
+      schoolsList: HELENE,
       testerMedicalRestrictionsReceived: true,
       testerMedicalRestrictionsNote: 'legacy note',
+    }],
+    ['fitTests/blank-1', {
+      userId: 'tester-1',
+      testerMedicalRestrictionsReceived: true,
+      testerMedicalRestrictionsNote: 'no school',
     }],
   ]);
   const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
   const otherDb = testEnv.authenticatedContext('tester-2').firestore();
   const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const outsideDb = testEnv.authenticatedContext('admin-2').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
   const note = {
     fitTestId: 'own-1',
     userId: 'tester-1',
+    schoolsList: HELENE,
     updatedBy: 'tester-1',
     testerMedicalRestrictionsReceived: true,
     testerMedicalRestrictionsNote: 'asthma',
@@ -901,12 +912,40 @@ test('medical restriction notes stay off the fit test and are limited to the own
   await assertFails(updateDoc(doc(ownerDb, 'fitTests/own-1'), {
     testerMedicalRestrictionsNote: 'changed',
   }));
-  const kept = await assertSucceeds(getDoc(doc(ownerDb, 'fitTests/own-1')));
-  expect(kept.data().testerMedicalRestrictionsNote).toBe('legacy note');
+  await assertFails(updateDoc(doc(ownerDb, 'fitTests/own-1'), {
+    testerMedicalRestrictionsReceived: deleteField(),
+    testerMedicalRestrictionsNote: deleteField(),
+  }));
+  await assertFails(updateDoc(doc(outsideDb, 'fitTests/own-1'), {
+    testerMedicalRestrictionsReceived: deleteField(),
+    testerMedicalRestrictionsNote: deleteField(),
+  }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), {
+    testerMedicalRestrictionsNote: 'rewritten',
+  }));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTests/own-1'), {
+    testerMedicalRestrictionsReceived: deleteField(),
+    testerMedicalRestrictionsNote: deleteField(),
+  }));
+  const cleared = await assertSucceeds(getDoc(doc(ownerDb, 'fitTests/own-1')));
+  expect(cleared.data().testerMedicalRestrictionsNote).toBeUndefined();
+  expect(cleared.data().testerMedicalRestrictionsReceived).toBeUndefined();
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/blank-1'), {
+    testerMedicalRestrictionsReceived: deleteField(),
+    testerMedicalRestrictionsNote: deleteField(),
+  }));
+  await assertSucceeds(updateDoc(doc(superDb, 'fitTests/blank-1'), {
+    testerMedicalRestrictionsReceived: deleteField(),
+    testerMedicalRestrictionsNote: deleteField(),
+  }));
 
   await assertFails(setDoc(doc(otherDb, 'fitTestMedicalNotes/own-1'), {
     ...note,
     updatedBy: 'tester-2',
+  }));
+  await assertFails(setDoc(doc(ownerDb, 'fitTestMedicalNotes/own-1'), {
+    ...note,
+    schoolsList: SECOND,
   }));
   await assertFails(setDoc(doc(ownerDb, 'fitTestMedicalNotes/own-1'), {
     ...note,
@@ -915,9 +954,27 @@ test('medical restriction notes stay off the fit test and are limited to the own
   }));
   await assertSucceeds(setDoc(doc(ownerDb, 'fitTestMedicalNotes/own-1'), note));
   await assertSucceeds(getDoc(doc(adminDb, 'fitTestMedicalNotes/own-1')));
+  await assertFails(getDoc(doc(outsideDb, 'fitTestMedicalNotes/own-1')));
+  await assertSucceeds(getDoc(doc(superDb, 'fitTestMedicalNotes/own-1')));
   await assertFails(getDoc(doc(otherDb, 'fitTestMedicalNotes/own-1')));
   await assertFails(getDocs(query(
     collection(otherDb, 'fitTestMedicalNotes'),
+    where('userId', '==', 'tester-1'),
+  )));
+  await assertFails(getDocs(query(
+    collection(adminDb, 'fitTestMedicalNotes'),
+    where('userId', '==', 'tester-1'),
+  )));
+  await assertSucceeds(getDocs(query(
+    collection(adminDb, 'fitTestMedicalNotes'),
+    where('schoolsList', '==', HELENE),
+  )));
+  await assertFails(getDocs(query(
+    collection(outsideDb, 'fitTestMedicalNotes'),
+    where('schoolsList', '==', HELENE),
+  )));
+  await assertSucceeds(getDocs(query(
+    collection(superDb, 'fitTestMedicalNotes'),
     where('userId', '==', 'tester-1'),
   )));
   await assertSucceeds(getDocs(query(

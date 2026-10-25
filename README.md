@@ -98,7 +98,7 @@ Collections:
 
 - `users` — testers/admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin). Medical restriction notes are stored in `fitTestMedicalNotes`, readable by the record owner and admins, so they are not part of the fit test document (medical privacy). Older notes already on a fit test are left in place.
+- `fitTests` — records (owner or admin). Medical restriction notes are stored in `fitTestMedicalNotes` and written in the same batch as the fit test. The record owner can read their notes. A super admin can read any. A school admin can read only notes for their schools. Client reads strip `testerMedicalRestrictionsReceived` and `testerMedicalRestrictionsNote` off the fit test, so faculty (when that role is used) never receive the inline copy. If the notes read fails, the results list still returns and does not fall back to those inline fields. An in-scope admin or a super admin can delete the legacy inline fields from a fit test. A record with no school can be cleared only by a super admin.
 - `fitTestLookups/{lookupKey}` — public get for resend
 - `fitTestVerifications/{token}` — public get for verify
 

@@ -399,11 +399,31 @@ service cloud.firestore {
         return !request.resource.data.keys().hasAny(['testerMedicalRestrictionsReceived'])
           && !request.resource.data.keys().hasAny(['testerMedicalRestrictionsNote']);
       }
+      function medicalFieldKeptOrRemoved(field) {
+        return request.resource.data.keys().hasAny([field])
+          ? request.resource.data.get(field, null) == resource.data.get(field, null)
+          : true;
+      }
+      function removedAMedicalField() {
+        return (resource.data.keys().hasAny(['testerMedicalRestrictionsReceived'])
+            && !request.resource.data.keys().hasAny(['testerMedicalRestrictionsReceived']))
+          || (resource.data.keys().hasAny(['testerMedicalRestrictionsNote'])
+            && !request.resource.data.keys().hasAny(['testerMedicalRestrictionsNote']));
+      }
+      // A blank schoolsList is not in any admin's scope, so only a super admin
+      // can clear those legacy fields. Anyone else can leave them untouched.
+      function canStripLegacyMedicalNotes() {
+        return isSuperAdmin()
+          || (
+            isScopedAdmin()
+            && schoolsListOf(resource.data) != ''
+            && schoolsListOf(resource.data) in actorSchools()
+          );
+      }
       function medicalNoteFieldsUnchanged() {
-        return request.resource.data.get('testerMedicalRestrictionsReceived', null)
-            == resource.data.get('testerMedicalRestrictionsReceived', null)
-          && request.resource.data.get('testerMedicalRestrictionsNote', null)
-            == resource.data.get('testerMedicalRestrictionsNote', null);
+        return medicalFieldKeptOrRemoved('testerMedicalRestrictionsReceived')
+          && medicalFieldKeptOrRemoved('testerMedicalRestrictionsNote')
+          && (removedAMedicalField() ? canStripLegacyMedicalNotes() : true);
       }
       allow update: if
         isSignedIn() &&
@@ -423,14 +443,18 @@ service cloud.firestore {
         && medicalNoteFieldsAbsent();
     }
 
-    // Medical restriction notes are not on the fit test. Only the record owner and admins can read them.
+    // Medical restriction notes are not on the fit test. The owner can read their
+    // own. A super admin can read any. A scoped admin can read only notes whose
+    // school is one of theirs. getAfter lets the note be created in the same
+    // batch as a new fit test.
     match /fitTestMedicalNotes/{fitTestId} {
-      function noteOwner() {
-        return get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.userId;
+      function parentAfter() {
+        return getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data;
       }
       function noteShapeOk() {
         return request.resource.data.fitTestId == fitTestId
-          && request.resource.data.userId == noteOwner()
+          && request.resource.data.get('userId', '') == parentAfter().get('userId', '')
+          && request.resource.data.get('schoolsList', '') == schoolsListOf(parentAfter())
           && request.resource.data.updatedBy == request.auth.uid
           && request.resource.data.testerMedicalRestrictionsReceived is bool
           && request.resource.data.testerMedicalRestrictionsNote is string
@@ -440,10 +464,26 @@ service cloud.firestore {
             || request.resource.data.testerMedicalRestrictionsNote.size() == 0
           );
       }
-      allow read: if isSignedIn() && isApproved() &&
-        (isAdmin() || resource.data.userId == request.auth.uid);
+      function noteInAdminScope() {
+        return isSuperAdmin()
+          || (
+            isScopedAdmin()
+            && resource.data.get('schoolsList', '') != ''
+            && resource.data.get('schoolsList', '') in actorSchools()
+          );
+      }
+      allow get: if isSignedIn() && isApproved() &&
+        (resource.data.userId == request.auth.uid || noteInAdminScope());
+      allow list: if isSignedIn() && isApproved() && (
+        resource.data.userId == request.auth.uid
+        || isSuperAdmin()
+        || (
+          isScopedAdmin()
+          && resource.data.schoolsList in actorSchools()
+        )
+      );
       allow create, update: if isSignedIn() && isApproved() &&
-        (isAdmin() || request.auth.uid == noteOwner()) &&
+        (isAdmin() || request.auth.uid == parentAfter().get('userId', '')) &&
         noteShapeOk();
       allow delete: if false;
     }

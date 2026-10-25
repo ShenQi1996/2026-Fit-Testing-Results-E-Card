@@ -3,7 +3,6 @@
 
 import {
   collection,
-  addDoc,
   getDocs,
   doc,
   getDoc,
@@ -117,12 +116,13 @@ const hasMedicalNoteInput = (data = {}) => MEDICAL_NOTE_FIELDS.some((field) => (
   Object.prototype.hasOwnProperty.call(data, field)
 ));
 
-const writeMedicalNote = async (fitTestId, ownerUserId, actorUserId, note, updatedAt) => {
-  await setDoc(doc(db, FIT_TEST_MEDICAL_NOTES_COLLECTION, fitTestId), {
+const queueMedicalNote = (batch, fitTestId, ownerUserId, actorUserId, note, updatedAt, schoolsList) => {
+  batch.set(doc(db, FIT_TEST_MEDICAL_NOTES_COLLECTION, fitTestId), {
     fitTestId,
     userId: ownerUserId,
     updatedBy: actorUserId,
     updatedAt,
+    schoolsList: typeof schoolsList === 'string' ? schoolsList : '',
     ...note,
   });
 };
@@ -396,7 +396,10 @@ export const saveFitTest = async (userId, fitTestData) => {
     };
     const createdAt = Timestamp.now();
     const retentionDate = retentionDateValue({ ...recordToSave, createdAt });
-    const docRef = await addDoc(collection(db, FIT_TESTS_COLLECTION), {
+    const fitTestId = createVerificationToken();
+    const docRef = doc(db, FIT_TESTS_COLLECTION, fitTestId);
+    const batch = writeBatch(db);
+    batch.set(docRef, {
       userId,
       ...recordToSave,
       lookupKey: lookupKey || null,
@@ -405,8 +408,17 @@ export const saveFitTest = async (userId, fitTestData) => {
       ...(retentionDate ? { retentionDate } : {}),
     });
     if (note) {
-      await writeMedicalNote(docRef.id, userId, userId, note, createdAt);
+      queueMedicalNote(
+        batch,
+        fitTestId,
+        userId,
+        userId,
+        note,
+        createdAt,
+        recordToSave.schoolsList,
+      );
     }
+    await batch.commit();
     if (lookupKey) {
       await upsertFitTestLookup(lookupKey, recordToSave, docRef.id, userId);
     }
@@ -435,7 +447,7 @@ const isIndexError = (error) => (
 );
 
 const mapFitTestDoc = (docSnap) => {
-  const data = docSnap.data() || {};
+  const data = withoutMedicalNote(docSnap.data() || {});
   return {
     id: docSnap.id,
     ...data,
@@ -495,13 +507,21 @@ export const getUserFitTests = async (userId, options = {}) => {
     );
     
     const querySnapshot = await getDocs(q);
-    const notesSnap = await getDocs(query(
-      collection(db, FIT_TEST_MEDICAL_NOTES_COLLECTION),
-      where('userId', '==', userId),
-    ));
-    const notesById = new Map(
-      notesSnap.docs.map((noteSnap) => [noteSnap.id, noteSnap.data() || {}])
-    );
+    // A notes failure must not hide the fit tests. Inline fields are already
+    // stripped, including for faculty once that role reads this list, so a
+    // failed notes read does not fall back to the legacy copy.
+    let notesById = new Map();
+    try {
+      const notesSnap = await getDocs(query(
+        collection(db, FIT_TEST_MEDICAL_NOTES_COLLECTION),
+        where('userId', '==', userId),
+      ));
+      notesById = new Map(
+        notesSnap.docs.map((noteSnap) => [noteSnap.id, noteSnap.data() || {}])
+      );
+    } catch (noteError) {
+      console.error('Error fetching medical notes:', noteError);
+    }
 
     return querySnapshot.docs
       .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now))
@@ -602,12 +622,7 @@ export const getFitTest = async (fitTestId) => {
     const docSnap = await getDoc(docRef);
     
     if (docSnap.exists()) {
-      return {
-        id: docSnap.id,
-        ...docSnap.data(),
-        createdAt: docSnap.data().createdAt?.toDate()?.toISOString(),
-        updatedAt: docSnap.data().updatedAt?.toDate()?.toISOString(),
-      };
+      return mapFitTestDoc(docSnap);
     } else {
       throw new Error('Fit test record not found.');
     }
@@ -792,16 +807,37 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
 
     const retentionDate = retentionDateValue(nextRecord);
     const updatedAt = Timestamp.now();
-    await updateDoc(docRef, {
+    const schoolsList = typeof existing.schoolsList === 'string' ? existing.schoolsList : '';
+    const canStripLegacyNotes = isSuperAdmin(access.role)
+      || (schoolsList !== '' && normalizeSchoolList(access.schools).includes(schoolsList));
+    const payload = {
       ...writable,
       lookupKey: nextKey || null,
       verificationToken,
       updatedAt,
       ...(retentionDate ? { retentionDate } : {}),
-    });
-    if (note) {
-      await writeMedicalNote(fitTestId, existing.userId || userId, userId, note, updatedAt);
+    };
+    if (canStripLegacyNotes) {
+      MEDICAL_NOTE_FIELDS.forEach((field) => {
+        if (Object.prototype.hasOwnProperty.call(existing, field)) {
+          payload[field] = deleteField();
+        }
+      });
     }
+    const batch = writeBatch(db);
+    batch.update(docRef, payload);
+    if (note) {
+      queueMedicalNote(
+        batch,
+        fitTestId,
+        existing.userId || userId,
+        userId,
+        note,
+        updatedAt,
+        schoolsList,
+      );
+    }
+    await batch.commit();
 
     // Release lookups this record no longer owns, including any older key format.
     const releasedKeys = new Set(

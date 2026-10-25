@@ -4,6 +4,7 @@ import {
   getFitTestCountsByUser,
   getUserFitTests,
   saveFitTest,
+  updateFitTest,
 } from './firebaseDb';
 
 const userDoc = (role, extra = {}) => ({
@@ -100,21 +101,29 @@ test('a missing composite index is surfaced instead of an empty results list', a
 test('medical restriction notes are stored apart from the fit test and preferred on read', async () => {
   addDoc.mockClear();
   setDoc.mockClear();
+  writeBatch.mockClear();
 
   await saveFitTest('tester-1', {
     clientName: 'Ada Lovelace',
+    schoolsList: 'Helene College of Nursing',
     testerMedicalRestrictionsReceived: true,
     testerMedicalRestrictionsNote: '  asthma  ',
   });
 
-  const storedFitTest = addDoc.mock.calls[0][1];
-  expect(storedFitTest.testerMedicalRestrictionsReceived).toBeUndefined();
-  expect(storedFitTest.testerMedicalRestrictionsNote).toBeUndefined();
-  const noteWrite = setDoc.mock.calls.map((call) => call[1]).find((data) => data.testerMedicalRestrictionsNote);
-  expect(noteWrite).toEqual(expect.objectContaining({
-    fitTestId: 'mock-id',
+  expect(addDoc).not.toHaveBeenCalled();
+  expect(writeBatch).toHaveBeenCalledTimes(1);
+  const batch = writeBatch.mock.results[0].value;
+  expect(batch.commit).toHaveBeenCalledTimes(1);
+  const fitWrite = batch.set.mock.calls.find((call) => call[0].args[1] === 'fitTests');
+  const noteWrite = batch.set.mock.calls.find((call) => call[0].args[1] === 'fitTestMedicalNotes');
+  expect(fitWrite[1].testerMedicalRestrictionsReceived).toBeUndefined();
+  expect(fitWrite[1].testerMedicalRestrictionsNote).toBeUndefined();
+  expect(noteWrite[0].args.slice(1)).toEqual(['fitTestMedicalNotes', fitWrite[0].args[2]]);
+  expect(noteWrite[1]).toEqual(expect.objectContaining({
+    fitTestId: fitWrite[0].args[2],
     userId: 'tester-1',
     updatedBy: 'tester-1',
+    schoolsList: 'Helene College of Nursing',
     testerMedicalRestrictionsReceived: true,
     testerMedicalRestrictionsNote: 'asthma',
   }));
@@ -161,6 +170,71 @@ test('medical restriction notes are stored apart from the fit test and preferred
   const byId = Object.fromEntries(listed.map((record) => [record.id, record]));
   expect(byId['ft-1'].testerMedicalRestrictionsReceived).toBe(true);
   expect(byId['ft-1'].testerMedicalRestrictionsNote).toBe('side note');
-  expect(byId['ft-2'].testerMedicalRestrictionsReceived).toBe(false);
-  expect(byId['ft-2'].testerMedicalRestrictionsNote).toBe('kept on the old record');
+  expect(byId['ft-2'].testerMedicalRestrictionsReceived).toBeUndefined();
+  expect(byId['ft-2'].testerMedicalRestrictionsNote).toBeUndefined();
+});
+
+test('a failed medical-notes read still returns fit tests without inline notes', async () => {
+  const fitDocs = [{
+    id: 'ft-1',
+    data: () => ({
+      userId: 'tester-1',
+      issueDate: '10/24/2026',
+      createdAt: recentCreatedAt,
+      testerMedicalRestrictionsReceived: true,
+      testerMedicalRestrictionsNote: 'legacy inline',
+    }),
+  }];
+  let reads = 0;
+  getDocs.mockImplementation(async () => {
+    reads += 1;
+    if (reads === 1) return { docs: fitDocs };
+    throw new Error('notes unavailable');
+  });
+
+  const listed = await getUserFitTests('tester-1', { now: NOW });
+
+  expect(listed).toHaveLength(1);
+  expect(listed[0].id).toBe('ft-1');
+  expect(listed[0].testerMedicalRestrictionsReceived).toBeUndefined();
+  expect(listed[0].testerMedicalRestrictionsNote).toBeUndefined();
+});
+
+test('an in-scope admin edit clears legacy inline notes in the same batch as the update', async () => {
+  writeBatch.mockClear();
+  const stored = {
+    userId: 'tester-1',
+    schoolsList: 'Helene College of Nursing',
+    clientName: 'Ada Lovelace',
+    testerMedicalRestrictionsReceived: true,
+    testerMedicalRestrictionsNote: 'legacy inline',
+  };
+  getDoc.mockImplementation(async (ref) => {
+    const name = ref?.args?.[1];
+    if (name === 'users') return userDoc('admin');
+    if (name === 'fitTests') return { exists: () => true, data: () => stored };
+    return { exists: () => false, data: () => null };
+  });
+
+  await updateFitTest('ft-1', {
+    clientName: 'Ada Lovelace',
+    testerMedicalRestrictionsReceived: true,
+    testerMedicalRestrictionsNote: '  updated note  ',
+  }, 'admin-1');
+
+  const batch = writeBatch.mock.results[0].value;
+  expect(batch.commit).toHaveBeenCalledTimes(1);
+  const payload = batch.update.mock.calls[0][1];
+  expect(payload.testerMedicalRestrictionsReceived).toEqual({ kind: 'deleteField' });
+  expect(payload.testerMedicalRestrictionsNote).toEqual({ kind: 'deleteField' });
+  expect(payload.clientName).toBe('Ada Lovelace');
+  const noteWrite = batch.set.mock.calls.find((call) => call[0].args[1] === 'fitTestMedicalNotes');
+  expect(noteWrite[1]).toEqual(expect.objectContaining({
+    fitTestId: 'ft-1',
+    userId: 'tester-1',
+    updatedBy: 'admin-1',
+    schoolsList: 'Helene College of Nursing',
+    testerMedicalRestrictionsReceived: true,
+    testerMedicalRestrictionsNote: 'updated note',
+  }));
 });
