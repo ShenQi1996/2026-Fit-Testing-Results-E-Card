@@ -115,7 +115,9 @@ The composite index for that query (`creatorSchool` ascending, `deletedAt` ascen
 
 Faculty queries match `deletedAt == null`. A record with no `deletedAt` field does not match. New fit tests stamp `deletedAt: null`. Records created after the faculty role is deployed and before that stamp exists have `creatorSchool` and no `deletedAt`, so faculty cannot see them until they are stamped.
 
-Run this once on staging and once on production, before or right after deploying the medical-notes change. Dry run is the default and writes nothing. `--write` sets `deletedAt` to null only on `fitTests` that have a non-empty `creatorSchool` and no `deletedAt` field. A record that already has `deletedAt` null or a timestamp is left alone, so running it again changes nothing. The service account `project_id` has to match `--project-id`. Do not commit the key. This script is not part of CI.
+Run this once on staging and once on production before deploying the medical-notes change. Do not deploy first. Dry run is the default and writes nothing. `--write` sets `deletedAt` to null only on `fitTests` that have a non-empty `creatorSchool` and no `deletedAt` field. Each write is conditioned on that document's update time, so a fit test soft-deleted while the script is running stays deleted. A record that already has `deletedAt` null or a timestamp is left alone, so running it again changes nothing. The service account `project_id` has to match `--project-id`. Do not commit the key. This script is not part of CI.
+
+Deploy the client and the Firestore rules together. Create requires `deletedAt: null`, so an old client against the new rules, or the new client against the old rules, cannot save a fit test. Ship #40 and #41 together.
 
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json

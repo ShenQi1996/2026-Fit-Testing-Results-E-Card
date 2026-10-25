@@ -132,6 +132,23 @@ test('an edit that keeps the issue date does not reload the results list', async
   expect(apiRef.current.fitTests.map((test) => test.clientName)).toEqual(['Ada King']);
 });
 
+test('a legacy edit with no style stays on the form', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, style: '' });
+  });
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
+  expect(updateFitTest).not.toHaveBeenCalled();
+  expect(apiRef.current.error).toBe('');
+  expect(apiRef.current.editError).toBe('Please select the respirator style.');
+  expect(apiRef.current.editing).toBe('ft-1');
+});
+
 test('a quantitative edit with no fit factor stays on the form', async () => {
   const apiRef = { current: null };
   await renderProbe(apiRef);

@@ -11,8 +11,13 @@ import {
   isCustomOptionValue,
 } from '../../constants/fitTestOptions';
 
+const STYLE_REQUIRED_MESSAGE = 'Please select the respirator style.';
+
 const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editError }) => {
   const isCustomMfg = isCustomOptionValue(editData.respiratorMfg, RESPIRATOR_MFG_OPTIONS);
+  const styleError = editError === STYLE_REQUIRED_MESSAGE ? editError : '';
+  const fitFactorError = Boolean(editError) && !styleError && editData.fitTestMethod === 'Quantitative';
+  const otherError = Boolean(editError) && !styleError && editData.fitTestMethod !== 'Quantitative';
 
   return (
     <div className="result-card-body edit-mode">
@@ -155,15 +160,20 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editErro
       <div className="edit-form-row">
         <label>Style:</label>
         <select
-          className="edit-select"
+          className={`edit-select${styleError ? ' form-input-error' : ''}`}
           value={editData.style || ''}
           onChange={(e) => onChange('style', e.target.value)}
+          aria-invalid={styleError ? 'true' : 'false'}
+          aria-describedby={styleError ? 'edit-style-error' : undefined}
         >
           <option value="">Select style</option>
           {RESPIRATOR_STYLE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
+        {styleError ? (
+          <span id="edit-style-error" className="form-error-message">{styleError}</span>
+        ) : null}
       </div>
       <div className="edit-form-row">
         <label>Fit Test Method:</label>
@@ -183,21 +193,21 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editErro
           <label>Fit Factor:</label>
           <input
             type="number"
-            className={`edit-input${editError ? ' form-input-error' : ''}`}
+            className={`edit-input${fitFactorError ? ' form-input-error' : ''}`}
             min="1"
             max="100000"
             value={editData.fitFactor ?? ''}
             onChange={(e) => onChange('fitFactor', e.target.value)}
             placeholder="1 to 100000"
-            aria-invalid={editError ? 'true' : 'false'}
-            aria-describedby={editError ? 'edit-fit-factor-error' : undefined}
+            aria-invalid={fitFactorError ? 'true' : 'false'}
+            aria-describedby={fitFactorError ? 'edit-fit-factor-error' : undefined}
           />
-          {editError ? (
+          {fitFactorError ? (
             <span id="edit-fit-factor-error" className="form-error-message">{editError}</span>
           ) : null}
         </div>
       )}
-      {editError && editData.fitTestMethod !== 'Quantitative' ? (
+      {otherError ? (
         <span className="form-error-message">{editError}</span>
       ) : null}
       <div className="edit-form-row">

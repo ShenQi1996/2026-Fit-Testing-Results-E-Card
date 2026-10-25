@@ -3,8 +3,8 @@
 // Faculty queries require deletedAt == null. Records created after the faculty
 // role ships and before that field is stamped have creatorSchool and no
 // deletedAt, so faculty cannot read them. Run this once on staging and once
-// on production, before or right after that rules change is deployed. It is
-// not part of CI and this repo does not run it.
+// on production before that rules change is deployed. Do not deploy first.
+// It is not part of CI and this repo does not run it.
 //
 //   export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
 //   npm run backfill:deleted-at -- --project-id fit-test-result-e-card-staging --dry-run
@@ -13,10 +13,16 @@
 //   npm run backfill:deleted-at -- --project-id fit-test-result-e-card-2026 --write
 //
 // Dry run is the default. --dry-run writes nothing. --write sets deletedAt to
-// null and changes no other field. A second run changes nothing: a document
-// that already has deletedAt, including null, is skipped. A document with no
-// creatorSchool is skipped. The service account project_id must match
-// --project-id. Do not commit the service account file.
+// null and changes no other field. Each write is conditioned on the document's
+// updateTime, so a concurrent soft delete is not overwritten. A failed
+// precondition is counted and logged, that batch is retried one document at a
+// time, and a document that now has deletedAt is skipped. A second run changes
+// nothing: a document that already has deletedAt, including null, is skipped.
+// A document with no creatorSchool is skipped. The service account project_id
+// must match --project-id. Do not commit the service account file.
+//
+// --emulator talks only to FIRESTORE_EMULATOR_HOST and only accepts a demo-*
+// project id. It does not load a service account.
 
 const fs = require('fs');
 const path = require('path');
@@ -37,8 +43,18 @@ const selectStampIds = (docs) => docs
   .filter((entry) => needsDeletedAtStamp(entry && entry.data))
   .map((entry) => entry.id);
 
-const assertAllowedProject = (projectId) => {
+const DEMO_PROJECT_ID = /^demo-[A-Za-z0-9-]+$/;
+
+const assertAllowedProject = (projectId, { emulator = false } = {}) => {
   const id = typeof projectId === 'string' ? projectId.trim() : '';
+  if (emulator) {
+    if (!DEMO_PROJECT_ID.test(id)) {
+      throw new Error(
+        `Refusing project "${id}" with --emulator. Pass a demo-* project id.`
+      );
+    }
+    return id;
+  }
   if (!ALLOWED_PROJECT_IDS.has(id)) {
     throw new Error(
       `Refusing project "${id}". Pass --project-id ${STAGING_PROJECT_ID} or ${PROD_PROJECT_ID}.`
@@ -47,11 +63,22 @@ const assertAllowedProject = (projectId) => {
   return id;
 };
 
+const assertEmulatorHost = () => {
+  const host = process.env.FIRESTORE_EMULATOR_HOST;
+  if (!host || !String(host).trim()) {
+    throw new Error(
+      'Set FIRESTORE_EMULATOR_HOST before --emulator. This script will not connect to a real project in emulator mode.'
+    );
+  }
+  return String(host).trim();
+};
+
 const parseArgs = (argv) => {
   const args = argv.slice(2);
   let projectId = '';
   let dryRun = false;
   let write = false;
+  let emulator = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -59,6 +86,8 @@ const parseArgs = (argv) => {
       dryRun = true;
     } else if (arg === '--write') {
       write = true;
+    } else if (arg === '--emulator') {
+      emulator = true;
     } else if (arg === '--project' || arg === '--project-id') {
       projectId = args[index + 1] || '';
       index += 1;
@@ -68,7 +97,7 @@ const parseArgs = (argv) => {
       projectId = arg.slice('--project-id='.length);
     } else {
       throw new Error(
-        `Unknown argument ${arg}. Pass --project-id and optional --dry-run or --write.`
+        `Unknown argument ${arg}. Pass --project-id and optional --dry-run, --write, or --emulator.`
       );
     }
   }
@@ -83,9 +112,10 @@ const parseArgs = (argv) => {
   }
 
   return {
-    projectId: assertAllowedProject(projectId),
+    projectId: assertAllowedProject(projectId, { emulator }),
     dryRun: !write,
     write,
+    emulator,
   };
 };
 
@@ -147,52 +177,149 @@ const readStampCandidates = async (db, documentId) => {
   return ids;
 };
 
-const applyDeletedAtStamps = async (db, ids) => {
+const isPreconditionError = (error) => {
+  const code = error && error.code;
+  if (code === 9 || code === '9' || code === 'failed-precondition' || code === 'FAILED_PRECONDITION') {
+    return true;
+  }
+  const message = String((error && (error.message || error.details)) || '');
+  return /FAILED_PRECONDITION|failed-precondition/i.test(message);
+};
+
+const readFitTest = async (db, id) => db.collection('fitTests').doc(id).get();
+
+const applyDeletedAtStamps = async (db, ids, { batchSize = BATCH_SIZE, beforeCommit } = {}) => {
   const written = [];
   const failed = [];
+  const skipped = [];
+  let preconditionFailures = 0;
 
-  for (let start = 0; start < ids.length; start += BATCH_SIZE) {
-    const chunk = ids.slice(start, start + BATCH_SIZE);
+  const rememberSkip = (id, data) => {
+    if (!data) {
+      console.error(`Skipping fitTests/${id}: the document is gone.`);
+    } else if (data.deletedAt == null) {
+      console.error(`Skipping fitTests/${id}: deletedAt is already set.`);
+    } else {
+      console.error(`Skipping fitTests/${id}: deletedAt is now set, so the soft delete was left in place.`);
+    }
+    skipped.push(id);
+  };
+
+  const stampOne = async (id) => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const snap = await readFitTest(db, id);
+      const data = snap.exists ? (snap.data() || {}) : null;
+      if (!data || !needsDeletedAtStamp(data)) {
+        rememberSkip(id, data);
+        return;
+      }
+      const batch = db.batch();
+      batch.update(snap.ref, stampPayload(), { lastUpdateTime: snap.updateTime });
+      try {
+        await batch.commit();
+        written.push(id);
+        return;
+      } catch (error) {
+        if (!isPreconditionError(error)) {
+          failed.push({ id, message: error.message || String(error) });
+          console.error(`Failed to stamp deletedAt on fitTests/${id}:`, error.message || error);
+          return;
+        }
+        preconditionFailures += 1;
+        console.error(`Precondition failed for fitTests/${id}. Re-reading.`);
+      }
+    }
+
+    const snap = await readFitTest(db, id);
+    const data = snap.exists ? (snap.data() || {}) : null;
+    if (!data || !needsDeletedAtStamp(data)) {
+      rememberSkip(id, data);
+      return;
+    }
+    failed.push({ id, message: 'Precondition failed and deletedAt is still absent.' });
+    console.error(`Failed to stamp deletedAt on fitTests/${id} after a precondition failure.`);
+  };
+
+  for (let start = 0; start < ids.length; start += batchSize) {
+    const chunk = ids.slice(start, start + batchSize);
+    const snaps = [];
+    for (const id of chunk) {
+      const snap = await readFitTest(db, id);
+      const data = snap.exists ? (snap.data() || {}) : null;
+      if (!data || !needsDeletedAtStamp(data)) {
+        rememberSkip(id, data);
+        continue;
+      }
+      snaps.push(snap);
+    }
+    if (snaps.length === 0) continue;
+    if (typeof beforeCommit === 'function') await beforeCommit(snaps);
+
     const batch = db.batch();
-    chunk.forEach((id) => {
-      batch.update(db.collection('fitTests').doc(id), stampPayload());
+    snaps.forEach((snap) => {
+      batch.update(snap.ref, stampPayload(), { lastUpdateTime: snap.updateTime });
     });
     try {
       await batch.commit();
-      written.push(...chunk);
+      written.push(...snaps.map((snap) => snap.id));
     } catch (error) {
-      chunk.forEach((id) => failed.push({ id, message: error.message || String(error) }));
-      console.error(`Failed to stamp deletedAt on ${chunk.length} fit test(s):`, error.message || error);
+      if (!isPreconditionError(error)) {
+        snaps.forEach((snap) => failed.push({ id: snap.id, message: error.message || String(error) }));
+        console.error(
+          `Failed to stamp deletedAt on ${snaps.length} fit test(s). Later batches still run:`,
+          error.message || error
+        );
+        continue;
+      }
+      preconditionFailures += 1;
+      const idsInBatch = snaps.map((snap) => snap.id);
+      console.error(
+        `Precondition failed for fitTests/${idsInBatch.join(', ')}. Retrying each document. Later batches still run.`
+      );
+      for (const snap of snaps) {
+        await stampOne(snap.id);
+      }
     }
   }
 
-  return { written, failed };
+  return { written, failed, skipped, preconditionFailures };
 };
 
-const connectAdmin = async (serviceAccount) => {
+const connectAdmin = async (serviceAccount, { emulator = false, projectId } = {}) => {
   const admin = require('firebase-admin');
-  if (admin.apps.length === 0) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      projectId: serviceAccount.project_id,
-    });
+  const name = `backfill-deleted-at-${projectId || 'default'}`;
+  const existing = admin.apps.find((app) => app && app.name === name);
+  if (emulator) {
+    assertEmulatorHost();
+    const app = existing || admin.initializeApp({ projectId }, name);
+    return {
+      db: app.firestore(),
+      documentId: admin.firestore.FieldPath.documentId(),
+    };
   }
+  const app = existing || admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    projectId: serviceAccount.project_id,
+  }, name);
   return {
-    db: admin.firestore(),
+    db: app.firestore(),
     documentId: admin.firestore.FieldPath.documentId(),
   };
 };
 
 const backfillDeletedAt = async ({ argv = process.argv } = {}) => {
   const options = parseArgs(argv);
-  const serviceAccount = loadCredentials(options.projectId);
-  const { db, documentId } = await connectAdmin(serviceAccount);
+  if (options.emulator) assertEmulatorHost();
+  const serviceAccount = options.emulator ? null : loadCredentials(options.projectId);
+  const { db, documentId } = await connectAdmin(serviceAccount, options);
   const ids = await readStampCandidates(db, documentId);
   console.log(formatReport({ projectId: options.projectId, ids, write: options.write }));
-  if (!options.write) return { ...options, ids, written: [], failed: [] };
+  if (!options.write) return { ...options, ids, written: [], failed: [], skipped: [], preconditionFailures: 0 };
 
   const result = await applyDeletedAtStamps(db, ids);
   console.log(`Stamped deletedAt: null on ${result.written.length} fit test(s).`);
+  console.log(`Skipped ${result.skipped.length} fit test(s) that already have deletedAt.`);
+  console.log(`Precondition failures: ${result.preconditionFailures}.`);
   if (result.failed.length > 0) {
     throw new Error(`Failed to stamp deletedAt on ${result.failed.length} fit test(s).`);
   }
@@ -212,7 +339,9 @@ module.exports = {
   STAGING_PROJECT_ID,
   applyDeletedAtStamps,
   assertAllowedProject,
+  assertEmulatorHost,
   formatReport,
+  isPreconditionError,
   loadCredentials,
   needsDeletedAtStamp,
   parseArgs,

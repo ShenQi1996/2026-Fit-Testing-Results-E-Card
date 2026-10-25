@@ -6,7 +6,9 @@ import {
   STAGING_PROJECT_ID,
   applyDeletedAtStamps,
   assertAllowedProject,
+  assertEmulatorHost,
   formatReport,
+  isPreconditionError,
   loadCredentials,
   needsDeletedAtStamp,
   parseArgs,
@@ -70,13 +72,42 @@ test('the project argument accepts staging and production and nothing else', () 
     '--project-id',
     STAGING_PROJECT_ID,
     '--dry-run',
-  ])).toEqual({ projectId: STAGING_PROJECT_ID, dryRun: true, write: false });
+  ])).toEqual({
+    projectId: STAGING_PROJECT_ID, dryRun: true, write: false, emulator: false,
+  });
   expect(parseArgs([
     'node',
     'backfillDeletedAt.js',
     `--project-id=${PROD_PROJECT_ID}`,
     '--write',
-  ])).toEqual({ projectId: PROD_PROJECT_ID, dryRun: false, write: true });
+  ])).toEqual({
+    projectId: PROD_PROJECT_ID, dryRun: false, write: true, emulator: false,
+  });
+  expect(parseArgs([
+    'node',
+    'backfillDeletedAt.js',
+    '--emulator',
+    '--project-id',
+    'demo-fit-test-rules',
+    '--dry-run',
+  ])).toEqual({
+    projectId: 'demo-fit-test-rules', dryRun: true, write: false, emulator: true,
+  });
+  expect(() => parseArgs([
+    'node',
+    'backfillDeletedAt.js',
+    '--emulator',
+    '--project-id',
+    STAGING_PROJECT_ID,
+  ])).toThrow(/demo-\*/);
+  const previousHost = process.env.FIRESTORE_EMULATOR_HOST;
+  delete process.env.FIRESTORE_EMULATOR_HOST;
+  try {
+    expect(() => assertEmulatorHost()).toThrow(/FIRESTORE_EMULATOR_HOST/);
+  } finally {
+    if (previousHost === undefined) delete process.env.FIRESTORE_EMULATOR_HOST;
+    else process.env.FIRESTORE_EMULATOR_HOST = previousHost;
+  }
   expect(parseArgs([
     'node',
     'backfillDeletedAt.js',
@@ -123,30 +154,142 @@ test('credentials must name the same project, and a dry run lists ids without wr
   expect(stampPayload()).toEqual({ deletedAt: null });
 });
 
-test('a write sets deletedAt to null and no other field', async () => {
+const fakeDb = (rows, { failBatchOnce = false } = {}) => {
   const updates = [];
+  let batchCommits = 0;
   const db = {
+    updates,
     collection() {
-      return { doc: (id) => ({ id }) };
+      return {
+        doc(id) {
+          return {
+            id,
+            async get() {
+              const row = rows[id];
+              return {
+                id,
+                exists: Boolean(row),
+                updateTime: row ? row.updateTime : null,
+                ref: { id },
+                data: () => (row ? { ...row.data } : undefined),
+              };
+            },
+          };
+        },
+      };
     },
     batch() {
       const ops = [];
       return {
-        update(ref, data) {
-          ops.push({ id: ref.id, data });
+        update(ref, data, precondition) {
+          ops.push({ id: ref.id, data, precondition });
         },
         async commit() {
+          batchCommits += 1;
+          if (failBatchOnce && batchCommits === 1) {
+            const error = new Error('9 FAILED_PRECONDITION: update time precondition failed');
+            error.code = 9;
+            throw error;
+          }
+          updates.push(...ops);
+        },
+      };
+    },
+  };
+  return db;
+};
+
+test('a write sets deletedAt to null and no other field', async () => {
+  const updateTime = { seconds: 5, nanoseconds: 1 };
+  const db = fakeDb({
+    'gap-1': { updateTime, data: { creatorSchool: 'Helene College of Nursing' } },
+    'gap-2': { updateTime, data: { creatorSchool: 'Helene College of Nursing' } },
+  });
+
+  const result = await applyDeletedAtStamps(db, ['gap-1', 'gap-2']);
+  expect(result.failed).toEqual([]);
+  expect(result.skipped).toEqual([]);
+  expect(result.preconditionFailures).toBe(0);
+  expect(result.written).toEqual(['gap-1', 'gap-2']);
+  expect(db.updates).toEqual([
+    {
+      id: 'gap-1',
+      data: { deletedAt: null },
+      precondition: { lastUpdateTime: updateTime },
+    },
+    {
+      id: 'gap-2',
+      data: { deletedAt: null },
+      precondition: { lastUpdateTime: updateTime },
+    },
+  ]);
+});
+
+test('a precondition failure retries each doc and the next batch still runs', async () => {
+  const stale = { seconds: 1, nanoseconds: 0 };
+  const fresh = { seconds: 2, nanoseconds: 0 };
+  const rows = {
+    'soft-deleted': { creatorSchool: 'Helene College of Nursing' },
+    'still-open': { creatorSchool: 'Helene College of Nursing' },
+    later: { creatorSchool: 'Helene College of Nursing' },
+  };
+  const updates = [];
+  let failedOnce = false;
+  let retrying = false;
+  const db = {
+    updates,
+    collection() {
+      return {
+        doc(id) {
+          return {
+            id,
+            async get() {
+              const data = { ...rows[id] };
+              if (retrying && id === 'soft-deleted') data.deletedAt = { seconds: 9 };
+              return {
+                id,
+                exists: true,
+                updateTime: id === 'later' ? fresh : stale,
+                ref: { id },
+                data: () => data,
+              };
+            },
+          };
+        },
+      };
+    },
+    batch() {
+      const ops = [];
+      return {
+        update(ref, data, precondition) {
+          ops.push({ id: ref.id, data, precondition });
+        },
+        async commit() {
+          if (!failedOnce) {
+            failedOnce = true;
+            retrying = true;
+            const error = new Error('9 FAILED_PRECONDITION: update time precondition failed');
+            error.code = 9;
+            throw error;
+          }
           updates.push(...ops);
         },
       };
     },
   };
 
-  const result = await applyDeletedAtStamps(db, ['gap-1', 'gap-2']);
+  const result = await applyDeletedAtStamps(db, ['soft-deleted', 'still-open', 'later'], {
+    batchSize: 2,
+  });
+
+  expect(isPreconditionError({ code: 9, message: 'FAILED_PRECONDITION' })).toBe(true);
+  expect(result.preconditionFailures).toBe(1);
+  expect(result.skipped).toEqual(['soft-deleted']);
+  expect(result.written).toEqual(['still-open', 'later']);
   expect(result.failed).toEqual([]);
-  expect(result.written).toEqual(['gap-1', 'gap-2']);
-  expect(updates).toEqual([
-    { id: 'gap-1', data: { deletedAt: null } },
-    { id: 'gap-2', data: { deletedAt: null } },
-  ]);
+  expect(updates.map((entry) => entry.id)).toEqual(['still-open', 'later']);
+  updates.forEach((entry) => {
+    expect(entry.data).toEqual({ deletedAt: null });
+    expect(entry.precondition.lastUpdateTime).toBeTruthy();
+  });
 });
