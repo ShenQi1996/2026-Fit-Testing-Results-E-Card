@@ -602,6 +602,7 @@ service cloud.firestore {
         !isFacultyRole() &&
         request.auth.uid == request.resource.data.userId
         && fitTestSchoolOkOnCreate()
+        && request.resource.data.deletedAt == null
         && respiratorRecordOk()
         && creatorStampMatchesProfile();
     }

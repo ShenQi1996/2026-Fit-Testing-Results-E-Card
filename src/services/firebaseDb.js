@@ -424,6 +424,7 @@ export const saveFitTest = async (userId, fitTestData) => {
       userId,
       ...recordToSave,
       lookupKey: lookupKey || null,
+      deletedAt: null,
       createdAt,
       updatedAt: createdAt,
       ...(retentionDate ? { retentionDate } : {}),

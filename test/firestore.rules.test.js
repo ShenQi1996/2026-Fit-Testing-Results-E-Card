@@ -848,6 +848,7 @@ test('renamed or removed school names stay readable until the field changes', as
     schoolsList: HELENE,
     creatorRole: 'tester',
     creatorSchool: oldName,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/new-2'), {
@@ -862,6 +863,7 @@ test('renamed or removed school names stay readable until the field changes', as
     schoolsList: '',
     creatorRole: 'tester',
     creatorSchool: oldName,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
 });
@@ -912,9 +914,17 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
     userId: 'tester-1',
     creatorRole: 'tester',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100 }),
   }));
   await assertSucceeds(setDoc(doc(testerDb, 'fitTests/qual-ok'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    deletedAt: null,
+    ...respiratorRecord(),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/missing-deleted'), {
     userId: 'tester-1',
     creatorRole: 'tester',
     creatorSchool: HELENE,
@@ -936,6 +946,7 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
     userId: 'tester-1',
     creatorRole: 'tester',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100000 }),
   }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/qual-factor'), {
@@ -1027,6 +1038,7 @@ test('a new fit test stamps the creator role and school, and those stamps stay p
     schoolsList: SECOND,
     creatorRole: 'tester',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertFails(updateDoc(doc(testerDb, 'fitTests/ok'), { creatorSchool: SECOND }));
@@ -1038,6 +1050,7 @@ test('a new fit test stamps the creator role and school, and those stamps stay p
     schoolsList: HELENE,
     creatorRole: 'admin',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertFails(setDoc(doc(adminDb, 'fitTests/admin-spoof'), {
@@ -1192,6 +1205,7 @@ test('creatorSchool cannot be taken from the card, and a tester with no school c
     schoolsList: SECOND,
     creatorRole: 'tester',
     creatorSchool: HELENE,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertSucceeds(setDoc(doc(adminDb, 'fitTests/admin-second'), {
@@ -1199,6 +1213,7 @@ test('creatorSchool cannot be taken from the card, and a tester with no school c
     schoolsList: HELENE,
     creatorRole: 'admin',
     creatorSchool: SECOND,
+    deletedAt: null,
     ...respiratorRecord(),
   }));
   await assertFails(setDoc(doc(secondDb, 'fitTests/not-mine'), {
