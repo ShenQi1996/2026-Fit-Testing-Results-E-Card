@@ -665,7 +665,7 @@ service cloud.firestore {
           && (!names.hasAny(['respiratorMfg']) || (old.respiratorMfg == resource.data.get('respiratorMfg', null) && neu.respiratorMfg == request.resource.data.get('respiratorMfg', null) && keptText(old.respiratorMfg, neu.respiratorMfg, 200)))
           && (!names.hasAny(['model']) || (old.model == resource.data.get('model', null) && neu.model == request.resource.data.get('model', null) && keptText(old.model, neu.model, 200)))
           && (!names.hasAny(['style']) || (old.style == resource.data.get('style', null) && neu.style == request.resource.data.get('style', null)))
-          && (!names.hasAny(['fitTestMethod']) || (old.fitTestMethod == resource.data.get('fitTestMethod', null) && neu.fitTestMethod == request.resource.data.get('fitTestMethod', null)))
+          && (!names.hasAny(['fitTestMethod']) || (old.fitTestMethod == resource.data.get('fitTestMethod', null) && neu.fitTestMethod == request.resource.data.get('fitTestMethod', null) && keptText(old.fitTestMethod, neu.fitTestMethod, 100)))
           && (!names.hasAny(['fitFactor']) || (old.fitFactor == resource.data.get('fitFactor', null) && neu.fitFactor == request.resource.data.get('fitFactor', null)))
           && (!names.hasAny(['maskSize']) || (old.maskSize == resource.data.get('maskSize', null) && neu.maskSize == request.resource.data.get('maskSize', null) && keptText(old.maskSize, neu.maskSize, 50)))
           && (!names.hasAny(['testingAgent']) || (old.testingAgent == resource.data.get('testingAgent', null) && neu.testingAgent == request.resource.data.get('testingAgent', null)))
@@ -686,11 +686,17 @@ service cloud.firestore {
             || textOk(after, maxSize);
       }
       // Every material edit, including one that does not touch the method.
-      // A legacy "Locked to Qualitative" value has to be corrected in that edit.
+      // A legacy record that never stored a method may leave it blank. Once a
+      // method is stored, the edit has to keep Qualitative or Quantitative.
       function methodStillOk() {
         let method = request.resource.data.get('fitTestMethod', '');
+        let stored = resource.data.get('fitTestMethod', '');
         let factor = request.resource.data.get('fitFactor', null);
-        return (method == 'Qualitative' || method == 'Quantitative' || !hadStoredText(method))
+        return (
+            hadStoredText(stored)
+              ? (method == 'Qualitative' || method == 'Quantitative')
+              : (method == 'Qualitative' || method == 'Quantitative' || !hadStoredText(method))
+          )
           && (method == 'Quantitative'
             ? (factor is number && factor >= 1 && factor <= 100000)
             : method != 'Qualitative' || factor == null);
