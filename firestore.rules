@@ -395,11 +395,17 @@ service cloud.firestore {
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin());
+      // OSHA 1910.134 record integrity: result and test date are fixed after create.
+      function lockedFitTestFieldsUnchanged() {
+        return request.resource.data.get('result', null) == resource.data.get('result', null)
+          && request.resource.data.get('issueDate', null) == resource.data.get('issueDate', null);
+      }
       allow update: if
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin())
-        && fitTestSchoolOkOnUpdate();
+        && fitTestSchoolOkOnUpdate()
+        && lockedFitTestFieldsUnchanged();
       allow delete: if
         isSignedIn() &&
         isApproved() &&
@@ -409,6 +415,23 @@ service cloud.firestore {
         isApproved() &&
         request.auth.uid == request.resource.data.userId
         && fitTestSchoolOkOnCreate();
+
+      match /editHistory/{entryId} {
+        function parentOwner() {
+          return get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.userId;
+        }
+        allow read: if isSignedIn() && isApproved() &&
+          (request.auth.uid == parentOwner() || isAdmin());
+        allow create: if isSignedIn() && isApproved() &&
+          (request.auth.uid == parentOwner() || isAdmin()) &&
+          request.resource.data.editedBy == request.auth.uid &&
+          request.resource.data.editedAt is timestamp &&
+          request.resource.data.fitTestId == fitTestId &&
+          request.resource.data.changes is list &&
+          request.resource.data.changes.size() > 0 &&
+          request.resource.data.changes.size() <= 40;
+        allow update, delete: if false;
+      }
     }
 
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.

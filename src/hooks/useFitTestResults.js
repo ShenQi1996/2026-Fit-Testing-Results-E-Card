@@ -300,6 +300,9 @@ export const useFitTestResults = () => {
   };
 
   const handleEditChange = (field, value) => {
+    if (field === 'result' || field === 'issueDate') {
+      return;
+    }
     setEditData((prev) => ({
       ...prev,
       [field]: value,
@@ -318,26 +321,23 @@ export const useFitTestResults = () => {
       setSuccessMessage('');
       setError('');
 
+      const stored = fitTests.find((test) => test.id === testId);
       const updates = { ...editData };
+      delete updates.result;
+      delete updates.issueDate;
       updates.testLocation = nextLocation;
-      if (editData.issueDate) {
-        updates.expirationDate = calculateExpirationDate(editData.issueDate);
+      if (stored?.issueDate) {
+        updates.expirationDate = calculateExpirationDate(stored.issueDate);
       }
 
       if (!user || !user.uid) {
         throw new Error('User must be logged in to update records.');
       }
-      const previousIssueDate = fitTests.find((test) => test.id === testId)?.issueDate || '';
-      const issueDateChanged = previousIssueDate !== (editData.issueDate || '');
       await updateFitTest(testId, updates, user.uid);
 
-      if (issueDateChanged) {
-        await loadFitTests();
-      } else {
-        setFitTests((prev) => prev.map((test) =>
-          test.id === testId ? { ...test, ...updates } : test
-        ));
-      }
+      setFitTests((prev) => prev.map((test) =>
+        test.id === testId ? { ...test, ...updates } : test
+      ));
 
       setSuccessMessage('Record updated successfully!');
       setEditing(null);

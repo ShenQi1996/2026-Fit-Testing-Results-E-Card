@@ -98,7 +98,7 @@ Collections:
 
 - `users` — testers/admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin)
+- `fitTests` — records (owner or admin). Result and test date cannot change after the record is saved. Allowed edits append `fitTests/{id}/editHistory` (who, when, fields, old and new values) for OSHA record integrity.
 - `fitTestLookups/{lookupKey}` — public get for resend
 - `fitTestVerifications/{token}` — public get for verify
 

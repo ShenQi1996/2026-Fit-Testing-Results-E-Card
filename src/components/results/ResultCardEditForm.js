@@ -56,7 +56,10 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
           type="text"
           className="edit-input"
           value={editData.issueDate || ''}
-          onChange={(e) => onChange('issueDate', e.target.value)}
+          readOnly
+          disabled
+          aria-disabled="true"
+          title="The test date cannot be changed after the record is saved."
           placeholder="MM/DD/YYYY"
         />
       </div>

@@ -695,6 +695,23 @@ export const ensureFitTestVerification = async (record, userId) => {
  * @param {string} userId - User ID of the user making the update (for authorization check)
  * @returns {Promise<void>}
  */
+const LOCKED_FIT_TEST_FIELDS = ['result', 'issueDate'];
+const LOCKED_FIT_TEST_MESSAGE = 'The result and test date cannot be changed after the record is saved.';
+const EDIT_HISTORY_SKIP = new Set([
+  'updatedAt',
+  'createdAt',
+  'lookupKey',
+  'verificationToken',
+  'retentionDate',
+]);
+
+const sameStoredValue = (left, right) => {
+  if (left === right) return true;
+  return left == null && right == null;
+};
+
+const editHistoryValue = (value) => (value === undefined ? null : value);
+
 export const updateFitTest = async (fitTestId, updates, userId) => {
   try {
     // Check if user is admin
@@ -711,21 +728,52 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     
     const docRef = doc(db, FIT_TESTS_COLLECTION, fitTestId);
     const existingSnap = await getDoc(docRef);
-    const existing = existingSnap.exists() ? existingSnap.data() : {};
-    const nextRecord = { ...existing, ...updates };
+    if (!existingSnap.exists()) {
+      throw new Error('Fit test record not found.');
+    }
+    const existing = existingSnap.data() || {};
+    const lockedChange = LOCKED_FIT_TEST_FIELDS.find((field) => (
+      Object.prototype.hasOwnProperty.call(updates, field)
+      && !sameStoredValue(updates[field], existing[field])
+    ));
+    if (lockedChange) {
+      throw new Error(LOCKED_FIT_TEST_MESSAGE);
+    }
+    const writable = { ...updates };
+    LOCKED_FIT_TEST_FIELDS.forEach((field) => {
+      delete writable[field];
+    });
+    const changes = Object.keys(writable)
+      .filter((field) => !EDIT_HISTORY_SKIP.has(field) && writable[field] !== undefined)
+      .filter((field) => !sameStoredValue(writable[field], existing[field]))
+      .map((field) => ({
+        field,
+        oldValue: editHistoryValue(existing[field]),
+        newValue: editHistoryValue(writable[field]),
+      }));
+    const nextRecord = { ...existing, ...writable };
     const previousKey = await resolveLookupKey(existing);
     const nextKey = await resolveLookupKey(nextRecord);
     const verificationToken = resolveVerificationToken(nextRecord);
     nextRecord.verificationToken = verificationToken;
 
     const retentionDate = retentionDateValue(nextRecord);
+    const editedAt = Timestamp.now();
     await updateDoc(docRef, {
-      ...updates,
+      ...writable,
       lookupKey: nextKey || null,
       verificationToken,
-      updatedAt: Timestamp.now(),
+      updatedAt: editedAt,
       ...(retentionDate ? { retentionDate } : {}),
     });
+    if (changes.length > 0) {
+      await addDoc(collection(db, FIT_TESTS_COLLECTION, fitTestId, 'editHistory'), {
+        fitTestId,
+        editedBy: userId,
+        editedAt,
+        changes,
+      });
+    }
 
     // Release lookups this record no longer owns, including any older key format.
     const releasedKeys = new Set(
@@ -752,7 +800,12 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
   } catch (error) {
     console.error('Error updating fit test:', error);
     // Re-throw permission denied errors
-    if (error.code === 'PERMISSION_DENIED') {
+    if (
+      error.code === 'PERMISSION_DENIED'
+      || error.message === LOCKED_FIT_TEST_MESSAGE
+      || error.message === 'Fit test record not found.'
+      || error.message === 'User ID is required to update fit test records.'
+    ) {
       throw error;
     }
     throw new Error('Failed to update fit test record. Please try again.');

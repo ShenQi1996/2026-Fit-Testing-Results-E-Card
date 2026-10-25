@@ -829,7 +829,7 @@ test('renamed or removed school names stay readable until the field changes', as
   await assertSucceeds(getDoc(doc(testerDb, 'users/tester-1')));
   await assertSucceeds(getDoc(doc(adminDb, 'fitTests/old-1')));
   await assertSucceeds(updateDoc(doc(superDb, 'users/tester-1'), { name: 'Tess Updated' }));
-  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/old-1'), { result: 'Pass' }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/old-1'), { clientName: 'Tess Client' }));
   await assertFails(updateDoc(doc(superDb, 'users/tester-1'), { school: 'Another Missing School' }));
   await assertFails(updateDoc(doc(testerDb, 'fitTests/old-1'), { schoolsList: 'Another Missing School' }));
   await assertSucceeds(setDoc(doc(testerDb, 'fitTests/new-1'), {
@@ -868,4 +868,51 @@ test('fitTests count queries follow the same read rules as document reads', asyn
     collection(adminDb, 'fitTests'),
     where('userId', '==', 'tester-1'),
   )));
+});
+
+test('result and issue date cannot change, and edit history is append-only', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/tester-2', approved('tester', 'other@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin()],
+    ['fitTests/own-1', {
+      userId: 'tester-1',
+      result: 'Pass',
+      issueDate: '01/15/2026',
+      model: '1860',
+    }],
+  ]);
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const otherDb = testEnv.authenticatedContext('tester-2').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const history = {
+    fitTestId: 'own-1',
+    editedBy: 'admin-1',
+    editedAt: Timestamp.now(),
+    changes: [{ field: 'model', oldValue: '1860', newValue: '1870' }],
+  };
+
+  await assertFails(updateDoc(doc(ownerDb, 'fitTests/own-1'), { result: 'Fail' }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), { issueDate: '02/02/2026' }));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), { result: deleteField() }));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTests/own-1'), { result: 'Pass', model: '1870' }));
+  await assertFails(setDoc(doc(otherDb, 'fitTests/own-1/editHistory/nope'), {
+    ...history,
+    editedBy: 'tester-2',
+  }));
+  await assertFails(setDoc(doc(adminDb, 'fitTests/own-1/editHistory/spoof'), {
+    ...history,
+    editedBy: 'tester-1',
+  }));
+  await assertFails(setDoc(doc(adminDb, 'fitTests/own-1/editHistory/empty'), {
+    ...history,
+    changes: [],
+  }));
+  await assertSucceeds(setDoc(doc(adminDb, 'fitTests/own-1/editHistory/entry-1'), history));
+  await assertSucceeds(getDoc(doc(ownerDb, 'fitTests/own-1/editHistory/entry-1')));
+  await assertFails(getDoc(doc(otherDb, 'fitTests/own-1/editHistory/entry-1')));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1/editHistory/entry-1'), {
+    editedBy: 'admin-1',
+  }));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTests/own-1/editHistory/entry-1')));
 });

@@ -76,7 +76,7 @@ afterEach(() => {
   jest.clearAllTimers();
 });
 
-test('an issue-date edit reloads the results list', async () => {
+test('an issue-date or result edit is ignored and the list is not reloaded', async () => {
   const apiRef = { current: null };
   await renderProbe(apiRef);
 
@@ -84,25 +84,30 @@ test('an issue-date edit reloads the results list', async () => {
   expect(getUserFitTests).toHaveBeenCalledWith('admin-1');
 
   await act(async () => {
-    apiRef.current.handleEditClick(record);
+    apiRef.current.handleEditClick({ ...record, result: 'Pass' });
   });
   await act(async () => {
     apiRef.current.handleEditChange('issueDate', '09/01/2026');
+    apiRef.current.handleEditChange('result', 'Fail');
+    apiRef.current.handleEditChange('clientName', 'Ada King');
   });
 
-  getUserFitTests.mockResolvedValue([{ ...record, issueDate: '09/01/2026' }]);
+  expect(apiRef.current.editData.issueDate).toBe('10/01/2026');
+  expect(apiRef.current.editData.result).toBe('Pass');
+  expect(apiRef.current.editData.clientName).toBe('Ada King');
+
   await act(async () => {
     await apiRef.current.handleEditSave('ft-1');
   });
   await flush();
 
-  expect(updateFitTest).toHaveBeenCalledWith(
-    'ft-1',
-    expect.objectContaining({ issueDate: '09/01/2026' }),
-    'admin-1',
-  );
-  expect(getUserFitTests).toHaveBeenCalledTimes(2);
-  expect(apiRef.current.fitTests.map((test) => test.issueDate)).toEqual(['09/01/2026']);
+  const updates = updateFitTest.mock.calls[0][1];
+  expect(updateFitTest).toHaveBeenCalledWith('ft-1', updates, 'admin-1');
+  expect(updates.issueDate).toBeUndefined();
+  expect(updates.result).toBeUndefined();
+  expect(updates.clientName).toBe('Ada King');
+  expect(getUserFitTests).toHaveBeenCalledTimes(1);
+  expect(apiRef.current.fitTests.map((test) => test.issueDate)).toEqual(['10/01/2026']);
 });
 
 test('an edit that keeps the issue date does not reload the results list', async () => {

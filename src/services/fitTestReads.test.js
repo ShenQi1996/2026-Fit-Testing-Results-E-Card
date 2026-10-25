@@ -1,8 +1,9 @@
-import { getDoc, getDocs, where, writeBatch } from 'firebase/firestore';
+import { addDoc, getDoc, getDocs, updateDoc, where, writeBatch } from 'firebase/firestore';
 import {
   countFitTestsForUser,
   getFitTestCountsByUser,
   getUserFitTests,
+  updateFitTest,
 } from './firebaseDb';
 
 const userDoc = (role, extra = {}) => ({
@@ -94,4 +95,45 @@ test('a missing composite index is surfaced instead of an empty results list', a
     indexUrl: 'https://console.firebase.google.com/example',
   });
   await expect(countFitTestsForUser('tester-1', { now: NOW })).rejects.toBe(indexError);
+});
+
+test('an allowed edit writes history and a result change does not', async () => {
+  updateDoc.mockClear();
+  addDoc.mockClear();
+  const stored = {
+    userId: 'tester-1',
+    clientName: 'Ada Lovelace',
+    recipientEmail: 'ada@example.com',
+    dob: '01/01/1990',
+    result: 'Pass',
+    issueDate: '01/15/2026',
+    model: '1860',
+  };
+  getDoc.mockImplementation(async (ref) => {
+    const name = ref?.args?.[1];
+    if (name === 'users') return userDoc('admin');
+    if (name === 'fitTests') {
+      return { exists: () => true, data: () => stored };
+    }
+    return { exists: () => false, data: () => null };
+  });
+
+  await expect(updateFitTest('ft-1', { result: 'Fail', model: '1870' }, 'admin-1'))
+    .rejects.toThrow(/cannot be changed/);
+  expect(updateDoc).not.toHaveBeenCalled();
+  expect(addDoc).not.toHaveBeenCalled();
+
+  await updateFitTest('ft-1', { model: '1870', result: 'Pass' }, 'admin-1');
+
+  expect(updateDoc).toHaveBeenCalledTimes(1);
+  const written = updateDoc.mock.calls[0][1];
+  expect(written.model).toBe('1870');
+  expect(written.result).toBeUndefined();
+  expect(written.issueDate).toBeUndefined();
+  expect(addDoc).toHaveBeenCalledTimes(1);
+  expect(addDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+    fitTestId: 'ft-1',
+    editedBy: 'admin-1',
+    changes: [{ field: 'model', oldValue: '1860', newValue: '1870' }],
+  }));
 });

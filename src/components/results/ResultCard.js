@@ -327,8 +327,11 @@ const ResultCard = ({
         {isEditing ? (
           <select
             className="edit-select edit-result-badge"
-            value={editData.result || 'Pass'}
-            onChange={(e) => onEditChange('result', e.target.value)}
+            value={test.result || 'Pass'}
+            disabled
+            aria-disabled="true"
+            title="The result cannot be changed after the record is saved."
+            onChange={() => {}}
           >
             {RESULT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>

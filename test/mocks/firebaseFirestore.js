@@ -1,7 +1,7 @@
 const noop = () => {};
 
 exports.collection = noop;
-exports.addDoc = async () => ({ id: "mock-id" });
+exports.addDoc = jest.fn(async () => ({ id: "mock-id" }));
 exports.getDocs = jest.fn(async () => ({ docs: [], empty: true, forEach() {} }));
 exports.doc = jest.fn((...args) => ({ args }));
 exports.getDoc = jest.fn(async () => ({ exists: () => false, data: () => null, id: "mock-id" }));
