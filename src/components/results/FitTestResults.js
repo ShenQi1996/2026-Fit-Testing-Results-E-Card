@@ -37,6 +37,7 @@ const FitTestResults = () => {
     isCardExpanded,
     handleDeleteClick,
     handleDeleteCancel,
+    handleDeleteReasonChange,
     handleDeleteConfirm,
     handlePreviewResultPdf,
     handleDownloadResultPdf,
@@ -241,12 +242,25 @@ const FitTestResults = () => {
         {deleteConfirm && (
           <div className="modal-overlay" onClick={handleDeleteCancel}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              <h3>Confirm Delete</h3>
+              <h3>Remove from list</h3>
               <p>
-                Are you sure you want to delete the fit test record for{' '}
-                <strong>"{deleteConfirm.clientName}"</strong>?
+                Hide the fit test record for{' '}
+                <strong>"{deleteConfirm.clientName}"</strong> from normal lists.
+                The record is kept until the next fit test.
               </p>
-              <p className="modal-warning">This action cannot be undone.</p>
+              <label htmlFor="delete-reason">
+                Reason <span className="required-mark">*</span>
+              </label>
+              <textarea
+                id="delete-reason"
+                className="form-textarea"
+                value={deleteConfirm.reason || ''}
+                onChange={(event) => handleDeleteReasonChange(event.target.value)}
+                required
+                rows={3}
+                maxLength={500}
+                disabled={deleting}
+              />
               <div className="modal-buttons">
                 <button
                   onClick={handleDeleteCancel}
@@ -258,9 +272,9 @@ const FitTestResults = () => {
                 <button
                   onClick={handleDeleteConfirm}
                   className="modal-button confirm-delete-button"
-                  disabled={deleting}
+                  disabled={deleting || !(deleteConfirm.reason || '').trim()}
                 >
-                  {deleting ? 'Deleting...' : 'Delete'}
+                  {deleting ? 'Removing...' : 'Remove from list'}
                 </button>
               </div>
             </div>

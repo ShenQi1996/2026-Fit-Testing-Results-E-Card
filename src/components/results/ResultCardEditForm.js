@@ -3,7 +3,9 @@ import { formatDateInput } from '../../utils/dateUtils';
 import {
   TEST_LOCATION_OPTIONS,
   FIT_TEST_TYPE_OPTIONS,
+  FIT_TEST_METHOD_OPTIONS,
   RESPIRATOR_MFG_OPTIONS,
+  RESPIRATOR_STYLE_OPTIONS,
   TESTING_AGENT_OPTIONS,
   MASK_SIZE_OPTIONS,
   isCustomOptionValue,
@@ -150,6 +152,46 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
           placeholder="e.g., 1870+"
         />
       </div>
+      <div className="edit-form-row">
+        <label>Style:</label>
+        <select
+          className="edit-select"
+          value={editData.style || ''}
+          onChange={(e) => onChange('style', e.target.value)}
+        >
+          <option value="">Select style</option>
+          {RESPIRATOR_STYLE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="edit-form-row">
+        <label>Fit Test Method:</label>
+        <select
+          className="edit-select"
+          value={editData.fitTestMethod || ''}
+          onChange={(e) => onChange('fitTestMethod', e.target.value)}
+        >
+          <option value="">Select method</option>
+          {FIT_TEST_METHOD_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
+      {editData.fitTestMethod === 'Quantitative' && (
+        <div className="edit-form-row">
+          <label>Fit Factor:</label>
+          <input
+            type="number"
+            className="edit-input"
+            min="1"
+            max="100000"
+            value={editData.fitFactor ?? ''}
+            onChange={(e) => onChange('fitFactor', e.target.value)}
+            placeholder="1 to 100000"
+          />
+        </div>
+      )}
       <div className="edit-form-row">
         <label>Fit Tester:</label>
         <input

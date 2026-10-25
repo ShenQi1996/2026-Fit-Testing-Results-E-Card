@@ -96,11 +96,20 @@ Until `fitTestVerifications` rules are published, `/verify` cannot confirm cards
 
 Collections:
 
-- `users` — testers/admins (`role`, `status`)
+- `users` — testers, faculty, and admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin). Result, test date, expiration date, and retention date cannot change after the record is saved. Any other edit is saved in the same batch as `fitTests/{id}/editHistory/{id}`: the editor is the signed-in user, the time is the server time, and history entries cannot be updated or deleted.
-- `fitTestLookups/{lookupKey}` — public get for resend
-- `fitTestVerifications/{token}` — public get for verify. Copied card fields must match the fit test. Only that record's owner or an admin can write the copy.
+- `fitTests` — records (owner or admin). Faculty read by `creatorSchool`. New records must include respirator make, model, style, and size, plus qualitative or quantitative method. A quantitative test stores a fit factor from 1 to 100000. A qualitative test does not store a fit factor. An update cannot blank or remove respirator make, model, style, size, or method when those fields are already on the record (OSHA 1910.134(m)(2)). Result, test date, expiration date, and retention date cannot change after the record is saved. Any other edit is saved in the same batch as `fitTests/{id}/editHistory/{id}`: the editor is the signed-in user, the time is the server time, the `changes` map (`old` and `new` values of every field that actually changed, compared with the stored document and the write) matches the real diff, and history entries cannot be updated or deleted. A soft delete is exempt from that history entry. An in-scope admin or a super admin removes one from the list by setting `deletedAt` (server time), `deletedBy`, and a non-empty `deleteReason` in the same batch as `fitTestDeletionLogs/{fitTestId}`. The document is not deleted. Those deletion fields cannot be set when the record is created. A soft-deleted record cannot be edited. Faculty lists and counts skip records that have `deletedAt`.
+- `fitTestDeletionLogs` — one append-only log per fit test, written with the soft delete. The log stores the fit test's `schoolsList`. A super admin can read every log. A scoped admin can read a log only when that school is one of theirs. The owning tester can read their own log and cannot write one. Hard delete of `fitTests` is denied so the record is kept until the next fit test (OSHA 1910.134(m)(3)).
+- `fitTestLookups/{lookupKey}` — public get for resend. Create and update are limited to the record owner or an in-scope admin, and the copied fields must match the fit test. Hard delete is denied. `revokedAt`, once set, cannot be cleared. A removed record sets `revokedAt` on its lookup unless a later live test already takes that key. Resend skips a revoked card.
+- `fitTestVerifications/{token}` — public get for verify. The token and the copied fields must match the fit test. Hard delete is denied. A removed record sets `revokedAt`, and verify shows the card as revoked. `revokedAt` cannot be cleared.
+
+## Faculty
+
+Faculty see fit-test results for their own school. They cannot send e-cards, edit, delete, resend, or manage users. An admin assigns the faculty role in Users. A faculty profile stores one `school` string, the same shape as a tester.
+
+Each new fit test stores `creatorRole` and `creatorSchool` from the signed-in profile at save time. A tester's stamp is their profile `school`. An admin's stamp is one school from their own `schools` list. A tester with no profile school cannot save a fit test. Those fields stay as they were if that person later changes role or school. Faculty have exactly one `school` and no `schools` list. They may read a result only when `creatorSchool` equals that school and their access window is open. A missing start or end leaves that side open, the same as an admin. Outside the window they cannot read results. The results query is `creatorSchool` equal to that school, ordered by `createdAt` descending, with a limit of 100. The sidebar count uses that same limit, skips soft-deleted records, and uses the same retention filter as the list. Tests saved before these fields existed have no `creatorSchool` and stay hidden from faculty. This change does not backfill them.
+
+The composite index for that query (`creatorSchool` ascending, `createdAt` descending) is a separate change. It is not in this branch and is not deployed from here.
 
 ## Staff workflow
 

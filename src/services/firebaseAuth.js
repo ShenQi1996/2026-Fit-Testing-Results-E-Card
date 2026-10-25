@@ -28,6 +28,7 @@ import {
 import {
   isAdminOrAbove,
   isSuperAdmin,
+  USER_ROLE_FACULTY,
   USER_ROLE_SUPERADMIN,
   USER_ROLE_TESTER,
   USER_ROLES,
@@ -388,14 +389,15 @@ export const createManagedAuthUser = async (adminUserId, userData = {}) => {
     const adminRole = adminAccess.role;
     const requestedRole = userData.role || USER_ROLE_TESTER;
     if (!USER_ROLES.includes(requestedRole)) {
-      throw new Error('Invalid role. Must be tester, admin, or superadmin.');
+      throw new Error('Invalid role. Must be tester, faculty, admin, or superadmin.');
     }
     if (requestedRole === USER_ROLE_SUPERADMIN) {
       const error = new Error('A super admin cannot be created from the client.');
       error.code = 'PERMISSION_DENIED';
       throw error;
     }
-    if (requestedRole !== USER_ROLE_TESTER && !isSuperAdmin(adminRole)) {
+    const singleSchoolRole = requestedRole === USER_ROLE_TESTER || requestedRole === USER_ROLE_FACULTY;
+    if (!singleSchoolRole && !isSuperAdmin(adminRole)) {
       const error = new Error('Only a super admin can create admin accounts.');
       error.code = 'PERMISSION_DENIED';
       throw error;

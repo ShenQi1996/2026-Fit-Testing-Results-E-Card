@@ -69,6 +69,29 @@ export const validateFitTestForm = (formData, hasStrokes = false, hasTesterStrok
     fieldErrors.maskSize = 'Please select mask size.';
   }
 
+  if (!formData.model?.trim()) {
+    fieldErrors.model = 'Please enter the respirator model.';
+  }
+
+  if (!formData.style?.trim()) {
+    fieldErrors.style = 'Please select the respirator style.';
+  }
+
+  if (formData.fitTestMethod !== 'Qualitative' && formData.fitTestMethod !== 'Quantitative') {
+    fieldErrors.fitTestMethod = 'Please select qualitative or quantitative.';
+  }
+
+  if (formData.fitTestMethod === 'Quantitative') {
+    const fitFactor = Number(formData.fitFactor);
+    if (!Number.isFinite(fitFactor) || fitFactor < 1 || fitFactor > 100000) {
+      fieldErrors.fitFactor = 'Enter a fit factor from 1 to 100000.';
+    }
+  }
+
+  if (formData.fitTestMethod === 'Qualitative' && String(formData.fitFactor || '').trim()) {
+    fieldErrors.fitFactor = 'A qualitative test does not record a fit factor.';
+  }
+
   // Validate result
   if (!formData.result?.trim()) {
     fieldErrors.result = 'Please select result.';
