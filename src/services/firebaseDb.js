@@ -15,6 +15,7 @@ import {
   orderBy,
   Timestamp,
   deleteField,
+  serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -99,9 +100,6 @@ const toVerifyCardData = (record = {}) => {
   VERIFY_CARD_FIELDS.forEach((field) => {
     data[field] = record[field] || '';
   });
-  if (!data.expirationDate && data.issueDate) {
-    data.expirationDate = calculateExpirationDate(data.issueDate);
-  }
   return data;
 };
 
@@ -631,6 +629,9 @@ export const lookupFitTestForVerification = async (token) => {
     }
 
     const card = toVerifyCardData(verifySnap.data() || {});
+    if (!card.expirationDate && card.issueDate) {
+      card.expirationDate = calculateExpirationDate(card.issueDate);
+    }
     const expired = isExpirationDatePast(card.expirationDate);
     const passed = (card.result || '').trim().toLowerCase() === 'pass';
 
@@ -695,14 +696,14 @@ export const ensureFitTestVerification = async (record, userId) => {
  * @param {string} userId - User ID of the user making the update (for authorization check)
  * @returns {Promise<void>}
  */
-const LOCKED_FIT_TEST_FIELDS = ['result', 'issueDate'];
-const LOCKED_FIT_TEST_MESSAGE = 'The result and test date cannot be changed after the record is saved.';
+const LOCKED_FIT_TEST_FIELDS = ['result', 'issueDate', 'expirationDate', 'retentionDate'];
+const LOCKED_FIT_TEST_MESSAGE = 'The result, test date, expiration date, and retention date cannot be changed after the record is saved.';
 const EDIT_HISTORY_SKIP = new Set([
   'updatedAt',
   'createdAt',
   'lookupKey',
   'verificationToken',
-  'retentionDate',
+  'lastEditId',
 ]);
 
 const sameStoredValue = (left, right) => {
@@ -751,28 +752,36 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
         oldValue: editHistoryValue(existing[field]),
         newValue: editHistoryValue(writable[field]),
       }));
+    const changedWritable = {};
+    changes.forEach((change) => {
+      changedWritable[change.field] = writable[change.field];
+    });
     const nextRecord = { ...existing, ...writable };
     const previousKey = await resolveLookupKey(existing);
     const nextKey = await resolveLookupKey(nextRecord);
     const verificationToken = resolveVerificationToken(nextRecord);
     nextRecord.verificationToken = verificationToken;
 
-    const retentionDate = retentionDateValue(nextRecord);
-    const editedAt = Timestamp.now();
-    await updateDoc(docRef, {
-      ...writable,
+    const payload = {
+      ...changedWritable,
       lookupKey: nextKey || null,
       verificationToken,
-      updatedAt: editedAt,
-      ...(retentionDate ? { retentionDate } : {}),
-    });
+      updatedAt: serverTimestamp(),
+    };
     if (changes.length > 0) {
-      await addDoc(collection(db, FIT_TESTS_COLLECTION, fitTestId, 'editHistory'), {
+      const lastEditId = createVerificationToken();
+      payload.lastEditId = lastEditId;
+      const batch = writeBatch(db);
+      batch.update(docRef, payload);
+      batch.set(doc(db, FIT_TESTS_COLLECTION, fitTestId, 'editHistory', lastEditId), {
         fitTestId,
         editedBy: userId,
-        editedAt,
+        editedAt: serverTimestamp(),
         changes,
       });
+      await batch.commit();
+    } else {
+      await updateDoc(docRef, payload);
     }
 
     // Release lookups this record no longer owns, including any older key format.
@@ -1355,8 +1364,9 @@ export {
 } from './profilesDb';
 
 /**
- * Backfill expiration dates for existing fit test records
- * Calculates expiration date as issueDate + 1 year for records missing expirationDate
+ * Backfill expiration dates for existing fit test records.
+ * Calculates expiration date as issueDate + 1 year for records missing expirationDate.
+ * Security rules reject the write: expirationDate is locked after the record is created.
  * @param {string} userId - User ID (optional, if provided only backfills user's records)
  * @param {number} batchSize - Number of records to process per batch (default: 100)
  * @returns {Promise<{processed: number, updated: number}>} Statistics about the backfill

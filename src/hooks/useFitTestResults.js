@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getUserFitTests, deleteFitTest, updateFitTest, ensureFitTestVerification } from '../services/firebaseDb';
 import { sendFitTestCard } from '../services/emailService';
-import { calculateExpirationDate } from '../utils/dateUtils';
 import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../utils/csvUtils';
 import { TEST_LOCATION_OPTIONS } from '../constants/fitTestOptions';
@@ -321,14 +320,12 @@ export const useFitTestResults = () => {
       setSuccessMessage('');
       setError('');
 
-      const stored = fitTests.find((test) => test.id === testId);
       const updates = { ...editData };
       delete updates.result;
       delete updates.issueDate;
+      delete updates.expirationDate;
+      delete updates.retentionDate;
       updates.testLocation = nextLocation;
-      if (stored?.issueDate) {
-        updates.expirationDate = calculateExpirationDate(stored.issueDate);
-      }
 
       if (!user || !user.uid) {
         throw new Error('User must be logged in to update records.');

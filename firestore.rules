@@ -395,17 +395,42 @@ service cloud.firestore {
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin());
-      // OSHA 1910.134 record integrity: result and test date are fixed after create.
+      // OSHA 1910.134 record integrity: result, test date, and the dates derived
+      // from the test date stay fixed after create. A material edit must create
+      // its history entry in the same batch.
       function lockedFitTestFieldsUnchanged() {
         return request.resource.data.get('result', null) == resource.data.get('result', null)
-          && request.resource.data.get('issueDate', null) == resource.data.get('issueDate', null);
+          && request.resource.data.get('issueDate', null) == resource.data.get('issueDate', null)
+          && request.resource.data.get('expirationDate', null) == resource.data.get('expirationDate', null)
+          && request.resource.data.get('retentionDate', null) == resource.data.get('retentionDate', null);
+      }
+      function onlyHousekeeping() {
+        return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['updatedAt', 'lookupKey', 'verificationToken', 'lastEditId']);
+      }
+      function historyCreatedNow(entryId) {
+        let historyPath = /databases/$(database)/documents/fitTests/$(fitTestId)/editHistory/$(entryId);
+        return !exists(historyPath)
+          && existsAfter(historyPath)
+          && getAfter(historyPath).data.get('fitTestId', '') == fitTestId
+          && getAfter(historyPath).data.get('editedBy', '') == request.auth.uid
+          && getAfter(historyPath).data.get('changes', []).size() > 0
+          && getAfter(historyPath).data.get('changes', []).size() <= 40;
+      }
+      function editHistoryAfterOk() {
+        let entryId = request.resource.data.get('lastEditId', '');
+        return entryId is string
+          && entryId.size() > 0
+          && entryId.size() <= 80
+          && historyCreatedNow(entryId);
       }
       allow update: if
         isSignedIn() &&
         isApproved() &&
         (request.auth.uid == resource.data.userId || isAdmin())
         && fitTestSchoolOkOnUpdate()
-        && lockedFitTestFieldsUnchanged();
+        && lockedFitTestFieldsUnchanged()
+        && (onlyHousekeeping() || editHistoryAfterOk());
       allow delete: if
         isSignedIn() &&
         isApproved() &&
@@ -425,11 +450,12 @@ service cloud.firestore {
         allow create: if isSignedIn() && isApproved() &&
           (request.auth.uid == parentOwner() || isAdmin()) &&
           request.resource.data.editedBy == request.auth.uid &&
-          request.resource.data.editedAt is timestamp &&
+          request.resource.data.editedAt == request.time &&
           request.resource.data.fitTestId == fitTestId &&
           request.resource.data.changes is list &&
           request.resource.data.changes.size() > 0 &&
-          request.resource.data.changes.size() <= 40;
+          request.resource.data.changes.size() <= 40 &&
+          getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('lastEditId', '') == entryId;
         allow update, delete: if false;
       }
     }
@@ -449,9 +475,34 @@ service cloud.firestore {
     // Public verify: guests can read one verification doc only if they know the token.
     // Listing is denied so the collection cannot be dumped.
     match /fitTestVerifications/{token} {
+      function parentFitTest() {
+        return get(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data;
+      }
+      function copiedFieldMatches(field) {
+        return request.resource.data.get(field, '') == parentFitTest().get(field, '');
+      }
+      // The public card is a copy. Only the record owner or an admin may write
+      // it, and every copied field has to match the fit test it points at.
+      function verificationMatchesParent() {
+        return request.resource.data.fitTestId is string
+          && request.resource.data.fitTestId.size() > 0
+          && exists(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId))
+          && request.resource.data.get('userId', '') == parentFitTest().get('userId', '')
+          && (request.auth.uid == parentFitTest().get('userId', '') || isAdmin())
+          && copiedFieldMatches('result')
+          && copiedFieldMatches('issueDate')
+          && copiedFieldMatches('expirationDate')
+          && copiedFieldMatches('clientName')
+          && copiedFieldMatches('testLocation')
+          && copiedFieldMatches('fitTestType')
+          && copiedFieldMatches('respiratorMfg')
+          && copiedFieldMatches('maskSize')
+          && copiedFieldMatches('model')
+          && copiedFieldMatches('fitTester');
+      }
       allow get: if true;
       allow list: if false;
-      allow create, update: if isSignedIn() && isApproved();
+      allow create, update: if isSignedIn() && isApproved() && verificationMatchesParent();
       allow delete: if
         isSignedIn() &&
         isApproved() &&

@@ -100,6 +100,7 @@ test('a missing composite index is surfaced instead of an empty results list', a
 test('an allowed edit writes history and a result change does not', async () => {
   updateDoc.mockClear();
   addDoc.mockClear();
+  writeBatch.mockClear();
   const stored = {
     userId: 'tester-1',
     clientName: 'Ada Lovelace',
@@ -107,6 +108,7 @@ test('an allowed edit writes history and a result change does not', async () => 
     dob: '01/01/1990',
     result: 'Pass',
     issueDate: '01/15/2026',
+    expirationDate: '01/15/2027',
     model: '1860',
   };
   getDoc.mockImplementation(async (ref) => {
@@ -120,20 +122,39 @@ test('an allowed edit writes history and a result change does not', async () => 
 
   await expect(updateFitTest('ft-1', { result: 'Fail', model: '1870' }, 'admin-1'))
     .rejects.toThrow(/cannot be changed/);
+  await expect(updateFitTest('ft-1', { expirationDate: '02/02/2027' }, 'admin-1'))
+    .rejects.toThrow(/cannot be changed/);
+  await expect(updateFitTest('ft-1', { retentionDate: { seconds: 1 } }, 'admin-1'))
+    .rejects.toThrow(/cannot be changed/);
   expect(updateDoc).not.toHaveBeenCalled();
   expect(addDoc).not.toHaveBeenCalled();
+  expect(writeBatch).not.toHaveBeenCalled();
 
-  await updateFitTest('ft-1', { model: '1870', result: 'Pass' }, 'admin-1');
+  await updateFitTest('ft-1', { model: '1870', result: 'Pass', expirationDate: '01/15/2027' }, 'admin-1');
 
-  expect(updateDoc).toHaveBeenCalledTimes(1);
-  const written = updateDoc.mock.calls[0][1];
+  expect(updateDoc).not.toHaveBeenCalled();
+  expect(addDoc).not.toHaveBeenCalled();
+  expect(writeBatch).toHaveBeenCalledTimes(1);
+  const batch = writeBatch.mock.results[0].value;
+  expect(batch.commit).toHaveBeenCalledTimes(1);
+  const written = batch.update.mock.calls[0][1];
   expect(written.model).toBe('1870');
   expect(written.result).toBeUndefined();
   expect(written.issueDate).toBeUndefined();
-  expect(addDoc).toHaveBeenCalledTimes(1);
-  expect(addDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+  expect(written.expirationDate).toBeUndefined();
+  expect(written.retentionDate).toBeUndefined();
+  expect(written.lastEditId).toEqual(expect.stringMatching(/^[a-f0-9]{32}$/));
+  expect(written.updatedAt).toEqual({ kind: 'serverTimestamp' });
+  expect(batch.set.mock.calls[0][0].args.slice(1)).toEqual([
+    'fitTests',
+    'ft-1',
+    'editHistory',
+    written.lastEditId,
+  ]);
+  expect(batch.set.mock.calls[0][1]).toEqual({
     fitTestId: 'ft-1',
     editedBy: 'admin-1',
+    editedAt: { kind: 'serverTimestamp' },
     changes: [{ field: 'model', oldValue: '1860', newValue: '1870' }],
-  }));
+  });
 });

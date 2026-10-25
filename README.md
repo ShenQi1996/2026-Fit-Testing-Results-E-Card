@@ -98,9 +98,9 @@ Collections:
 
 - `users` — testers/admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin). Result and test date cannot change after the record is saved. Allowed edits append `fitTests/{id}/editHistory` (who, when, fields, old and new values) for OSHA record integrity.
+- `fitTests` — records (owner or admin). Result, test date, expiration date, and retention date cannot change after the record is saved. Any other edit is saved in the same batch as `fitTests/{id}/editHistory/{id}`: the editor is the signed-in user, the time is the server time, and history entries cannot be updated or deleted.
 - `fitTestLookups/{lookupKey}` — public get for resend
-- `fitTestVerifications/{token}` — public get for verify
+- `fitTestVerifications/{token}` — public get for verify. Copied card fields must match the fit test. Only that record's owner or an admin can write the copy.
 
 ## Staff workflow
 
