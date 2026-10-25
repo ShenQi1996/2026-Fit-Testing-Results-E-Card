@@ -556,7 +556,7 @@ test('a failed medical-notes read still returns fit tests without inline notes',
   expect(listed[0].testerMedicalRestrictionsNote).toBeUndefined();
 });
 
-test('an in-scope admin edit clears legacy inline notes and records that in history', async () => {
+test('an in-scope admin edit moves a legacy inline note off the fit test without history', async () => {
   writeBatch.mockClear();
   const stored = {
     userId: 'tester-1',
@@ -584,19 +584,10 @@ test('an in-scope admin edit clears legacy inline notes and records that in hist
   expect(payload.testerMedicalRestrictionsReceived).toEqual({ kind: 'deleteField' });
   expect(payload.testerMedicalRestrictionsNote).toEqual({ kind: 'deleteField' });
   expect(payload.clientName).toBeUndefined();
-  const historyWrite = batch.set.mock.calls.find((call) => call[0].args[3] === 'editHistory');
-  expect(historyWrite[1].fields.sort()).toEqual([
-    'testerMedicalRestrictionsNote',
-    'testerMedicalRestrictionsReceived',
-  ]);
-  expect(historyWrite[1].changes).toEqual({
-    old: {
-      testerMedicalRestrictionsReceived: true,
-      testerMedicalRestrictionsNote: 'legacy inline',
-    },
-    new: {},
-  });
+  const historyWrite = batch.set.mock.calls.find((call) => call[0].args.includes('editHistory'));
+  expect(historyWrite).toBeUndefined();
   const noteWrite = batch.set.mock.calls.find((call) => call[0].args[1] === 'fitTestMedicalNotes');
+  expect(batch.set.mock.invocationCallOrder[0]).toBeLessThan(batch.update.mock.invocationCallOrder[0]);
   expect(noteWrite[1]).toEqual(expect.objectContaining({
     fitTestId: 'ft-1',
     userId: 'tester-1',

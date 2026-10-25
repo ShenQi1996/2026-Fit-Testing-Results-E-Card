@@ -47,6 +47,11 @@ export const FIT_TEST_METHOD_OPTIONS = [
   { value: 'Quantitative', label: 'Quantitative' },
 ];
 
+// Older records stored the display label. Reads and saves use the canonical value.
+export const canonicalFitTestMethod = (value) => (
+  value === 'Locked to Qualitative' ? 'Qualitative' : value
+);
+
 export const RESPIRATOR_STYLE_OPTIONS = [
   { value: 'Filtering facepiece', label: 'Filtering facepiece' },
   { value: 'Half-facepiece', label: 'Half-facepiece' },

@@ -460,6 +460,10 @@ export const saveFitTest = async (userId, fitTestData) => {
     const clientData = withoutMedicalNote(fitTestData || {});
     delete clientData[CREATOR_ROLE_FIELD];
     delete clientData[CREATOR_SCHOOL_FIELD];
+    if (clientData.fitTestMethod === 'Locked to Qualitative') {
+      clientData.fitTestMethod = 'Qualitative';
+      delete clientData.fitFactor;
+    }
     const lookupKey = await resolveLookupKey(clientData);
     const verificationToken = resolveVerificationToken(clientData);
     const recordToSave = {
@@ -1007,17 +1011,31 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     if (isSoftDeletedFitTest(existing)) {
       throw new Error('This fit test record is already hidden.');
     }
+    const normalizedUpdates = { ...(updates || {}) };
+    const incomingMethod = Object.prototype.hasOwnProperty.call(normalizedUpdates, 'fitTestMethod')
+      ? normalizedUpdates.fitTestMethod
+      : existing.fitTestMethod;
+    if (incomingMethod === 'Locked to Qualitative') {
+      normalizedUpdates.fitTestMethod = 'Qualitative';
+    }
+    if (normalizedUpdates.fitTestMethod === 'Qualitative') {
+      const factor = normalizedUpdates.fitFactor;
+      const clearingFactor = isDeleteSentinel(factor);
+      if (!clearingFactor && (existing.fitFactor != null || Object.prototype.hasOwnProperty.call(normalizedUpdates, 'fitFactor'))) {
+        normalizedUpdates.fitFactor = deleteField();
+      }
+    }
     const lockedChange = LOCKED_FIT_TEST_FIELDS.find((field) => (
-      Object.prototype.hasOwnProperty.call(updates, field)
-      && !sameStoredValue(updates[field], existing[field])
+      Object.prototype.hasOwnProperty.call(normalizedUpdates, field)
+      && !sameStoredValue(normalizedUpdates[field], existing[field])
     ));
     if (lockedChange) {
       throw new Error(LOCKED_FIT_TEST_MESSAGE);
     }
-
-    const notePresent = hasMedicalNoteInput(updates);
-    const note = notePresent ? medicalNoteFromRecord(updates) : null;
-    const writable = withoutMedicalNote(updates || {});
+    const formNote = hasMedicalNoteInput(normalizedUpdates)
+      ? medicalNoteFromRecord(normalizedUpdates)
+      : null;
+    const writable = withoutMedicalNote(normalizedUpdates);
     LOCKED_FIT_TEST_FIELDS.forEach((field) => {
       delete writable[field];
     });
@@ -1027,55 +1045,47 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const schoolsList = typeof existing.schoolsList === 'string' ? existing.schoolsList : '';
     const canStripLegacyNotes = isSuperAdmin(access.role)
       || (schoolsList !== '' && normalizeSchoolList(access.schools).includes(schoolsList));
-    if (canStripLegacyNotes) {
+    const hasLegacyInlineNote = MEDICAL_NOTE_FIELDS.some((field) => (
+      Object.prototype.hasOwnProperty.call(existing, field)
+    ));
+    const noteStrips = {};
+    let note = formNote;
+    if (canStripLegacyNotes && hasLegacyInlineNote) {
       MEDICAL_NOTE_FIELDS.forEach((field) => {
-        if (Object.prototype.hasOwnProperty.call(existing, field)) {
-          writable[field] = deleteField();
-        }
+        noteStrips[field] = deleteField();
       });
+      if (!note) note = medicalNoteFromRecord(existing);
     }
 
     const oldValues = {};
     const newValues = {};
-    Object.keys(writable)
-      .filter((field) => !EDIT_HISTORY_SKIP.has(field) && writable[field] !== undefined)
-      .filter((field) => !sameStoredValue(
+    const changedFieldNames = Object.keys(writable).filter((field) => (
+      !EDIT_HISTORY_SKIP.has(field)
+      && !MEDICAL_NOTE_FIELDS.includes(field)
+      && writable[field] !== undefined
+      && !sameStoredValue(
         isDeleteSentinel(writable[field]) ? null : writable[field],
         existing[field],
-      ))
-      .forEach((field) => {
-        // A missing key means the field was absent. An explicit null stays,
-        // because that is different from a field the document never had.
-        if (Object.prototype.hasOwnProperty.call(existing, field)) {
-          oldValues[field] = editHistoryValue(existing[field]);
-        }
-        if (!isDeleteSentinel(writable[field])) {
-          newValues[field] = editHistoryValue(writable[field]);
-        }
-      });
+      )
+    ));
+    changedFieldNames.forEach((field) => {
+      // Both maps list every changed field. A field the document never had is null.
+      oldValues[field] = Object.prototype.hasOwnProperty.call(existing, field)
+        ? editHistoryValue(existing[field])
+        : null;
+      newValues[field] = isDeleteSentinel(writable[field])
+        ? null
+        : editHistoryValue(writable[field]);
+    });
     const changes = { old: oldValues, new: newValues };
-    const changedFields = new Set(
-      Object.keys(writable).filter((field) => (
-        !EDIT_HISTORY_SKIP.has(field)
-        && writable[field] !== undefined
-        && !sameStoredValue(
-          isDeleteSentinel(writable[field]) ? null : writable[field],
-          existing[field],
-        )
-      )),
-    );
+    const changedFields = new Set(changedFieldNames);
     const changedWritable = {};
     changedFields.forEach((field) => {
       changedWritable[field] = writable[field];
     });
-
-    const nextRecord = { ...existing };
-    Object.keys(writable).forEach((field) => {
-      if (isDeleteSentinel(writable[field])) {
-        delete nextRecord[field];
-      } else if (writable[field] !== undefined) {
-        nextRecord[field] = writable[field];
-      }
+    const nextRecord = { ...existing, ...writable, ...noteStrips };
+    Object.keys(nextRecord).forEach((field) => {
+      if (isDeleteSentinel(nextRecord[field])) delete nextRecord[field];
     });
     const previousKey = await resolveLookupKey(existing);
     const nextKey = await resolveLookupKey(nextRecord);
@@ -1085,11 +1095,23 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const ownerId = existing.userId || userId;
     const payload = {
       ...changedWritable,
+      ...noteStrips,
       lookupKey: nextKey || null,
       verificationToken,
       updatedAt: serverTimestamp(),
     };
     const batch = writeBatch(db);
+    if (note) {
+      queueMedicalNote(
+        batch,
+        fitTestId,
+        ownerId,
+        userId,
+        note,
+        serverTimestamp(),
+        schoolsList,
+      );
+    }
     if (changedFields.size > 0) {
       const lastEditId = createVerificationToken();
       payload.lastEditId = lastEditId;
@@ -1102,17 +1124,6 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
       });
     }
     batch.update(docRef, payload);
-    if (note) {
-      queueMedicalNote(
-        batch,
-        fitTestId,
-        ownerId,
-        userId,
-        note,
-        serverTimestamp(),
-        schoolsList,
-      );
-    }
 
     const releasedKeys = new Set(
       [previousKey, existing.lookupKey].filter((key) => key && key !== nextKey)

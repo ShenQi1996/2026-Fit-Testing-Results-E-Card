@@ -581,6 +581,31 @@ service cloud.firestore {
         return !request.resource.data.keys().hasAny(['testerMedicalRestrictionsReceived'])
           && !request.resource.data.keys().hasAny(['testerMedicalRestrictionsNote']);
       }
+      function recordSchoolInScope() {
+        return isSuperAdmin()
+          || (
+            isScopedAdmin()
+            && resource.data.get('schoolsList', '') is string
+            && resource.data.get('schoolsList', '').size() > 0
+            && resource.data.get('schoolsList', '') in actorSchools()
+          );
+      }
+      // Inline notes must be absent after the write. Removing a legacy note is
+      // limited to an admin who covers the record's school. The owner may edit
+      // only after those fields are already gone.
+      function canEditFitTestRecord() {
+        return medicalNoteFieldsAbsent()
+          && (
+            (
+              !resource.data.keys().hasAny(['testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'])
+              && (request.auth.uid == resource.data.userId || recordSchoolInScope())
+            )
+            || (
+              resource.data.keys().hasAny(['testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'])
+              && recordSchoolInScope()
+            )
+          );
+      }
       // OSHA 1910.134 record integrity: result, test date, and the dates derived
       // from the test date stay fixed after create. A material edit writes its
       // history entry in the same batch. Soft delete is the exception.
@@ -592,7 +617,13 @@ service cloud.firestore {
       }
       function onlyHousekeeping() {
         return request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['updatedAt', 'lookupKey', 'verificationToken']);
+          .hasOnly([
+            'updatedAt',
+            'lookupKey',
+            'verificationToken',
+            'testerMedicalRestrictionsReceived',
+            'testerMedicalRestrictionsNote'
+          ]);
       }
       function lastEditChanged() {
         return request.resource.data.get('lastEditId', '') != resource.data.get('lastEditId', '');
@@ -614,7 +645,7 @@ service cloud.firestore {
           (softDeleteUpdate() && deletionLogAfterOk(fitTestId))
           || (
             !isFacultyRole()
-            && (request.auth.uid == resource.data.userId || isAdmin())
+            && canEditFitTestRecord()
             && notSoftDeleted()
             && deletionFieldsUnchanged()
             && fitTestSchoolOkOnUpdate()
@@ -684,10 +715,15 @@ service cloud.firestore {
           );
       }
 
+      // Style is required on every create and update. A blank or missing style is rejected.
+      function styleRequired() {
+        return textOk(request.resource.data.get('style', ''), 100);
+      }
+
       function respiratorFieldsOkOnUpdate() {
         return textNotBlanked('respiratorMfg', 200)
           && textNotBlanked('model', 200)
-          && textNotBlanked('style', 100)
+          && styleRequired()
           && textNotBlanked('maskSize', 50)
           && methodNotBlanked()
           && fitFactorOkOnWrite();
@@ -696,7 +732,7 @@ service cloud.firestore {
       function respiratorRecordOk() {
         return textOk(request.resource.data.get('respiratorMfg', ''), 200)
           && textOk(request.resource.data.get('model', ''), 200)
-          && textOk(request.resource.data.get('style', ''), 100)
+          && styleRequired()
           && textOk(request.resource.data.get('maskSize', ''), 50)
           && (request.resource.data.get('fitTestMethod', '') == 'Qualitative'
             || request.resource.data.get('fitTestMethod', '') == 'Quantitative')
@@ -715,69 +751,81 @@ service cloud.firestore {
         && medicalNoteFieldsAbsent();
 
       match /editHistory/{entryId} {
-        function parentOwner() {
-          return get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.userId;
+        // Owner, super admin, or an admin whose schools include this record.
+        // A blank school is left to the owner or a super admin.
+        function historyActorOk() {
+          let school = get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('schoolsList', '');
+          let ownerId = get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('userId', '');
+          return request.auth.uid == ownerId
+            || isSuperAdmin()
+            || (
+              isScopedAdmin()
+              && school is string
+              && school.size() > 0
+              && school in actorSchools()
+            );
         }
         // The diff is checked here, not on the parent update. The parent only
         // proves a new history doc exists, which keeps that rule under the
         // expression limit when the fit test record is large.
+        // Each old value is compared with the stored field. A missing field is null.
         function historyChangesMatch() {
           let before = get(/databases/$(database)/documents/fitTests/$(fitTestId)).data;
           let after = getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data;
           let names = request.resource.data.fields;
+          let oldValues = request.resource.data.changes.old;
+          let newValues = request.resource.data.changes.new;
           let material = after.diff(before).affectedKeys()
-            .difference(['updatedAt', 'lookupKey', 'verificationToken', 'lastEditId'].toSet());
+            .difference([
+              'updatedAt', 'lookupKey', 'verificationToken', 'lastEditId',
+              'testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'
+            ].toSet());
+          let tracked = [
+            'recipientEmail', 'clientName', 'dob', 'testLocation', 'schoolsList',
+            'fitTestType', 'respiratorMfg', 'model', 'style', 'fitTestMethod',
+            'fitFactor', 'maskSize', 'testingAgent', 'fitTester', 'failureReason',
+            'correctiveActionNote', 'userId'
+          ];
           return names is list
             && names.size() > 0
             && names.size() <= 40
             && material.hasOnly(names)
             && material.hasAll(names)
-            && before.diff(request.resource.data.changes.get('old', {})).changedKeys().size() == 0
-            && after.diff(request.resource.data.changes.get('new', {})).changedKeys().size() == 0
-            && material.difference(before.keys().toSet()).size() + request.resource.data.changes.get('old', {}).size() == names.size()
-            && material.difference(after.keys().toSet()).size() + request.resource.data.changes.get('new', {}).size() == names.size()
+            && oldValues.keys().hasOnly(names)
+            && oldValues.keys().hasAll(names)
+            && newValues.keys().hasOnly(names)
+            && newValues.keys().hasAll(names)
+            && oldValues.keys().hasOnly(tracked)
+            && newValues.keys().hasOnly(tracked)
+            && after.diff(newValues).changedKeys().size() == 0
+            && (!oldValues.keys().hasAny(['recipientEmail']) || oldValues.recipientEmail == before.get('recipientEmail', null))
+            && (!oldValues.keys().hasAny(['clientName']) || oldValues.clientName == before.get('clientName', null))
+            && (!oldValues.keys().hasAny(['dob']) || oldValues.dob == before.get('dob', null))
+            && (!oldValues.keys().hasAny(['testLocation']) || oldValues.testLocation == before.get('testLocation', null))
+            && (!oldValues.keys().hasAny(['schoolsList']) || oldValues.schoolsList == before.get('schoolsList', null))
+            && (!oldValues.keys().hasAny(['fitTestType']) || oldValues.fitTestType == before.get('fitTestType', null))
+            && (!oldValues.keys().hasAny(['respiratorMfg']) || oldValues.respiratorMfg == before.get('respiratorMfg', null))
+            && (!oldValues.keys().hasAny(['model']) || oldValues.model == before.get('model', null))
+            && (!oldValues.keys().hasAny(['style']) || oldValues.style == before.get('style', null))
+            && (!oldValues.keys().hasAny(['fitTestMethod']) || oldValues.fitTestMethod == before.get('fitTestMethod', null))
+            && (!oldValues.keys().hasAny(['fitFactor']) || oldValues.fitFactor == before.get('fitFactor', null))
+            && (!oldValues.keys().hasAny(['maskSize']) || oldValues.maskSize == before.get('maskSize', null))
+            && (!oldValues.keys().hasAny(['testingAgent']) || oldValues.testingAgent == before.get('testingAgent', null))
+            && (!oldValues.keys().hasAny(['fitTester']) || oldValues.fitTester == before.get('fitTester', null))
+            && (!oldValues.keys().hasAny(['failureReason']) || oldValues.failureReason == before.get('failureReason', null))
+            && (!oldValues.keys().hasAny(['correctiveActionNote']) || oldValues.correctiveActionNote == before.get('correctiveActionNote', null))
+            && (!oldValues.keys().hasAny(['userId']) || oldValues.userId == before.get('userId', null))
             && (!hadText(before, 'respiratorMfg') || textOk(after.get('respiratorMfg', ''), 200))
             && (!hadText(before, 'model') || textOk(after.get('model', ''), 200))
-            && (!hadText(before, 'style') || textOk(after.get('style', ''), 100))
+            && textOk(after.get('style', ''), 100)
             && (!hadText(before, 'maskSize') || textOk(after.get('maskSize', ''), 50))
             && (!hadText(before, 'fitTestMethod') || after.get('fitTestMethod', '') == 'Qualitative' || after.get('fitTestMethod', '') == 'Quantitative')
             && (after.get('fitTestMethod', '') == 'Quantitative'
               ? (after.get('fitFactor', null) is number && after.get('fitFactor', null) >= 1 && after.get('fitFactor', null) <= 100000)
-              : after.get('fitTestMethod', '') != 'Qualitative' || !after.keys().hasAny(['fitFactor']))
-            && (
-              !before.keys().hasAny(['testerMedicalRestrictionsReceived'])
-              || !after.keys().hasAny(['testerMedicalRestrictionsReceived'])
-              || before.get('testerMedicalRestrictionsReceived', null) == after.get('testerMedicalRestrictionsReceived', null)
-            )
-            && (
-              !before.keys().hasAny(['testerMedicalRestrictionsNote'])
-              || !after.keys().hasAny(['testerMedicalRestrictionsNote'])
-              || before.get('testerMedicalRestrictionsNote', null) == after.get('testerMedicalRestrictionsNote', null)
-            )
-            && (
-              (
-                (before.keys().hasAny(['testerMedicalRestrictionsReceived'])
-                  && !after.keys().hasAny(['testerMedicalRestrictionsReceived']))
-                || (before.keys().hasAny(['testerMedicalRestrictionsNote'])
-                  && !after.keys().hasAny(['testerMedicalRestrictionsNote']))
-              )
-                ? (
-                  isSuperAdmin()
-                  || (
-                    isScopedAdmin()
-                    && before.keys().hasAny(['schoolsList'])
-                    && before.schoolsList is string
-                    && before.schoolsList.size() > 0
-                    && before.schoolsList in actorSchools()
-                  )
-                )
-                : true
-            );
+              : after.get('fitTestMethod', '') != 'Qualitative' || !after.keys().hasAny(['fitFactor']));
         }
-        allow read: if isSignedIn() && isApproved() &&
-          (request.auth.uid == parentOwner() || isAdmin());
-        allow create: if isSignedIn() && isApproved() &&
-          (request.auth.uid == parentOwner() || isAdmin()) &&
+        allow read: if isSignedIn() && isApproved() && historyActorOk();
+        allow create: if isSignedIn() && isApproved() && historyActorOk() &&
           request.resource.data.editedBy == request.auth.uid &&
           request.resource.data.editedAt == request.time &&
           request.resource.data.fitTestId == fitTestId &&
@@ -839,6 +887,7 @@ service cloud.firestore {
         )
       );
       allow create, update: if isSignedIn() && isApproved() && !isFacultyRole() &&
+        parentLive(fitTestId) &&
         (request.auth.uid == parentAfter().get('userId', '') || noteWriteInScope()) &&
         noteShapeOk();
       allow delete: if isSignedIn() && isApproved() && !isFacultyRole()
@@ -890,12 +939,25 @@ service cloud.firestore {
         || (isScopedAdmin() && school is string && school.size() > 0 && school in actorSchools());
     }
 
+    // Create reads the parent as stored. A fit test that is already hidden cannot gain a card.
+    function parentLive(fitTestId) {
+      return get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedAt', null) == null;
+    }
+
+    // Revoke reads the parent after this batch, so the hide and the revoke can commit together.
+    function parentHidden(fitTestId) {
+      return getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedAt', null) != null;
+    }
+
     function revokedAtNotCleared() {
       return resource.data.keys().hasAny(['revokedAt'])
         ? request.resource.data.get('revokedAt', null) == resource.data.get('revokedAt', null)
         : (
           request.resource.data.keys().hasAny(['revokedAt'])
-            ? (isSuperAdmin() || isScopedAdmin())
+            ? (
+              (isSuperAdmin() || isScopedAdmin())
+              && parentHidden(request.resource.data.get('fitTestId', ''))
+            )
             : true
         );
     }
@@ -908,7 +970,8 @@ service cloud.firestore {
         && (isSuperAdmin() || isScopedAdmin())
         && request.resource.data.get('userId', '') == resource.data.get('userId', '')
         && cardParentReady(fitTestId)
-        && canWriteParentId(fitTestId);
+        && canWriteParentId(fitTestId)
+        && parentHidden(fitTestId);
     }
 
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.
@@ -946,7 +1009,8 @@ service cloud.firestore {
       allow list: if false;
       allow create: if isSignedIn() && isApproved() && !isFacultyRole()
         && !request.resource.data.keys().hasAny(['revokedAt'])
-        && lookupMatchesParent();
+        && lookupMatchesParent()
+        && parentLive(request.resource.data.fitTestId);
       allow update: if isSignedIn() && isApproved() && !isFacultyRole()
         && (
           canRevokeStoredCard()
@@ -987,12 +1051,37 @@ service cloud.firestore {
         let fitTestId = request.resource.data.get('fitTestId', '');
         return cardParentReady(fitTestId) && verificationFieldsMatch(fitTestId);
       }
+      function verificationKeysOk() {
+        return request.resource.data.keys().hasOnly([
+          'clientName',
+          'testLocation',
+          'issueDate',
+          'expirationDate',
+          'fitTestType',
+          'respiratorMfg',
+          'maskSize',
+          'model',
+          'style',
+          'fitTestMethod',
+          'fitFactor',
+          'result',
+          'fitTester',
+          'userId',
+          'fitTestId',
+          'verificationToken',
+          'updatedAt',
+          'revokedAt'
+        ]);
+      }
       allow get: if true;
       allow list: if false;
       allow create: if isSignedIn() && isApproved() && !isFacultyRole()
         && !request.resource.data.keys().hasAny(['revokedAt'])
-        && verificationMatchesParent();
+        && verificationKeysOk()
+        && verificationMatchesParent()
+        && parentLive(request.resource.data.fitTestId);
       allow update: if isSignedIn() && isApproved() && !isFacultyRole()
+        && verificationKeysOk()
         && (
           canRevokeStoredCard()
           || (
