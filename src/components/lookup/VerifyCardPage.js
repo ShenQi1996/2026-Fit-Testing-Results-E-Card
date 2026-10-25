@@ -30,6 +30,11 @@ const STATUS_COPY = {
     title: 'This e-card could not be verified',
     subtitle: 'No matching Secure Fit record was found for this code.',
   },
+  revoked: {
+    kicker: 'Revoked record',
+    title: 'This e-card has been revoked',
+    subtitle: 'Secure Fit LLC no longer treats this card as a valid record.',
+  },
 };
 
 const DETAIL_FIELDS = [
@@ -169,6 +174,7 @@ const VerifyCardPage = ({ initialToken = '' }) => {
               {status === 'expired' && 'Expired — issued by Secure Fit LLC'}
               {status === 'failed' && 'Authentic — did not pass'}
               {status === 'invalid' && 'Not found'}
+              {status === 'revoked' && 'Revoked'}
               {status === 'error' && 'Try again shortly'}
             </div>
           )}

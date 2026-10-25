@@ -98,10 +98,10 @@ Collections:
 
 - `users` — testers/admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin). Removing one from the app sets `deletedAt`, `deletedBy`, and `deleteReason` and writes `fitTestDeletionLogs`. The document is not deleted.
-- `fitTestDeletionLogs` — append-only reason for hiding a fit test. Hard delete of `fitTests` is denied so the record is kept until the next fit test (OSHA 1910.134(m)(3)).
-- `fitTestLookups/{lookupKey}` — public get for resend
-- `fitTestVerifications/{token}` — public get for verify
+- `fitTests` — records (owner or admin). An in-scope admin or a super admin removes one from the list by setting `deletedAt` (server time), `deletedBy`, and a non-empty `deleteReason` in the same batch as `fitTestDeletionLogs/{fitTestId}`. The document is not deleted. Those deletion fields cannot be set when the record is created.
+- `fitTestDeletionLogs` — one append-only log per fit test, written with the soft delete. The owning tester cannot write it. Hard delete of `fitTests` is denied so the record is kept until the next fit test (OSHA 1910.134(m)(3)).
+- `fitTestLookups/{lookupKey}` — public get for resend. Hard delete is denied. A removed record sets `revokedAt` on its lookup, and resend skips that card unless a later live test takes the key.
+- `fitTestVerifications/{token}` — public get for verify. Hard delete is denied. A removed record sets `revokedAt`, and verify shows the card as revoked.
 
 ## Staff workflow
 

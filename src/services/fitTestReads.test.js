@@ -4,6 +4,8 @@ import {
   deleteFitTest,
   getFitTestCountsByUser,
   getUserFitTests,
+  lookupFitTestForResend,
+  lookupFitTestForVerification,
 } from './firebaseDb';
 
 const userDoc = (role, extra = {}) => ({
@@ -122,25 +124,81 @@ test('soft-deleted fit tests stay stored and drop out of normal lists', async ()
     return {
       exists: () => true,
       id: ref?.args?.[2],
-      data: () => ({ userId: 'tester-1', clientName: 'Ada' }),
+      data: () => ({
+        userId: 'tester-1',
+        clientName: 'Ada',
+        schoolsList: 'Helene College of Nursing',
+      }),
     };
   });
   await deleteFitTest('live-1', 'admin-1', ' Entered on the wrong person ');
   expect(deleteDoc).not.toHaveBeenCalled();
-  expect(updateDoc).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+  expect(updateDoc).not.toHaveBeenCalled();
+  expect(addDoc).not.toHaveBeenCalled();
+  expect(writeBatch).toHaveBeenCalledTimes(1);
+  const batch = writeBatch.mock.results[0].value;
+  expect(batch.commit).toHaveBeenCalledTimes(1);
+  expect(batch.update).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     deletedBy: 'admin-1',
     deleteReason: 'Entered on the wrong person',
+    deletedAt: { kind: 'serverTimestamp' },
   }));
-  expect(addDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+  const logWrite = batch.set.mock.calls[0];
+  expect(logWrite[0].args.slice(1)).toEqual(['fitTestDeletionLogs', 'live-1']);
+  expect(logWrite[1]).toEqual(expect.objectContaining({
     fitTestId: 'live-1',
     userId: 'tester-1',
     deletedBy: 'admin-1',
     deleteReason: 'Entered on the wrong person',
+    deletedAt: { kind: 'serverTimestamp' },
   }));
 
-  updateDoc.mockClear();
-  addDoc.mockClear();
+  writeBatch.mockClear();
   await expect(deleteFitTest('live-1', 'admin-1', '   ')).rejects.toThrow(/reason is required/i);
-  expect(updateDoc).not.toHaveBeenCalled();
-  expect(addDoc).not.toHaveBeenCalled();
+  expect(writeBatch).not.toHaveBeenCalled();
+});
+
+test('a scoped admin cannot soft-delete a fit test outside their schools', async () => {
+  getDoc.mockImplementation(async (ref) => {
+    if (ref?.args?.[1] === 'users') return userDoc('admin');
+    return {
+      exists: () => true,
+      data: () => ({ userId: 'tester-1', schoolsList: 'Example Second School' }),
+    };
+  });
+
+  await expect(deleteFitTest('live-1', 'admin-1', 'Wrong school')).rejects.toMatchObject({
+    code: 'PERMISSION_DENIED',
+  });
+  expect(writeBatch).not.toHaveBeenCalled();
+  expect(deleteDoc).not.toHaveBeenCalled();
+});
+
+test('resend skips a revoked lookup and verify reports the card revoked', async () => {
+  getDoc.mockResolvedValue({
+    exists: () => true,
+    id: 'lookup',
+    data: () => ({
+      clientName: 'Ada Lovelace',
+      dob: '01/02/1990',
+      recipientEmail: 'ada@example.com',
+      revokedAt: { toDate: () => new Date('2026-10-25T00:00:00.000Z') },
+    }),
+  });
+
+  await expect(lookupFitTestForResend('Ada Lovelace', '01/02/1990', 'ada@example.com')).resolves.toBeNull();
+
+  getDoc.mockResolvedValue({
+    exists: () => true,
+    id: 'token',
+    data: () => ({
+      clientName: 'Ada Lovelace',
+      result: 'Pass',
+      revokedAt: { toDate: () => new Date('2026-10-25T00:00:00.000Z') },
+    }),
+  });
+  await expect(lookupFitTestForVerification('ab'.repeat(16))).resolves.toEqual({
+    status: 'revoked',
+    card: null,
+  });
 });

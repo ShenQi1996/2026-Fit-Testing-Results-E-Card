@@ -18,10 +18,11 @@ exports.Timestamp = {
   fromDate: (date) => ({ toDate: () => date, kind: 'timestamp', date }),
 };
 exports.deleteField = () => ({ kind: 'deleteField' });
+exports.serverTimestamp = () => ({ kind: 'serverTimestamp' });
 exports.writeBatch = jest.fn(() => ({
-  delete: noop,
-  update: noop,
-  set: noop,
-  commit: async () => {},
+  delete: jest.fn(),
+  update: jest.fn(),
+  set: jest.fn(),
+  commit: jest.fn(async () => {}),
 }));
 exports.getFirestore = () => ({});

@@ -14,9 +14,11 @@ import {
   getDoc,
   getDocs,
   query,
+  serverTimestamp,
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 
 const RULES = fs.readFileSync('firestore.rules', 'utf8');
@@ -870,61 +872,96 @@ test('fitTests count queries follow the same read rules as document reads', asyn
   )));
 });
 
+const commitSoftDelete = (db, fitTestId, actorId, ownerId, reason, deletedAt = serverTimestamp()) => {
+  const batch = writeBatch(db);
+  batch.update(doc(db, `fitTests/${fitTestId}`), {
+    deletedAt,
+    deletedBy: actorId,
+    deleteReason: reason,
+    updatedAt: serverTimestamp(),
+  });
+  batch.set(doc(db, `fitTestDeletionLogs/${fitTestId}`), {
+    fitTestId,
+    userId: ownerId,
+    deletedAt,
+    deletedBy: actorId,
+    deleteReason: reason,
+  });
+  return batch.commit();
+};
+
 test('fit test records are soft-deleted with a reason and cannot be hard-deleted', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
     ['users/admin-1', scopedAdmin()],
+    ['users/admin-2', scopedAdmin([SECOND], 'other-admin@example.com')],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
     ['users/other-1', approved('tester', 'other@example.com', { school: SECOND })],
     ['fitTests/own-1', { userId: 'tester-1', result: 'Pass', schoolsList: HELENE }],
     ['fitTests/own-2', { userId: 'tester-1', result: 'Fail', schoolsList: HELENE }],
+    ['fitTests/second-1', { userId: 'other-1', result: 'Pass', schoolsList: SECOND }],
+    ['fitTests/blank-school', { userId: 'tester-1', result: 'Pass' }],
+    ['fitTestLookups/lookup-1', { userId: 'tester-1', fitTestId: 'own-1' }],
+    ['fitTestVerifications/abc', { userId: 'tester-1', fitTestId: 'own-1', result: 'Pass' }],
   ]);
   const testerDb = testEnv.authenticatedContext('tester-1').firestore();
   const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const otherAdminDb = testEnv.authenticatedContext('admin-2').firestore();
+  const superDb = testEnv.authenticatedContext('super-1').firestore();
   const otherDb = testEnv.authenticatedContext('other-1').firestore();
   const deletedAt = Timestamp.fromDate(new Date('2026-10-25T12:00:00Z'));
 
   await assertFails(deleteDoc(doc(testerDb, 'fitTests/own-1')));
   await assertFails(deleteDoc(doc(adminDb, 'fitTests/own-1')));
-  await assertFails(updateDoc(doc(testerDb, 'fitTests/own-1'), {
+  await assertFails(deleteDoc(doc(adminDb, 'fitTestLookups/lookup-1')));
+  await assertFails(deleteDoc(doc(testerDb, 'fitTestLookups/lookup-1')));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTestVerifications/abc')));
+  await assertFails(deleteDoc(doc(testerDb, 'fitTestVerifications/abc')));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/created-deleted'), {
+    userId: 'tester-1',
+    schoolsList: HELENE,
     deletedAt,
     deletedBy: 'tester-1',
-    deleteReason: '',
+    deleteReason: 'Should not be on create',
   }));
-  await assertFails(updateDoc(doc(otherDb, 'fitTests/own-1'), {
+  await assertFails(commitSoftDelete(testerDb, 'own-2', 'tester-1', 'tester-1', 'Duplicate entry'));
+  await assertFails(commitSoftDelete(otherDb, 'own-1', 'other-1', 'tester-1', 'Not my record'));
+  await assertFails(commitSoftDelete(otherAdminDb, 'own-1', 'admin-2', 'tester-1', 'Outside my schools'));
+  await assertFails(commitSoftDelete(adminDb, 'blank-school', 'admin-1', 'tester-1', 'No school on the record'));
+  await assertFails(commitSoftDelete(
+    adminDb,
+    'own-1',
+    'admin-1',
+    'tester-1',
+    'Wrong participant',
     deletedAt,
-    deletedBy: 'other-1',
-    deleteReason: 'Not my record',
-  }));
-  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/own-2'), {
-    deletedAt,
-    deletedBy: 'tester-1',
-    deleteReason: 'Duplicate entry',
-    updatedAt: deletedAt,
-  }));
-  await assertSucceeds(updateDoc(doc(adminDb, 'fitTests/own-1'), {
-    deletedAt,
+  ));
+  await assertFails(commitSoftDelete(adminDb, 'own-1', 'admin-1', 'tester-1', '   '));
+  await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), {
+    deletedAt: serverTimestamp(),
     deletedBy: 'admin-1',
-    deleteReason: 'Wrong participant',
-    updatedAt: deletedAt,
+    deleteReason: 'Missing the log',
+    updatedAt: serverTimestamp(),
   }));
+  await assertFails(setDoc(doc(adminDb, 'fitTestDeletionLogs/own-1'), {
+    fitTestId: 'own-1',
+    userId: 'tester-1',
+    deletedAt: serverTimestamp(),
+    deletedBy: 'admin-1',
+    deleteReason: 'Log without the delete',
+  }));
+
+  await assertSucceeds(commitSoftDelete(adminDb, 'own-1', 'admin-1', 'tester-1', 'Wrong participant'));
   await assertSucceeds(getDoc(doc(adminDb, 'fitTests/own-1')));
   await assertFails(updateDoc(doc(adminDb, 'fitTests/own-1'), { result: 'Fail' }));
   await assertFails(deleteDoc(doc(adminDb, 'fitTests/own-1')));
-
-  await assertSucceeds(setDoc(doc(adminDb, 'fitTestDeletionLogs/log-1'), {
-    fitTestId: 'own-1',
-    userId: 'tester-1',
-    deletedAt,
-    deletedBy: 'admin-1',
-    deleteReason: 'Wrong participant',
+  await assertFails(updateDoc(doc(adminDb, 'fitTestDeletionLogs/own-1'), { deleteReason: 'Changed' }));
+  await assertFails(deleteDoc(doc(adminDb, 'fitTestDeletionLogs/own-1')));
+  await assertSucceeds(commitSoftDelete(superDb, 'second-1', 'super-1', 'other-1', 'Super admin removal'));
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTestLookups/lookup-1'), {
+    revokedAt: serverTimestamp(),
   }));
-  await assertFails(updateDoc(doc(adminDb, 'fitTestDeletionLogs/log-1'), { deleteReason: 'Changed' }));
-  await assertFails(deleteDoc(doc(adminDb, 'fitTestDeletionLogs/log-1')));
-  await assertFails(setDoc(doc(otherDb, 'fitTestDeletionLogs/log-2'), {
-    fitTestId: 'own-1',
-    userId: 'tester-1',
-    deletedAt,
-    deletedBy: 'other-1',
-    deleteReason: 'Not allowed',
+  await assertSucceeds(updateDoc(doc(adminDb, 'fitTestVerifications/abc'), {
+    revokedAt: serverTimestamp(),
   }));
 });

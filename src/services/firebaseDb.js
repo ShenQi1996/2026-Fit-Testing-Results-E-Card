@@ -15,6 +15,7 @@ import {
   orderBy,
   Timestamp,
   deleteField,
+  serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -124,11 +125,7 @@ const upsertFitTestVerification = async (token, record, fitTestId, userId) => {
   });
 };
 
-const deleteFitTestVerification = async (token) => {
-  const verificationToken = normalizeVerificationToken(token);
-  if (!isValidVerificationToken(verificationToken)) return;
-  await deleteDoc(doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken));
-};
+const isRevokedCard = (data) => data?.revokedAt != null && data.revokedAt !== '';
 
 const toMillis = (value) => {
   if (!value) return 0;
@@ -188,14 +185,16 @@ const upsertFitTestLookup = async (lookupKey, record, fitTestId, userId) => {
   });
 };
 
-const deleteFitTestLookupIfCurrent = async (lookupKey, fitTestId) => {
+const revokeFitTestLookupIfCurrent = async (lookupKey, fitTestId) => {
   if (!lookupKey) return;
 
   const lookupRef = doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey);
   const lookupSnap = await getDoc(lookupRef);
   if (!lookupSnap.exists()) return;
-  if (fitTestId && lookupSnap.data()?.fitTestId !== fitTestId) return;
-  await deleteDoc(lookupRef);
+  const data = lookupSnap.data() || {};
+  if (fitTestId && data.fitTestId !== fitTestId) return;
+  if (isRevokedCard(data)) return;
+  await updateDoc(lookupRef, { revokedAt: serverTimestamp() });
 };
 
 /** Always recomputed from the record so key-format changes propagate on next write. */
@@ -402,7 +401,7 @@ const repointLookupToLatestRemaining = async (lookupKey, removedFitTestId, fallb
     const remaining = siblingsSnapshot.docs
       .filter((docSnap) => docSnap.id !== removedFitTestId)
       .map(mapFitTestDoc)
-      .filter((record) => !isFitTestPastRetention(record))
+      .filter((record) => !isSoftDeletedFitTest(record) && !isFitTestPastRetention(record))
       .sort(compareFitTestRecency);
 
     const next = remaining[0];
@@ -572,6 +571,7 @@ export const lookupFitTestForResend = async (clientName, dob, recipientEmail) =>
     if (!lookupSnap.exists()) return null;
 
     const data = lookupSnap.data() || {};
+    if (isRevokedCard(data)) return null;
     if (!data.recipientEmail?.trim()) return null;
 
     // Hash collision is extremely unlikely; still require all three to match.
@@ -620,7 +620,7 @@ const assertVerifyRateLimit = () => {
 /**
  * Public e-card verification by unguessable token. Never list this collection.
  * @param {string} token
- * @returns {Promise<{status: 'invalid'|'expired'|'failed'|'valid', card: object|null}>}
+ * @returns {Promise<{status: 'invalid'|'expired'|'failed'|'valid'|'revoked', card: object|null}>}
  */
 export const lookupFitTestForVerification = async (token) => {
   const verificationToken = normalizeVerificationToken(token);
@@ -637,7 +637,12 @@ export const lookupFitTestForVerification = async (token) => {
       return { status: 'invalid', card: null };
     }
 
-    const card = toVerifyCardData(verifySnap.data() || {});
+    const data = verifySnap.data() || {};
+    if (isRevokedCard(data)) {
+      return { status: 'revoked', card: null };
+    }
+
+    const card = toVerifyCardData(data);
     const expired = isExpirationDatePast(card.expirationDate);
     const passed = (card.result || '').trim().toLowerCase() === 'pass';
 
@@ -739,7 +744,7 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
       [previousKey, existing.lookupKey].filter((key) => key && key !== nextKey)
     );
     for (const key of releasedKeys) {
-      await deleteFitTestLookupIfCurrent(key, fitTestId);
+      await revokeFitTestLookupIfCurrent(key, fitTestId);
     }
 
     if (previousKey && previousKey !== nextKey) {
@@ -788,7 +793,7 @@ export const deleteFitTest = async (fitTestId, userId, reason) => {
     }
 
     const access = await getUserAccessProfile(userId);
-    if (!isAdminOrAbove(access)) {
+    if (access.status !== USER_STATUS_APPROVED || !isAdminOrAbove(access)) {
       const error = new Error('Only admin users can delete test results.');
       error.code = 'PERMISSION_DENIED';
       throw error;
@@ -803,21 +808,62 @@ export const deleteFitTest = async (fitTestId, userId, reason) => {
     if (isSoftDeletedFitTest(existing)) {
       throw new Error('This fit test record is already hidden.');
     }
+    const recordSchool = typeof existing.schoolsList === 'string' ? existing.schoolsList : '';
+    if (!isSuperAdmin(access.role) && !normalizeSchoolList(access.schools).includes(recordSchool)) {
+      throw permissionError('You can only remove fit tests for your schools.');
+    }
 
-    const deletedAt = Timestamp.now();
-    await updateDoc(docRef, {
-      deletedAt,
+    const lookupKeys = new Set();
+    if (typeof existing.lookupKey === 'string' && existing.lookupKey) {
+      lookupKeys.add(existing.lookupKey);
+    }
+    try {
+      const resolvedKey = await resolveLookupKey(existing);
+      if (resolvedKey) lookupKeys.add(resolvedKey);
+    } catch (lookupError) {
+      console.error('Error resolving lookup key during soft delete:', lookupError);
+    }
+
+    const batch = writeBatch(db);
+    batch.update(docRef, {
+      deletedAt: serverTimestamp(),
       deletedBy: userId,
       deleteReason,
-      updatedAt: deletedAt,
+      updatedAt: serverTimestamp(),
     });
-    await addDoc(collection(db, FIT_TEST_DELETION_LOGS_COLLECTION), {
+    batch.set(doc(db, FIT_TEST_DELETION_LOGS_COLLECTION, fitTestId), {
       fitTestId,
       userId: existing.userId || '',
-      deletedAt,
+      deletedAt: serverTimestamp(),
       deletedBy: userId,
       deleteReason,
     });
+
+    const verificationToken = normalizeVerificationToken(existing.verificationToken);
+    if (isValidVerificationToken(verificationToken)) {
+      const verifySnap = await getDoc(doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken));
+      if (verifySnap.exists() && !isRevokedCard(verifySnap.data())) {
+        batch.update(doc(db, FIT_TEST_VERIFICATIONS_COLLECTION, verificationToken), {
+          revokedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    for (const lookupKey of lookupKeys) {
+      const lookupSnap = await getDoc(doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey));
+      if (!lookupSnap.exists()) continue;
+      const lookup = lookupSnap.data() || {};
+      if (lookup.fitTestId && lookup.fitTestId !== fitTestId) continue;
+      if (isRevokedCard(lookup)) continue;
+      batch.update(doc(db, FIT_TEST_LOOKUPS_COLLECTION, lookupKey), {
+        revokedAt: serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+    for (const lookupKey of lookupKeys) {
+      await repointLookupToLatestRemaining(lookupKey, fitTestId, existing.userId || userId);
+    }
     notifyFitTestActivity();
   } catch (error) {
     console.error('Error deleting fit test:', error);

@@ -400,16 +400,68 @@ service cloud.firestore {
         && request.resource.data.get('deleteReason', null) == resource.data.get('deleteReason', null);
     }
 
-    // Owners and admins keep the record. They may only add the deletion stamp once.
+    function deletionReasonOk(reason) {
+      return reason is string
+        && reason.size() > 0
+        && reason.size() <= 500
+        && reason.matches('.*\\S.*');
+    }
+
+    // Scoped admins may soft-delete only a fit test whose school is one of theirs.
+    // A blank school is left to a super admin. The record owner is not enough.
+    function canSoftDeleteFitTestData(data) {
+      return data == null
+        ? false
+        : isSuperAdmin()
+          || (
+            isScopedAdmin()
+            && schoolsListOf(data) != ''
+            && schoolsListOf(data) in actorSchools()
+          );
+    }
+
+    // The log document id is the fit test id, so this write and the stamp share one batch.
+    // Compare the strings here. Each write pins its own deletedAt to request.time;
+    // a server timestamp read back with getAfter is not a reliable timestamp.
+    function deletionLogAfterOk(fitTestId) {
+      return existsAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId))
+        && getAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId)).data.get('fitTestId', '') == fitTestId
+        && getAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId)).data.get('deletedBy', '') == request.auth.uid
+        && getAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId)).data.get('deleteReason', '') == request.resource.data.deleteReason
+        && getAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId)).data.get('userId', '') == resource.data.get('userId', '');
+    }
+
+    // In-scope admins and super admins keep the record. They may stamp it once.
     function softDeleteUpdate() {
       return notSoftDeleted()
+        && canSoftDeleteFitTestData(resource.data)
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['deletedAt', 'deletedBy', 'deleteReason', 'updatedAt'])
-        && request.resource.data.deletedAt is timestamp
+        && request.resource.data.deletedAt == request.time
         && request.resource.data.deletedBy == request.auth.uid
-        && request.resource.data.deleteReason is string
-        && request.resource.data.deleteReason.size() > 0
-        && request.resource.data.deleteReason.size() <= 500;
+        && deletionReasonOk(request.resource.data.deleteReason);
+    }
+
+    function softDeleteLogCreate(logId) {
+      return isSignedIn()
+        && isApproved()
+        && logId == request.resource.data.fitTestId
+        && request.resource.data.fitTestId is string
+        && request.resource.data.fitTestId.size() > 0
+        && request.resource.data.userId is string
+        && request.resource.data.deletedBy == request.auth.uid
+        && request.resource.data.deletedAt == request.time
+        && deletionReasonOk(request.resource.data.deleteReason)
+        && existsAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId))
+        && getAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data.get('userId', '')
+          == request.resource.data.userId
+        && getAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data.get('deletedBy', '')
+          == request.auth.uid
+        && getAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data.get('deleteReason', '')
+          == request.resource.data.deleteReason
+        && canSoftDeleteFitTestData(
+          getAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data
+        );
     }
 
     match /fitTests/{fitTestId} {
@@ -420,10 +472,14 @@ service cloud.firestore {
       allow update: if
         isSignedIn() &&
         isApproved() &&
-        (request.auth.uid == resource.data.userId || isAdmin())
-        && (
-          softDeleteUpdate()
-          || (notSoftDeleted() && deletionFieldsUnchanged() && fitTestSchoolOkOnUpdate())
+        (
+          (softDeleteUpdate() && deletionLogAfterOk(fitTestId))
+          || (
+            (request.auth.uid == resource.data.userId || isAdmin())
+            && notSoftDeleted()
+            && deletionFieldsUnchanged()
+            && fitTestSchoolOkOnUpdate()
+          )
         );
       // OSHA 1910.134(m)(3): fit test records are retained. Hard delete is denied.
       allow delete: if false;
@@ -432,10 +488,11 @@ service cloud.firestore {
         isApproved() &&
         request.auth.uid == request.resource.data.userId
         && fitTestSchoolOkOnCreate()
-        && !request.resource.data.keys().hasAny(['deletedAt']);
+        && !request.resource.data.keys().hasAny(['deletedAt', 'deletedBy', 'deleteReason']);
     }
 
-    // Append-only log of a soft delete. The fit test document itself stays.
+    // Append-only log written in the same batch as the soft delete. The fit test stays.
+    // The owning tester cannot write a log; only an in-scope admin or a super admin can.
     match /fitTestDeletionLogs/{logId} {
       allow get: if isSignedIn() && isApproved() && (
         isAdmin()
@@ -443,18 +500,7 @@ service cloud.firestore {
         || resource.data.userId == request.auth.uid
       );
       allow list: if isSignedIn() && isApproved() && isAdmin();
-      allow create: if isSignedIn() && isApproved()
-        && request.resource.data.deletedBy == request.auth.uid
-        && request.resource.data.deleteReason is string
-        && request.resource.data.deleteReason.size() > 0
-        && request.resource.data.deleteReason.size() <= 500
-        && request.resource.data.fitTestId is string
-        && request.resource.data.fitTestId.size() > 0
-        && request.resource.data.deletedAt is timestamp
-        && request.resource.data.userId is string
-        && get(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data.userId
-          == request.resource.data.userId
-        && (request.auth.uid == request.resource.data.userId || isAdmin());
+      allow create: if softDeleteLogCreate(logId);
       allow update, delete: if false;
     }
 
@@ -464,10 +510,8 @@ service cloud.firestore {
       allow get: if true;
       allow list: if false;
       allow create, update: if isSignedIn() && isApproved();
-      allow delete: if
-        isSignedIn() &&
-        isApproved() &&
-        (isAdmin() || request.auth.uid == resource.data.userId);
+      // Deactivate with revokedAt. The lookup document is kept.
+      allow delete: if false;
     }
 
     // Public verify: guests can read one verification doc only if they know the token.
@@ -476,10 +520,8 @@ service cloud.firestore {
       allow get: if true;
       allow list: if false;
       allow create, update: if isSignedIn() && isApproved();
-      allow delete: if
-        isSignedIn() &&
-        isApproved() &&
-        (isAdmin() || request.auth.uid == resource.data.userId);
+      // Deactivate with revokedAt. The verification document is kept.
+      allow delete: if false;
     }
 
     // One log per signed-in staff uid. Used to cap the two test accounts at 1 send / 24h.
