@@ -1173,6 +1173,43 @@ test('a legacy missing or Locked to Qualitative method saves as Qualitative', as
   expect(stripped.data().fitFactor).toBeUndefined();
 });
 
+test('a legacy quantitative method and fit factor stay unchanged on edit', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/quant', {
+      userId: 'tester-1',
+      ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 180 }),
+    }],
+    ['fitTests/quant-bare', {
+      userId: 'tester-1',
+      ...respiratorRecord({ fitTestMethod: 'Quantitative' }),
+    }],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/quant'), { fitTestMethod: 'Qualitative' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/quant'), {
+    fitTestMethod: 'Qualitative',
+    fitFactor: deleteField(),
+  }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/quant'), { fitFactor: 200 }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/quant'), { fitFactor: deleteField() }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/quant'), { fitTestMethod: 'Quantitative', fitFactor: 181 }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/quant'), { clientName: 'Ada Lovelace' }));
+  const saved = await getDoc(doc(testerDb, 'fitTests/quant'));
+  expect(saved.data().fitTestMethod).toBe('Quantitative');
+  expect(saved.data().fitFactor).toBe(180);
+  expect(saved.data().clientName).toBe('Ada Lovelace');
+
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/quant-bare'), { fitFactor: 100 }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/quant-bare'), { fitTestMethod: 'Qualitative' }));
+  await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/quant-bare'), { clientName: 'Grace Hopper' }));
+  const bare = await getDoc(doc(testerDb, 'fitTests/quant-bare'));
+  expect(bare.data().fitTestMethod).toBe('Quantitative');
+  expect(bare.data().fitFactor).toBeUndefined();
+  expect(bare.data().clientName).toBe('Grace Hopper');
+});
+
 test('a new fit test stamps the creator role and school, and those stamps stay put', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
