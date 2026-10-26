@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../context/AuthContext';
-import { getUserFitTests, updateFitTest } from '../services/firebaseDb';
+import { getFacultyFitTests, getUserFitTests, updateFitTest } from '../services/firebaseDb';
 import { useFitTestResults } from './useFitTestResults';
 
 jest.mock('../context/AuthContext', () => ({
@@ -10,6 +10,7 @@ jest.mock('../context/AuthContext', () => ({
 
 jest.mock('../services/firebaseDb', () => ({
   getUserFitTests: jest.fn(),
+  getFacultyFitTests: jest.fn(),
   updateFitTest: jest.fn(),
   deleteFitTest: jest.fn(),
   ensureFitTestVerification: jest.fn(),
@@ -122,4 +123,38 @@ test('an edit that keeps the issue date does not reload the results list', async
   expect(updateFitTest).toHaveBeenCalledTimes(1);
   expect(getUserFitTests).toHaveBeenCalledTimes(1);
   expect(apiRef.current.fitTests.map((test) => test.clientName)).toEqual(['Ada King']);
+});
+
+test('faculty load results by school instead of user id', async () => {
+  getFacultyFitTests.mockResolvedValue([record]);
+  useAuth.mockReturnValue({
+    user: { uid: 'faculty-1', role: 'faculty', school: 'Helene College of Nursing', schools: [] },
+  });
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  expect(getFacultyFitTests).toHaveBeenCalledWith(expect.objectContaining({
+    role: 'faculty',
+    school: 'Helene College of Nursing',
+  }));
+  expect(getUserFitTests).not.toHaveBeenCalled();
+  expect(apiRef.current.fitTests.map((test) => test.id)).toEqual(['ft-1']);
+});
+
+test('faculty outside the access window do not load results', async () => {
+  useAuth.mockReturnValue({
+    user: {
+      uid: 'faculty-1',
+      role: 'faculty',
+      school: 'Helene College of Nursing',
+      endDate: '2020-01-01T00:00:00.000Z',
+    },
+  });
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  expect(getFacultyFitTests).not.toHaveBeenCalled();
+  expect(getUserFitTests).not.toHaveBeenCalled();
+  expect(apiRef.current.fitTests).toEqual([]);
+  expect(apiRef.current.loading).toBe(false);
 });

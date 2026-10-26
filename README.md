@@ -84,15 +84,29 @@ Public verify and resend read one document by known key. Listing those collectio
 
 1. Open Firebase Console → Firestore → **Rules**
 2. Publish the contents of [`firestore.rules`](./firestore.rules) in this repo
-3. Create the composite index if Test Results asks for it: `fitTests` with `userId` ascending, `createdAt` descending
+3. Create the composite index if Test Results asks for it: `fitTests` with `userId` ascending, `createdAt` descending. Faculty results use `fitTests` with `creatorSchool` ascending and `createdAt` descending.
+
+Composite indexes are listed in [`firestore.indexes.json`](./firestore.indexes.json). Deploy them to staging with:
+
+```bash
+npx firebase-tools deploy --only firestore:indexes --project fit-test-result-e-card-staging
+```
 
 Until `fitTestVerifications` rules are published, `/verify` cannot confirm cards.
 
 Collections:
 
-- `users` — testers/admins (`role`, `status`)
+- `users` — testers, faculty, and admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin)
+- `fitTests` — records (owner or admin). Faculty read by `creatorSchool`
+
+## Faculty
+
+Faculty see fit-test results for their own school. They cannot send e-cards, edit, delete, resend, or manage users. An admin assigns the faculty role in Users. A faculty profile stores one `school` string, the same shape as a tester.
+
+Each new fit test stores `creatorRole` and `creatorSchool` from the signed-in profile at save time. A tester's stamp is their profile `school`. An admin's stamp is one school from their own `schools` list. A tester with no profile school cannot save a fit test. Those fields stay as they were if that person later changes role or school. Faculty have exactly one `school` and no `schools` list. They may read a result only when `creatorSchool` equals that school and their access window is open. A missing start or end leaves that side open, the same as an admin. Outside the window they cannot read results. The results query is `creatorSchool` equal to that school, ordered by `createdAt` descending, with a limit of 100. The sidebar count uses that same limit and the same retention filter as the list. Tests saved before these fields existed have no `creatorSchool` and stay hidden from faculty. This change does not backfill them.
+
+The composite index for that query (`creatorSchool` ascending, `createdAt` descending) is a separate change. It is not in this branch and is not deployed from here.
 - `fitTestLookups/{lookupKey}` — public get for resend
 - `fitTestVerifications/{token}` — public get for verify
 
