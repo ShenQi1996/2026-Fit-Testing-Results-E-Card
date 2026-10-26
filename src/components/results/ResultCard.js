@@ -68,9 +68,6 @@ const ResultCardView = ({ test, expanded, onToggleExpand }) => (
           <ResultRow label="Style:" value={test.style || 'N/A'} />
           <ResultRow label="Testing Agent:" value={test.testingAgent || 'N/A'} />
           <ResultRow label="Mask Size:" value={test.maskSize || 'N/A'} />
-          {canonicalFitTestMethod(test.fitTestMethod) === 'Quantitative' && (
-            <ResultRow label="Fit factor:" value={test.fitFactor ?? 'N/A'} />
-          )}
         </div>
 
         {(test.schoolsOnFile !== undefined || test.schoolsList || test.programAdministratorName || test.programAdministratorContact) && (

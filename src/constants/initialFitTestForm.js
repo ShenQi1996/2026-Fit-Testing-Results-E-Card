@@ -15,7 +15,6 @@ export const INITIAL_FORM_DATA = {
   maskSize: 'Regular',
   model: '',
   style: '',
-  fitFactor: '',
   result: 'Pass',
   fitTester: '',
   printedName: '',

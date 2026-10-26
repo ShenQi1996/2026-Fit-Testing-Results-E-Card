@@ -48,7 +48,6 @@ const DETAIL_FIELDS = [
   { key: 'model', label: 'Model' },
   { key: 'style', label: 'Style' },
   { key: 'fitTestMethod', label: 'Fit test method' },
-  { key: 'fitFactor', label: 'Fit factor' },
   { key: 'maskSize', label: 'Mask size' },
   { key: 'fitTester', label: 'Fit tester' },
   { key: 'testLocation', label: 'Test location' },
