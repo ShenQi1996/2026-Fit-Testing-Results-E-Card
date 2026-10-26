@@ -151,9 +151,6 @@ export const useFitTestForm = () => {
         ...prev,
         [field]: value,
       };
-      if (field === 'fitTestMethod' && value !== 'Quantitative') {
-        updates.fitFactor = '';
-      }
 
       if (field === 'clientName' && !printedNameManuallyEdited.current) {
         const prevPrintedName = (prev.printedName || '').trim();
@@ -369,18 +366,14 @@ export const useFitTestForm = () => {
         fitTester: user?.name || formData.fitTester || '',
         model: (formData.model || '').trim(),
         style: formData.style || '',
-        fitTestMethod: formData.fitTestMethod || '',
+        fitTestMethod: 'Qualitative',
         failureReason: showFailureReasonUI ? formData.failureReason : '',
         correctiveActionNote: showFailureReasonUI ? formData.correctiveActionNote : '',
         testerMedicalRestrictionsNote: formData.testerMedicalRestrictionsReceived === true
           ? (formData.testerMedicalRestrictionsNote || '').trim()
           : '',
       };
-      if (cleanedFormData.fitTestMethod === 'Quantitative') {
-        cleanedFormData.fitFactor = Number(formData.fitFactor);
-      } else {
-        delete cleanedFormData.fitFactor;
-      }
+      delete cleanedFormData.fitFactor;
 
       const expirationDate = calculateExpirationDate(cleanedFormData.issueDate);
       const formDataWithSignature = {

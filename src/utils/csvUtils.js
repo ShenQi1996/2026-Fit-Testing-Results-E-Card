@@ -15,7 +15,6 @@ const STANDARD_REPORT_COLUMNS = [
   { key: 'model', label: 'Model' },
   { key: 'style', label: 'Style' },
   { key: 'fitTestMethod', label: 'Fit Test Method' },
-  { key: 'fitFactor', label: 'Fit Factor' },
   { key: 'maskSize', label: 'Mask Size' },
   { key: 'testingAgent', label: 'Testing Agent' },
   { key: 'result', label: 'Result' },

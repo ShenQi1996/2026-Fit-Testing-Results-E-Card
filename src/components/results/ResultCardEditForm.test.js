@@ -18,8 +18,6 @@ const styleSelect = (renderer) => renderer.root.findAllByType('select').find((no
 test('a legacy edit with no style shows the message on the style field', () => {
   const renderer = renderForm({
     style: '',
-    fitTestMethod: 'Quantitative',
-    fitFactor: '',
     testLocation: 'Harlem',
   }, 'Please select the respirator style.');
 
@@ -30,5 +28,6 @@ test('a legacy edit with no style shows the message on the style field', () => {
   expect(renderer.root.findByProps({ id: 'edit-style-error' }).children).toEqual([
     'Please select the respirator style.',
   ]);
-  expect(renderer.root.findAllByProps({ id: 'edit-fit-factor-error' })).toEqual([]);
+  expect(JSON.stringify(renderer.toJSON())).not.toContain('Fit Factor');
+  expect(JSON.stringify(renderer.toJSON())).not.toContain('Fit Test Method');
 });
