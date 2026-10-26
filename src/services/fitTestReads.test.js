@@ -164,6 +164,8 @@ test('an allowed edit writes history and a result change does not', async () => 
   expect(batch.commit).toHaveBeenCalledTimes(1);
   const written = batch.update.mock.calls[0][1];
   expect(written.model).toBe('1870');
+  expect(written.fitTestMethod).toBe('Qualitative');
+  expect(written.fitFactor).toBeUndefined();
   expect(written.result).toBeUndefined();
   expect(written.issueDate).toBeUndefined();
   expect(written.expirationDate).toBeUndefined();
@@ -180,8 +182,11 @@ test('an allowed edit writes history and a result change does not', async () => 
     fitTestId: 'ft-1',
     editedBy: 'admin-1',
     editedAt: { kind: 'serverTimestamp' },
-    fields: ['model'],
-    changes: { old: { model: '1860' }, new: { model: '1870' } },
+    fields: ['model', 'fitTestMethod'],
+    changes: {
+      old: { model: '1860', fitTestMethod: null },
+      new: { model: '1870', fitTestMethod: 'Qualitative' },
+    },
   });
 });
 

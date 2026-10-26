@@ -12,7 +12,7 @@ import { isAccessWindowOpen, isFaculty } from '../utils/roles';
 import { sendFitTestCard } from '../services/emailService';
 import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../utils/csvUtils';
-import { TEST_LOCATION_OPTIONS, canonicalFitTestMethod } from '../constants/fitTestOptions';
+import { TEST_LOCATION_OPTIONS } from '../constants/fitTestOptions';
 import {
   FILTER_ALL,
   getMonthKeyFromTest,
@@ -317,8 +317,6 @@ export const useFitTestResults = () => {
       maskSize: test.maskSize || '',
       model: test.model || '',
       style: test.style || '',
-      fitTestMethod: canonicalFitTestMethod(test.fitTestMethod) || '',
-      fitFactor: test.fitFactor ?? '',
       result: test.result || '',
       fitTester: test.fitTester || '',
     });
@@ -362,34 +360,24 @@ export const useFitTestResults = () => {
       setEditError('Model cannot be cleared after it is saved.');
       return;
     }
-    const method = canonicalFitTestMethod(editData.fitTestMethod) || '';
-    if (method === 'Quantitative') {
-      const fitFactor = Number(editData.fitFactor);
-      if (!Number.isFinite(fitFactor) || fitFactor < 1 || fitFactor > 100000) {
-        setEditError('Enter a fit factor from 1 to 100000.');
-        return;
-      }
-    }
 
     try {
       setSaving(true);
       setSuccessMessage('');
       setError('');
 
-      const updates = { ...editData, model: nextModel, style: nextStyle, fitTestMethod: method };
+      const updates = {
+        ...editData,
+        model: nextModel,
+        style: nextStyle,
+        fitTestMethod: 'Qualitative',
+        fitFactor: deleteField(),
+      };
       delete updates.result;
       delete updates.issueDate;
       delete updates.expirationDate;
       delete updates.retentionDate;
       updates.testLocation = nextLocation;
-      delete updates.fitFactor;
-      if (method === 'Quantitative') {
-        updates.fitFactor = Number(editData.fitFactor);
-      } else if (method === 'Qualitative') {
-        updates.fitFactor = deleteField();
-      } else {
-        delete updates.fitTestMethod;
-      }
 
       if (!user || !user.uid) {
         throw new Error('User must be logged in to update records.');

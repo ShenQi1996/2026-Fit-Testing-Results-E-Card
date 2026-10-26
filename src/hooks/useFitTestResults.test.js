@@ -132,31 +132,15 @@ test('an edit that keeps the issue date does not reload the results list', async
   expect(apiRef.current.fitTests.map((test) => test.clientName)).toEqual(['Ada King']);
 });
 
-test('a quantitative edit with no fit factor stays on the form', async () => {
+test('an edit does not ask for a method and strips any fit factor', async () => {
   const apiRef = { current: null };
   await renderProbe(apiRef);
 
   await act(async () => {
-    apiRef.current.handleEditClick({ ...record, fitTestMethod: 'Quantitative', fitFactor: '' });
+    apiRef.current.handleEditClick({ ...record, fitTestMethod: undefined, fitFactor: 100 });
   });
-  await act(async () => {
-    await apiRef.current.handleEditSave('ft-1');
-  });
-
-  expect(updateFitTest).not.toHaveBeenCalled();
-  expect(apiRef.current.error).toBe('');
-  expect(apiRef.current.editError).toMatch(/fit factor/i);
-  expect(apiRef.current.editing).toBe('ft-1');
-});
-
-test('a legacy Locked to Qualitative value edits and saves as Qualitative', async () => {
-  const apiRef = { current: null };
-  await renderProbe(apiRef);
-
-  await act(async () => {
-    apiRef.current.handleEditClick({ ...record, fitTestMethod: 'Locked to Qualitative' });
-  });
-  expect(apiRef.current.editData.fitTestMethod).toBe('Qualitative');
+  expect(apiRef.current.editData.fitTestMethod).toBeUndefined();
+  expect(apiRef.current.editData.fitFactor).toBeUndefined();
 
   await act(async () => {
     await apiRef.current.handleEditSave('ft-1');
@@ -164,11 +148,30 @@ test('a legacy Locked to Qualitative value edits and saves as Qualitative', asyn
 
   expect(updateFitTest).toHaveBeenCalledWith(
     'ft-1',
-    expect.objectContaining({ fitTestMethod: 'Qualitative' }),
+    expect.objectContaining({
+      fitTestMethod: 'Qualitative',
+      fitFactor: { kind: 'deleteField' },
+    }),
     'admin-1',
   );
+});
+
+test('a legacy Locked to Qualitative value saves as Qualitative', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, fitTestMethod: 'Locked to Qualitative' });
+  });
+  expect(apiRef.current.editData.fitTestMethod).toBeUndefined();
+
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
   const payload = updateFitTest.mock.calls[0][1];
-  expect(payload.fitTestMethod).not.toBe('Locked to Qualitative');
+  expect(payload.fitTestMethod).toBe('Qualitative');
+  expect(payload.fitFactor).toEqual({ kind: 'deleteField' });
 });
 
 test('faculty load results by school instead of user id', async () => {

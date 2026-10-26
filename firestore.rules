@@ -686,20 +686,21 @@ service cloud.firestore {
             || textOk(after, maxSize);
       }
       // Every material edit, including one that does not touch the method.
-      // A legacy record that never stored a method may leave it blank. Once a
-      // method is stored, the edit has to keep Qualitative or Quantitative.
+      // A legacy record that never stored a method may leave it blank. A stored
+      // method, including "Locked to Qualitative", may be saved as Qualitative.
+      // Quantitative is never accepted, and a fit factor cannot be stored.
+      // The stored read runs only when the new value is blank, so a Qualitative
+      // edit does not spend that read on the expression limit.
       function methodStillOk() {
         let method = request.resource.data.get('fitTestMethod', '');
-        let stored = resource.data.get('fitTestMethod', '');
-        let factor = request.resource.data.get('fitFactor', null);
         return (
-            hadStoredText(stored)
-              ? (method == 'Qualitative' || method == 'Quantitative')
-              : (method == 'Qualitative' || method == 'Quantitative' || !hadStoredText(method))
+            method == 'Qualitative'
+            || (
+              !hadStoredText(method)
+              && !hadStoredText(resource.data.get('fitTestMethod', ''))
+            )
           )
-          && (method == 'Quantitative'
-            ? (factor is number && factor >= 1 && factor <= 100000)
-            : method != 'Qualitative' || factor == null);
+          && !request.resource.data.keys().hasAny(['fitFactor']);
       }
       // One allow rule. Extra allow update rules are all evaluated, and their
       // expression counts add up past the limit on a full record.
@@ -753,37 +754,29 @@ service cloud.firestore {
           : !hadText(resource.data, field);
       }
 
-      function fitFactorInRange(value) {
-        return value is number && value >= 1 && value <= 100000;
+      // Creates must be exactly Qualitative. An update may write Qualitative over a
+      // legacy "Locked to Qualitative" or missing method. A record that never had a
+      // method may stay blank. Quantitative is never accepted.
+      function qualitativeMethod() {
+        return request.resource.data.get('fitTestMethod', '') == 'Qualitative';
       }
 
-      function fitFactorOkOnWrite() {
-        return request.resource.data.get('fitTestMethod', '') == 'Quantitative'
-          ? fitFactorInRange(request.resource.data.get('fitFactor', null))
-          : request.resource.data.get('fitTestMethod', '') == 'Qualitative'
-            ? !request.resource.data.keys().hasAny(['fitFactor'])
-            : (
-              request.resource.data.keys().hasAny(['fitFactor'])
-                ? fitFactorInRange(request.resource.data.fitFactor)
-                : true
-            );
-      }
-
-      function methodNotBlanked() {
-        return hadText(resource.data, 'fitTestMethod')
-          ? (
-            request.resource.data.get('fitTestMethod', '') == 'Qualitative'
-            || request.resource.data.get('fitTestMethod', '') == 'Quantitative'
-          )
-          : (
-            !request.resource.data.keys().hasAny(['fitTestMethod'])
-            || request.resource.data.get('fitTestMethod', '') == 'Qualitative'
-            || request.resource.data.get('fitTestMethod', '') == 'Quantitative'
-            || (
-              request.resource.data.fitTestMethod is string
-              && request.resource.data.fitTestMethod.size() == 0
+      function qualitativeOrLegacyBlank() {
+        return qualitativeMethod()
+          || (
+            !hadText(resource.data, 'fitTestMethod')
+            && (
+              !request.resource.data.keys().hasAny(['fitTestMethod'])
+              || (
+                request.resource.data.fitTestMethod is string
+                && request.resource.data.fitTestMethod.size() == 0
+              )
             )
           );
+      }
+
+      function fitFactorAbsent() {
+        return !request.resource.data.keys().hasAny(['fitFactor']);
       }
 
       // Style is required on create and on every material edit. A housekeeping
@@ -797,18 +790,18 @@ service cloud.firestore {
           && textNotBlanked('model', 200)
           && styleRequired()
           && textNotBlanked('maskSize', 50)
-          && methodNotBlanked()
-          && fitFactorOkOnWrite();
+          && qualitativeOrLegacyBlank()
+          && fitFactorAbsent();
       }
 
+      // OSHA 1910.134(m)(2): make, model, style, and size. Method is Qualitative.
       function respiratorRecordOk() {
         return textOk(request.resource.data.get('respiratorMfg', ''), 200)
           && textOk(request.resource.data.get('model', ''), 200)
           && styleRequired()
           && textOk(request.resource.data.get('maskSize', ''), 50)
-          && (request.resource.data.get('fitTestMethod', '') == 'Qualitative'
-            || request.resource.data.get('fitTestMethod', '') == 'Quantitative')
-          && fitFactorOkOnWrite();
+          && qualitativeMethod()
+          && fitFactorAbsent();
       }
 
       allow create: if

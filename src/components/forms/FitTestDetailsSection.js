@@ -9,7 +9,6 @@ import {
   RESPIRATOR_MFG_OPTIONS,
   MASK_SIZE_OPTIONS,
   RESULT_OPTIONS,
-  FIT_TEST_METHOD_OPTIONS,
   RESPIRATOR_STYLE_OPTIONS,
   isCustomOptionValue,
 } from '../../constants/fitTestOptions';
@@ -77,17 +76,6 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
       </div>
 
       <div className="form-row">
-        <FormSelect
-          id="fitTestMethod"
-          label="Fit test method"
-          value={formData.fitTestMethod || ''}
-          onChange={(e) => onChange('fitTestMethod', e.target.value)}
-          options={FIT_TEST_METHOD_OPTIONS}
-          placeholder="Select method"
-          required
-          disabled={isLoading}
-          error={fieldErrors?.fitTestMethod}
-        />
         <FormSelect
           id="style"
           label="Style"
@@ -169,24 +157,6 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           error={fieldErrors?.model}
         />
       </div>
-
-      {formData.fitTestMethod === 'Quantitative' && (
-        <div className="form-row">
-          <FormInput
-            id="fitFactor"
-            label="Fit factor"
-            type="number"
-            value={formData.fitFactor}
-            onChange={(e) => onChange('fitFactor', e.target.value)}
-            placeholder="1 to 100000"
-            min="1"
-            max="100000"
-            required
-            disabled={isLoading}
-            error={fieldErrors?.fitFactor}
-          />
-        </div>
-      )}
 
       <div className="form-row">
         <FormSelect

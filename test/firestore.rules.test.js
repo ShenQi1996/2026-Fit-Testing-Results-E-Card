@@ -1353,30 +1353,38 @@ test('fit test records are soft-deleted with a reason and cannot be hard-deleted
   }));
 });
 
-test('new fit tests require make, model, style, size, test type, and a fit factor when quantitative', async () => {
+test('new fit tests require make, model, style, and size, and are qualitative with no fit factor', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
   ]);
   const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const withoutMethod = respiratorRecord();
+  delete withoutMethod.fitTestMethod;
 
   await assertFails(setDoc(doc(testerDb, 'fitTests/missing-model'), {
     userId: 'tester-1',
     ...respiratorRecord({ model: '' }),
   }));
-  await assertFails(setDoc(doc(testerDb, 'fitTests/quant-missing'), {
-    userId: 'tester-1',
-    ...respiratorRecord({ fitTestMethod: 'Quantitative' }),
-  }));
-  await assertFails(setDoc(doc(testerDb, 'fitTests/quant-string'), {
-    userId: 'tester-1',
-    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: '100' }),
-  }));
-  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/quant-ok'), {
+  await assertFails(setDoc(doc(testerDb, 'fitTests/quant'), {
     userId: 'tester-1',
     creatorRole: 'tester',
     creatorSchool: HELENE,
     deletedAt: null,
     ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100 }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/locked'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    deletedAt: null,
+    ...respiratorRecord({ fitTestMethod: 'Locked to Qualitative' }),
+  }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/no-method'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    deletedAt: null,
+    ...withoutMethod,
   }));
   await assertSucceeds(setDoc(doc(testerDb, 'fitTests/qual-ok'), {
     userId: 'tester-1',
@@ -1395,20 +1403,13 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
     userId: 'tester-1',
     ...respiratorRecord({ model: '   ' }),
   }));
-  await assertFails(setDoc(doc(testerDb, 'fitTests/factor-zero'), {
+  await assertFails(setDoc(doc(testerDb, 'fitTests/spaces-mfg'), {
     userId: 'tester-1',
-    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 0 }),
+    ...respiratorRecord({ respiratorMfg: '   ' }),
   }));
-  await assertFails(setDoc(doc(testerDb, 'fitTests/factor-high'), {
+  await assertFails(setDoc(doc(testerDb, 'fitTests/spaces-size'), {
     userId: 'tester-1',
-    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100001 }),
-  }));
-  await assertSucceeds(setDoc(doc(testerDb, 'fitTests/factor-max'), {
-    userId: 'tester-1',
-    creatorRole: 'tester',
-    creatorSchool: HELENE,
-    deletedAt: null,
-    ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 100000 }),
+    ...respiratorRecord({ maskSize: '   ' }),
   }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/qual-factor'), {
     userId: 'tester-1',
@@ -1428,7 +1429,7 @@ test('new fit tests require make, model, style, size, test type, and a fit facto
   }));
 });
 
-test('an update cannot blank model or style or put a fit factor on a qualitative test', async () => {
+test('an update cannot blank model or style, set a quantitative method, or add a fit factor', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
     ['fitTests/stamped', {
@@ -1445,7 +1446,10 @@ test('an update cannot blank model or style or put a fit factor on a qualitative
   await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { maskSize: deleteField() }));
   await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitTestMethod: deleteField() }));
   await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitTestMethod: '   ' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitTestMethod: 'Quantitative' }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitTestMethod: 'Locked to Qualitative' }));
   await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitFactor: 100 }));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/stamped'), { fitFactor: '' }));
   await assertFails(commitEdit(
     testerDb,
     'stamped',
@@ -1461,6 +1465,22 @@ test('an update cannot blank model or style or put a fit factor on a qualitative
     'clear-style',
     { style: { oldValue: 'Filtering facepiece', newValue: null } },
     { style: deleteField() },
+  ));
+  await assertFails(commitEdit(
+    testerDb,
+    'stamped',
+    'tester-1',
+    'set-quant',
+    { fitTestMethod: { oldValue: 'Qualitative', newValue: 'Quantitative' } },
+    { fitTestMethod: 'Quantitative' },
+  ));
+  await assertFails(commitEdit(
+    testerDb,
+    'stamped',
+    'tester-1',
+    'add-factor',
+    { fitFactor: { oldValue: null, newValue: 100 } },
+    { fitFactor: 100 },
   ));
   await assertSucceeds(commitEdit(
     testerDb,
@@ -1478,6 +1498,7 @@ test('an update cannot blank model or style or put a fit factor on a qualitative
     { respiratorMfg: { oldValue: '3M', newValue: 'Honeywell' } },
     { respiratorMfg: 'Honeywell' },
   ));
+  await assertFails(updateDoc(doc(testerDb, 'fitTests/legacy'), { result: 'Fail' }));
   await assertSucceeds(updateDoc(doc(testerDb, 'fitTests/legacy'), {
     verificationToken: 'tok-legacy',
     lookupKey: 'lookup-legacy',
@@ -1499,14 +1520,33 @@ test('an update cannot blank model or style or put a fit factor on a qualitative
     { style: { oldValue: null, newValue: 'Filtering facepiece' } },
     { style: 'Filtering facepiece' },
   ));
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'legacy',
+    'tester-1',
+    'edit-legacy-method',
+    { fitTestMethod: { oldValue: null, newValue: 'Qualitative' } },
+    { fitTestMethod: 'Qualitative' },
+  ));
 });
 
-test('a legacy Locked to Qualitative method saves as Qualitative', async () => {
+test('a legacy missing or Locked to Qualitative method saves as Qualitative', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
     ['fitTests/legacy-method', {
       userId: 'tester-1',
       ...respiratorRecord({ fitTestMethod: 'Locked to Qualitative' }),
+    }],
+    ['fitTests/legacy-missing', {
+      userId: 'tester-1',
+      respiratorMfg: '3M',
+      model: '1860',
+      style: 'Filtering facepiece',
+      maskSize: 'Regular',
+    }],
+    ['fitTests/legacy-factor', {
+      userId: 'tester-1',
+      ...respiratorRecord({ fitTestMethod: 'Locked to Qualitative', fitFactor: 100 }),
     }],
   ]);
   const testerDb = testEnv.authenticatedContext('tester-1').firestore();
@@ -1530,6 +1570,51 @@ test('a legacy Locked to Qualitative method saves as Qualitative', async () => {
   const saved = await getDoc(doc(testerDb, 'fitTests/legacy-method'));
   expect(saved.data().fitTestMethod).toBe('Qualitative');
   expect(saved.data().fitFactor).toBeUndefined();
+
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'legacy-missing',
+    'tester-1',
+    'keep-missing',
+    { clientName: { oldValue: null, newValue: 'Ada' } },
+    { clientName: 'Ada' },
+  ));
+  let missing = await getDoc(doc(testerDb, 'fitTests/legacy-missing'));
+  expect(missing.data().fitTestMethod).toBeUndefined();
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'legacy-missing',
+    'tester-1',
+    'set-method',
+    { fitTestMethod: { oldValue: null, newValue: 'Qualitative' } },
+    { fitTestMethod: 'Qualitative' },
+  ));
+  missing = await getDoc(doc(testerDb, 'fitTests/legacy-missing'));
+  expect(missing.data().fitTestMethod).toBe('Qualitative');
+  expect(missing.data().fitFactor).toBeUndefined();
+
+  await assertFails(commitEdit(
+    testerDb,
+    'legacy-factor',
+    'tester-1',
+    'keep-factor',
+    { fitTestMethod: { oldValue: 'Locked to Qualitative', newValue: 'Qualitative' } },
+    { fitTestMethod: 'Qualitative' },
+  ));
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'legacy-factor',
+    'tester-1',
+    'strip-factor',
+    {
+      fitTestMethod: { oldValue: 'Locked to Qualitative', newValue: 'Qualitative' },
+      fitFactor: { oldValue: 100, newValue: null },
+    },
+    { fitTestMethod: 'Qualitative', fitFactor: deleteField() },
+  ));
+  const stripped = await getDoc(doc(testerDb, 'fitTests/legacy-factor'));
+  expect(stripped.data().fitTestMethod).toBe('Qualitative');
+  expect(stripped.data().fitFactor).toBeUndefined();
 });
 
 test('a new fit test stamps the creator role and school, and those stamps stay put', async () => {
@@ -1869,7 +1954,6 @@ test('lookup and verification copies match the fit test and stay inside the admi
     expirationDate: '',
     fitTestType: '',
     testingAgent: '',
-    fitFactor: '',
     result: 'Pass',
     fitTester: '',
     verificationToken: token,
@@ -1884,7 +1968,6 @@ test('lookup and verification copies match the fit test and stay inside the admi
     issueDate: '',
     expirationDate: '',
     fitTestType: '',
-    fitFactor: '',
     result: 'Pass',
     fitTester: '',
     userId: 'tester-1',

@@ -59,47 +59,26 @@ describe('form validators', () => {
     expect(result.fieldErrors.solutionExpirationDate).toMatch(/on or after open date/i);
   });
 
-  test('respirator model, style, method, and quantitative fit factor are required', () => {
+  test('respirator make, model, style, and size are required', () => {
     const missingModel = validateFitTestForm({ ...validForm(), model: ' ' }, true, true);
     expect(missingModel.fieldErrors.model).toMatch(/model/i);
 
     const missingStyle = validateFitTestForm({ ...validForm(), style: '' }, true, true);
-    expect(missingStyle.fieldErrors.style).toMatch(/style/i);
+    expect(missingStyle.fieldErrors.style).toBe('Please select the respirator style.');
 
-    const missingMethod = validateFitTestForm({ ...validForm(), fitTestMethod: '' }, true, true);
-    expect(missingMethod.fieldErrors.fitTestMethod).toMatch(/qualitative or quantitative/i);
+    const whitespaceMfg = validateFitTestForm({ ...validForm(), respiratorMfg: '   ' }, true, true);
+    expect(whitespaceMfg.fieldErrors.respiratorMfg).toMatch(/manufacturer/i);
 
-    const quantitative = validateFitTestForm({
+    const whitespaceSize = validateFitTestForm({ ...validForm(), maskSize: '  ' }, true, true);
+    expect(whitespaceSize.fieldErrors.maskSize).toMatch(/mask size/i);
+
+    const savedAsQualitative = validateFitTestForm({
       ...validForm(),
-      fitTestMethod: 'Quantitative',
-      fitFactor: '',
-    }, true, true);
-    expect(quantitative.fieldErrors.fitFactor).toMatch(/1 to 100000/i);
-    const tooHigh = validateFitTestForm({
-      ...validForm(),
-      fitTestMethod: 'Quantitative',
-      fitFactor: '100001',
-    }, true, true);
-    expect(tooHigh.fieldErrors.fitFactor).toMatch(/1 to 100000/i);
-    const qualitativeWithFactor = validateFitTestForm({
-      ...validForm(),
-      fitTestMethod: 'Qualitative',
+      fitTestMethod: '',
       fitFactor: '100',
     }, true, true);
-    expect(qualitativeWithFactor.fieldErrors.fitFactor).toMatch(/does not record/i);
-
-    const withFactor = validateFitTestForm({
-      ...validForm(),
-      fitTestMethod: 'Quantitative',
-      fitFactor: '100',
-    }, true, true);
-    expect(withFactor.isValid).toBe(true);
-
-    const qualitative = validateFitTestForm({
-      ...validForm(),
-      fitTestMethod: 'Qualitative',
-      fitFactor: '',
-    }, true, true);
-    expect(qualitative.isValid).toBe(true);
+    expect(savedAsQualitative.isValid).toBe(true);
+    expect(savedAsQualitative.fieldErrors.fitTestMethod).toBeUndefined();
+    expect(savedAsQualitative.fieldErrors.fitFactor).toBeUndefined();
   });
 });

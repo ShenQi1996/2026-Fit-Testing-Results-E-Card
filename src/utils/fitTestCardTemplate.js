@@ -17,7 +17,6 @@ export const generateFitTestCard = (formData) => {
     model,
     style,
     fitTestMethod,
-    fitFactor,
     result,
     fitTester,
     recipientEmail,
@@ -179,18 +178,10 @@ export const generateFitTestCard = (formData) => {
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${style}</td>
                                 </tr>
                                 ` : ''}
-                                ${displayMethod ? `
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Test Method:</td>
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${displayMethod}</td>
                                 </tr>
-                                ` : ''}
-                                ${displayMethod === 'Quantitative' && fitFactor != null && fitFactor !== '' ? `
-                                <tr>
-                                  <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Factor:</td>
-                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${fitFactor}</td>
-                                </tr>
-                                ` : ''}
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Result:</td>
                                   <td style="padding: 8px 0; color: ${result === 'Pass' ? '#0F9A8A' : result === 'Fail' ? '#dc3545' : '#0B2D4A'}; text-align: right; font-weight: bold;">${result || '[Result]'}</td>
