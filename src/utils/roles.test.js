@@ -4,7 +4,9 @@ import {
   accessEndLocksAccount,
   accountStatusLabel,
   canModifyManagedUser,
+  isAccessWindowOpen,
   isAdminOrAbove,
+  isFaculty,
   isSuperAdmin,
   rolesAssignableBy,
   rolesCreatableBy,
@@ -15,22 +17,26 @@ describe('role helpers', () => {
     expect(isAdminOrAbove('admin')).toBe(true);
     expect(isAdminOrAbove('superadmin')).toBe(true);
     expect(isAdminOrAbove('tester')).toBe(false);
+    expect(isAdminOrAbove('faculty')).toBe(false);
+    expect(isFaculty('faculty')).toBe(true);
+    expect(isFaculty('tester')).toBe(false);
     expect(isAdminOrAbove(undefined)).toBe(false);
     expect(isSuperAdmin('superadmin')).toBe(true);
     expect(isSuperAdmin('admin')).toBe(false);
   });
 
-  test('client role choices are tester or admin, never superadmin', () => {
-    expect(rolesAssignableBy('superadmin')).toEqual(['tester', 'admin']);
-    expect(rolesAssignableBy('admin')).toEqual(['tester']);
+  test('client role choices include faculty for admins, never superadmin', () => {
+    expect(rolesAssignableBy('superadmin')).toEqual(['tester', 'faculty', 'admin']);
+    expect(rolesAssignableBy('admin')).toEqual(['tester', 'faculty']);
     expect(rolesAssignableBy('tester')).toEqual(['tester']);
+    expect(rolesAssignableBy('faculty')).toEqual(['tester']);
     expect(rolesAssignableBy('superadmin')).not.toContain('superadmin');
     expect(rolesAssignableBy('admin')).not.toContain('superadmin');
   });
 
   test('nobody can create a superadmin from the client role list', () => {
-    expect(rolesCreatableBy('superadmin')).toEqual(['tester', 'admin']);
-    expect(rolesCreatableBy('admin')).toEqual(['tester']);
+    expect(rolesCreatableBy('superadmin')).toEqual(['tester', 'faculty', 'admin']);
+    expect(rolesCreatableBy('admin')).toEqual(['tester', 'faculty']);
     expect(rolesCreatableBy('tester')).toEqual(['tester']);
     expect(rolesCreatableBy('superadmin')).not.toContain('superadmin');
   });
@@ -50,6 +56,15 @@ describe('role helpers', () => {
       startDate: '2026-11-01T00:00:00',
       endDate: '2026-10-01T00:00:00',
     }, now)).toBe(true);
+    expect(isAccessWindowOpen({ role: 'faculty' }, now)).toBe(true);
+    expect(isAccessWindowOpen({
+      role: 'faculty',
+      startDate: '2026-10-01T00:00:00',
+      endDate: '2026-10-31T23:59:59',
+    }, now)).toBe(true);
+    expect(isAccessWindowOpen({ role: 'faculty', endDate: '2026-10-01T00:00:00' }, now)).toBe(false);
+    expect(isAccessWindowOpen({ role: 'faculty', startDate: '2026-11-01T00:00:00' }, now)).toBe(false);
+    expect(isFaculty({ role: 'faculty', endDate: '2026-10-01T00:00:00' })).toBe(true);
     expect(accessDateInputValue('2026-06-01T12:00:00')).toMatch(/^2026-06-0[12]$/);
     expect(accessWindowOrderError('2026-10-10', '2026-10-01'))
       .toBe('Access end date cannot be before the start date.');
@@ -102,10 +117,13 @@ describe('role helpers', () => {
 
   test('a regular admin cannot modify admin or superadmin profiles', () => {
     expect(canModifyManagedUser('admin', 'tester')).toBe(true);
+    expect(canModifyManagedUser('admin', 'faculty')).toBe(true);
     expect(canModifyManagedUser('admin', undefined)).toBe(true);
     expect(canModifyManagedUser('admin', 'admin')).toBe(false);
     expect(canModifyManagedUser('admin', 'superadmin')).toBe(false);
+    expect(canModifyManagedUser('faculty', 'tester')).toBe(false);
     expect(canModifyManagedUser('superadmin', 'admin')).toBe(true);
+    expect(canModifyManagedUser('superadmin', 'faculty')).toBe(true);
     expect(canModifyManagedUser('superadmin', 'superadmin')).toBe(true);
     expect(canModifyManagedUser('tester', 'tester')).toBe(false);
   });
