@@ -121,9 +121,10 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editErro
         <label>Testing Agent:</label>
         <select
           className="edit-select"
-          value={editData.testingAgent || 'Bitrex'}
+          value={editData.testingAgent || ''}
           onChange={(e) => onChange('testingAgent', e.target.value)}
         >
+          <option value="">Select testing agent</option>
           {TESTING_AGENT_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}

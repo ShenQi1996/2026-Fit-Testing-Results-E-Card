@@ -366,13 +366,25 @@ export const useFitTestResults = () => {
       setSuccessMessage('');
       setError('');
 
+      const keepQuantitative = original?.fitTestMethod === 'Quantitative';
       const updates = {
         ...editData,
         model: nextModel,
         style: nextStyle,
-        fitTestMethod: 'Qualitative',
-        fitFactor: deleteField(),
+        fitTestMethod: keepQuantitative ? 'Quantitative' : 'Qualitative',
       };
+      if (keepQuantitative) {
+        if (Object.prototype.hasOwnProperty.call(original, 'fitFactor')) {
+          updates.fitFactor = original.fitFactor;
+        } else {
+          delete updates.fitFactor;
+        }
+      } else {
+        updates.fitFactor = deleteField();
+      }
+      if (!String(updates.testingAgent || '').trim()) {
+        delete updates.testingAgent;
+      }
       delete updates.result;
       delete updates.issueDate;
       delete updates.expirationDate;

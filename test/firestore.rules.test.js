@@ -1617,6 +1617,94 @@ test('a legacy missing or Locked to Qualitative method saves as Qualitative', as
   expect(stripped.data().fitFactor).toBeUndefined();
 });
 
+test('a legacy quantitative method and fit factor stay unchanged on edit', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/quant', {
+      userId: 'tester-1',
+      schoolsList: HELENE,
+      deletedAt: null,
+      ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 180 }),
+    }],
+    ['fitTests/quant-bare', {
+      userId: 'tester-1',
+      schoolsList: HELENE,
+      deletedAt: null,
+      ...respiratorRecord({ fitTestMethod: 'Quantitative' }),
+    }],
+  ]);
+  const testerDb = testEnv.authenticatedContext('tester-1').firestore();
+
+  await assertFails(commitEdit(
+    testerDb,
+    'quant',
+    'tester-1',
+    'rewrite',
+    {
+      fitTestMethod: { oldValue: 'Quantitative', newValue: 'Qualitative' },
+      fitFactor: { oldValue: 180, newValue: null },
+    },
+    { fitTestMethod: 'Qualitative', fitFactor: deleteField() },
+  ));
+  await assertFails(commitEdit(
+    testerDb,
+    'quant',
+    'tester-1',
+    'factor',
+    { fitFactor: { oldValue: 180, newValue: 200 } },
+    { fitFactor: 200 },
+  ));
+  await assertFails(commitEdit(
+    testerDb,
+    'quant',
+    'tester-1',
+    'drop-factor',
+    { fitFactor: { oldValue: 180, newValue: null } },
+    { fitFactor: deleteField() },
+  ));
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'quant',
+    'tester-1',
+    'name',
+    { clientName: { oldValue: null, newValue: 'Ada Lovelace' } },
+    { clientName: 'Ada Lovelace' },
+  ));
+  const saved = await getDoc(doc(testerDb, 'fitTests/quant'));
+  expect(saved.data().fitTestMethod).toBe('Quantitative');
+  expect(saved.data().fitFactor).toBe(180);
+  expect(saved.data().clientName).toBe('Ada Lovelace');
+
+  await assertFails(commitEdit(
+    testerDb,
+    'quant-bare',
+    'tester-1',
+    'add-factor',
+    { fitFactor: { oldValue: null, newValue: 100 } },
+    { fitFactor: 100 },
+  ));
+  await assertFails(commitEdit(
+    testerDb,
+    'quant-bare',
+    'tester-1',
+    'rewrite-bare',
+    { fitTestMethod: { oldValue: 'Quantitative', newValue: 'Qualitative' } },
+    { fitTestMethod: 'Qualitative' },
+  ));
+  await assertSucceeds(commitEdit(
+    testerDb,
+    'quant-bare',
+    'tester-1',
+    'bare-name',
+    { clientName: { oldValue: null, newValue: 'Grace Hopper' } },
+    { clientName: 'Grace Hopper' },
+  ));
+  const bare = await getDoc(doc(testerDb, 'fitTests/quant-bare'));
+  expect(bare.data().fitTestMethod).toBe('Quantitative');
+  expect(bare.data().fitFactor).toBeUndefined();
+  expect(bare.data().clientName).toBe('Grace Hopper');
+});
+
 test('a new fit test stamps the creator role and school, and those stamps stay put', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],

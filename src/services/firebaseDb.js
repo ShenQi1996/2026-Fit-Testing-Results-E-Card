@@ -926,11 +926,21 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
       throw new Error('This fit test record is already hidden.');
     }
     const normalizedUpdates = { ...(updates || {}) };
-    normalizedUpdates.fitTestMethod = 'Qualitative';
-    if (Object.prototype.hasOwnProperty.call(existing, 'fitFactor')) {
-      normalizedUpdates.fitFactor = deleteField();
+    const keepQuantitative = existing.fitTestMethod === 'Quantitative';
+    if (keepQuantitative) {
+      normalizedUpdates.fitTestMethod = existing.fitTestMethod;
+      if (Object.prototype.hasOwnProperty.call(existing, 'fitFactor')) {
+        normalizedUpdates.fitFactor = existing.fitFactor;
+      } else {
+        delete normalizedUpdates.fitFactor;
+      }
     } else {
-      delete normalizedUpdates.fitFactor;
+      normalizedUpdates.fitTestMethod = 'Qualitative';
+      if (Object.prototype.hasOwnProperty.call(existing, 'fitFactor')) {
+        normalizedUpdates.fitFactor = deleteField();
+      } else {
+        delete normalizedUpdates.fitFactor;
+      }
     }
     const lockedChange = LOCKED_FIT_TEST_FIELDS.find((field) => (
       Object.prototype.hasOwnProperty.call(normalizedUpdates, field)

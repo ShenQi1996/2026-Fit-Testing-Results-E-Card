@@ -688,19 +688,30 @@ service cloud.firestore {
       // Every material edit, including one that does not touch the method.
       // A legacy record that never stored a method may leave it blank. A stored
       // method, including "Locked to Qualitative", may be saved as Qualitative.
-      // Quantitative is never accepted, and a fit factor cannot be stored.
-      // The stored read runs only when the new value is blank, so a Qualitative
-      // edit does not spend that read on the expression limit.
+      // An existing Quantitative method and its fit factor may stay exactly as
+      // stored. They cannot be added or changed, and a fit factor cannot be
+      // added to any other record. The stored method is read on a Qualitative
+      // save so a legacy Quantitative record cannot be rewritten.
       function methodStillOk() {
         let method = request.resource.data.get('fitTestMethod', '');
-        return (
-            method == 'Qualitative'
-            || (
-              !hadStoredText(method)
-              && !hadStoredText(resource.data.get('fitTestMethod', ''))
-            )
+        return method == 'Quantitative'
+          ? (
+            resource.data.get('fitTestMethod', '') == 'Quantitative'
+            && request.resource.data.get('fitFactor', null) == resource.data.get('fitFactor', null)
+            && request.resource.data.keys().hasAny(['fitFactor'])
+              == resource.data.keys().hasAny(['fitFactor'])
           )
-          && !request.resource.data.keys().hasAny(['fitFactor']);
+          : (
+            (
+              method == 'Qualitative'
+                ? resource.data.get('fitTestMethod', '') != 'Quantitative'
+                : (
+                  !hadStoredText(method)
+                  && !hadStoredText(resource.data.get('fitTestMethod', ''))
+                )
+            )
+            && !request.resource.data.keys().hasAny(['fitFactor'])
+          );
       }
       // One allow rule. Extra allow update rules are all evaluated, and their
       // expression counts add up past the limit on a full record.
@@ -756,9 +767,27 @@ service cloud.firestore {
 
       // Creates must be exactly Qualitative. An update may write Qualitative over a
       // legacy "Locked to Qualitative" or missing method. A record that never had a
-      // method may stay blank. Quantitative is never accepted.
+      // method may stay blank. An existing Quantitative method and its fit factor
+      // may stay exactly as stored, and cannot be added or changed.
       function qualitativeMethod() {
         return request.resource.data.get('fitTestMethod', '') == 'Qualitative';
+      }
+
+      function quantitativeUnchanged() {
+        return request.resource.data.get('fitTestMethod', '') == 'Quantitative'
+          && resource.data.get('fitTestMethod', '') == 'Quantitative'
+          && request.resource.data.get('fitFactor', null) == resource.data.get('fitFactor', null)
+          && request.resource.data.keys().hasAny(['fitFactor'])
+            == resource.data.keys().hasAny(['fitFactor']);
+      }
+
+      function methodAndFactorOk() {
+        return quantitativeUnchanged()
+          || (
+            resource.data.get('fitTestMethod', '') != 'Quantitative'
+            && qualitativeOrLegacyBlank()
+            && fitFactorAbsent()
+          );
       }
 
       function qualitativeOrLegacyBlank() {
@@ -790,8 +819,7 @@ service cloud.firestore {
           && textNotBlanked('model', 200)
           && styleRequired()
           && textNotBlanked('maskSize', 50)
-          && qualitativeOrLegacyBlank()
-          && fitFactorAbsent();
+          && methodAndFactorOk();
       }
 
       // OSHA 1910.134(m)(2): make, model, style, and size. Method is Qualitative.
