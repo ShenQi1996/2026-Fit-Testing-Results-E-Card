@@ -914,10 +914,22 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const existingSnap = await getDoc(docRef);
     const existing = existingSnap.exists() ? existingSnap.data() : {};
     const normalizedUpdates = { ...(updates || {}) };
-    normalizedUpdates.fitTestMethod = 'Qualitative';
-    normalizedUpdates.fitFactor = deleteField();
+    const keepQuantitative = existing.fitTestMethod === 'Quantitative';
+    if (keepQuantitative) {
+      normalizedUpdates.fitTestMethod = existing.fitTestMethod;
+      if (Object.prototype.hasOwnProperty.call(existing, 'fitFactor')) {
+        normalizedUpdates.fitFactor = existing.fitFactor;
+      } else {
+        delete normalizedUpdates.fitFactor;
+      }
+    } else {
+      normalizedUpdates.fitTestMethod = 'Qualitative';
+      normalizedUpdates.fitFactor = deleteField();
+    }
     const nextRecord = { ...existing, ...normalizedUpdates };
-    delete nextRecord.fitFactor;
+    if (!keepQuantitative) {
+      delete nextRecord.fitFactor;
+    }
     const previousKey = await resolveLookupKey(existing);
     const nextKey = await resolveLookupKey(nextRecord);
     const verificationToken = resolveVerificationToken(nextRecord);

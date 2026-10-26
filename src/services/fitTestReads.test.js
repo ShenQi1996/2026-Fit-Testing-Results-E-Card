@@ -16,6 +16,7 @@ import {
   getFitTestCountsByUser,
   getUserFitTests,
   saveFitTest,
+  updateFitTest,
 } from './firebaseDb';
 
 const userDoc = (role, extra = {}) => ({
@@ -132,6 +133,103 @@ test('saveFitTest stamps the creator profile and ignores a client stamp', async 
   expect(addDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
     creatorRole: 'admin',
     creatorSchool: 'Helene College of Nursing',
+  }));
+});
+
+test('updateFitTest keeps a legacy quantitative method and fit factor', async () => {
+  const update = jest.fn();
+  writeBatch.mockReturnValue({
+    delete: jest.fn(),
+    update,
+    set: jest.fn(),
+    commit: async () => {},
+  });
+  getDoc
+    .mockResolvedValueOnce(userDoc('admin'))
+    .mockResolvedValueOnce({
+      exists: () => true,
+      id: 'ft-1',
+      data: () => ({
+        userId: 'tester-1',
+        fitTestMethod: 'Quantitative',
+        fitFactor: 180,
+        clientName: 'Ada',
+      }),
+    });
+
+  await updateFitTest('ft-1', {
+    clientName: 'Ada Lovelace',
+    fitTestMethod: 'Qualitative',
+    fitFactor: { kind: 'deleteField' },
+  }, 'admin-1');
+
+  expect(update).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    clientName: 'Ada Lovelace',
+    fitTestMethod: 'Quantitative',
+    fitFactor: 180,
+  }));
+});
+
+test('updateFitTest does not add a fit factor to a quantitative record that has none', async () => {
+  const update = jest.fn();
+  writeBatch.mockReturnValue({
+    delete: jest.fn(),
+    update,
+    set: jest.fn(),
+    commit: async () => {},
+  });
+  getDoc
+    .mockResolvedValueOnce(userDoc('admin'))
+    .mockResolvedValueOnce({
+      exists: () => true,
+      id: 'ft-1',
+      data: () => ({
+        userId: 'tester-1',
+        fitTestMethod: 'Quantitative',
+        clientName: 'Ada',
+      }),
+    });
+
+  await updateFitTest('ft-1', {
+    clientName: 'Ada Lovelace',
+    fitTestMethod: 'Qualitative',
+    fitFactor: 200,
+  }, 'admin-1');
+
+  const written = update.mock.calls[0][1];
+  expect(written.fitTestMethod).toBe('Quantitative');
+  expect(written.fitFactor).toBeUndefined();
+});
+
+test('updateFitTest still records a non-quantitative edit as qualitative with no fit factor', async () => {
+  const update = jest.fn();
+  writeBatch.mockReturnValue({
+    delete: jest.fn(),
+    update,
+    set: jest.fn(),
+    commit: async () => {},
+  });
+  getDoc
+    .mockResolvedValueOnce(userDoc('admin'))
+    .mockResolvedValueOnce({
+      exists: () => true,
+      id: 'ft-1',
+      data: () => ({
+        userId: 'tester-1',
+        fitTestMethod: 'Locked to Qualitative',
+        fitFactor: 100,
+        clientName: 'Ada',
+      }),
+    });
+
+  await updateFitTest('ft-1', {
+    clientName: 'Ada Lovelace',
+    fitFactor: 100,
+  }, 'admin-1');
+
+  expect(update).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    fitTestMethod: 'Qualitative',
+    fitFactor: { kind: 'deleteField' },
   }));
 });
 

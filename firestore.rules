@@ -540,9 +540,27 @@ service cloud.firestore {
 
       // Creates must be exactly Qualitative. An update may write Qualitative over a
       // legacy "Locked to Qualitative" or missing method. A record that never had a
-      // method may stay blank. Quantitative is never accepted.
+      // method may stay blank. An existing Quantitative method and its fit factor
+      // may stay exactly as stored, and cannot be added or changed.
       function qualitativeMethod() {
         return request.resource.data.get('fitTestMethod', '') == 'Qualitative';
+      }
+
+      function quantitativeUnchanged() {
+        return request.resource.data.get('fitTestMethod', '') == 'Quantitative'
+          && resource.data.get('fitTestMethod', '') == 'Quantitative'
+          && request.resource.data.get('fitFactor', null) == resource.data.get('fitFactor', null)
+          && request.resource.data.keys().hasAny(['fitFactor'])
+            == resource.data.keys().hasAny(['fitFactor']);
+      }
+
+      function methodAndFactorOk() {
+        return quantitativeUnchanged()
+          || (
+            resource.data.get('fitTestMethod', '') != 'Quantitative'
+            && qualitativeOrLegacyBlank()
+            && fitFactorAbsent()
+          );
       }
 
       function qualitativeOrLegacyBlank() {
@@ -573,8 +591,7 @@ service cloud.firestore {
           && textNotBlanked('model', 200)
           && styleRequired()
           && textNotBlanked('maskSize', 50)
-          && qualitativeOrLegacyBlank()
-          && fitFactorAbsent();
+          && methodAndFactorOk();
       }
 
       // OSHA 1910.134(m)(2): make, model, style, and size. Method is Qualitative.
