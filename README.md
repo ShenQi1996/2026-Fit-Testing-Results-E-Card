@@ -98,7 +98,7 @@ Collections:
 
 - `users` — testers, faculty, and admins (`role`, `status`)
 - `users/{uid}/solutionProfiles` and `schoolProfiles`
-- `fitTests` — records (owner or admin). Faculty read by `creatorSchool`. New records must include respirator make, model, style, and size, plus qualitative or quantitative method. A quantitative test stores a fit factor from 1 to 100000. A qualitative test does not store a fit factor. An update cannot blank or remove respirator make, model, style, size, or method when those fields are already on the record (OSHA 1910.134(m)(2)).
+- `fitTests` — records (owner or admin). Faculty read by `creatorSchool`. New records must include respirator make, model, style, and size, and stamp `deletedAt` null. Every save stores `fitTestMethod` as `Qualitative`. The company only runs qualitative N95 tests (Bitrex or Saccharin), so the form does not offer a method choice or a fit factor. A legacy record whose method is missing or `Locked to Qualitative` displays as Qualitative, and saving it writes `Qualitative`. A save removes any `fitFactor`. An update cannot blank respirator make, model, style, or size when those fields are already on the record, cannot store a quantitative method, and cannot add a fit factor (OSHA 1910.134(m)(2)).
 
 ## Faculty
 

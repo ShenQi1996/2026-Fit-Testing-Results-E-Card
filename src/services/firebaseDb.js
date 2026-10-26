@@ -73,7 +73,6 @@ const LOOKUP_CARD_FIELDS = [
   'model',
   'style',
   'fitTestMethod',
-  'fitFactor',
   'result',
   'fitTester',
   'verificationToken',
@@ -90,7 +89,6 @@ const VERIFY_CARD_FIELDS = [
   'model',
   'style',
   'fitTestMethod',
-  'fitFactor',
   'result',
   'fitTester',
 ];
@@ -407,10 +405,8 @@ export const saveFitTest = async (userId, fitTestData) => {
     const clientData = { ...(fitTestData || {}) };
     delete clientData[CREATOR_ROLE_FIELD];
     delete clientData[CREATOR_SCHOOL_FIELD];
-    if (clientData.fitTestMethod === 'Locked to Qualitative') {
-      clientData.fitTestMethod = 'Qualitative';
-      delete clientData.fitFactor;
-    }
+    clientData.fitTestMethod = 'Qualitative';
+    delete clientData.fitFactor;
     const lookupKey = await resolveLookupKey(clientData);
     const verificationToken = resolveVerificationToken(clientData);
     const recordToSave = {
@@ -918,30 +914,10 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     const existingSnap = await getDoc(docRef);
     const existing = existingSnap.exists() ? existingSnap.data() : {};
     const normalizedUpdates = { ...(updates || {}) };
-    const incomingMethod = Object.prototype.hasOwnProperty.call(normalizedUpdates, 'fitTestMethod')
-      ? normalizedUpdates.fitTestMethod
-      : existing.fitTestMethod;
-    if (incomingMethod === 'Locked to Qualitative') {
-      normalizedUpdates.fitTestMethod = 'Qualitative';
-    }
-    if (normalizedUpdates.fitTestMethod === 'Qualitative') {
-      const factor = normalizedUpdates.fitFactor;
-      const clearingFactor = factor != null
-        && typeof factor === 'object'
-        && (factor.kind === 'deleteField' || factor._methodName === 'deleteField');
-      if (!clearingFactor && (existing.fitFactor != null || Object.prototype.hasOwnProperty.call(normalizedUpdates, 'fitFactor'))) {
-        normalizedUpdates.fitFactor = deleteField();
-      }
-    }
+    normalizedUpdates.fitTestMethod = 'Qualitative';
+    normalizedUpdates.fitFactor = deleteField();
     const nextRecord = { ...existing, ...normalizedUpdates };
-    const writtenFactor = normalizedUpdates.fitFactor;
-    if (
-      writtenFactor != null
-      && typeof writtenFactor === 'object'
-      && (writtenFactor.kind === 'deleteField' || writtenFactor._methodName === 'deleteField')
-    ) {
-      delete nextRecord.fitFactor;
-    }
+    delete nextRecord.fitFactor;
     const previousKey = await resolveLookupKey(existing);
     const nextKey = await resolveLookupKey(nextRecord);
     const verificationToken = resolveVerificationToken(nextRecord);

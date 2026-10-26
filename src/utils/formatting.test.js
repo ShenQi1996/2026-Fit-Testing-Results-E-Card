@@ -12,6 +12,9 @@ describe('formatting and route helpers', () => {
     ]);
 
     expect(csv.startsWith('Client Name,DOB,Issue Date,Expiration Date,')).toBe(true);
+    expect(csv).toContain('Fit Test Method');
+    expect(csv).not.toContain('Fit Factor');
+    expect(csv).toContain('Qualitative');
     expect(csv).toContain('"Doe, Jane"');
     expect(csv).toContain('"Pass ""A"""');
     expect(csv).toContain('"line one\nline two"');
