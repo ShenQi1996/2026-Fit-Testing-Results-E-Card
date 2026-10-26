@@ -254,6 +254,7 @@ test('updateFitTest keeps a legacy quantitative method and fit factor', async ()
     set: jest.fn(),
     commit: async () => {},
   });
+  getDoc.mockImplementation(async () => ({ exists: () => false, data: () => null }));
   getDoc
     .mockResolvedValueOnce(userDoc('admin'))
     .mockResolvedValueOnce({
@@ -288,6 +289,7 @@ test('updateFitTest does not add a fit factor to a quantitative record that has 
     set: jest.fn(),
     commit: async () => {},
   });
+  getDoc.mockImplementation(async () => ({ exists: () => false, data: () => null }));
   getDoc
     .mockResolvedValueOnce(userDoc('admin'))
     .mockResolvedValueOnce({
@@ -319,6 +321,7 @@ test('updateFitTest still records a non-quantitative edit as qualitative with no
     set: jest.fn(),
     commit: async () => {},
   });
+  getDoc.mockImplementation(async () => ({ exists: () => false, data: () => null }));
   getDoc
     .mockResolvedValueOnce(userDoc('admin'))
     .mockResolvedValueOnce({
