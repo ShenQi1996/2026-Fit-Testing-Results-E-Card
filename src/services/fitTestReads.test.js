@@ -22,7 +22,6 @@ import {
   updateFitTest,
   lookupFitTestForVerification,
   saveFitTest,
-  updateFitTest,
 } from './firebaseDb';
 
 const userDoc = (role, extra = {}) => ({
