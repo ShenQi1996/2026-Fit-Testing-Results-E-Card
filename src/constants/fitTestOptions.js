@@ -42,8 +42,18 @@ export const RESULT_OPTIONS = [
   { value: 'Fail', label: 'Fail' },
 ];
 
-export const FIT_TEST_METHOD_OPTIONS = [
-  { value: 'Locked to Qualitative', label: 'Locked to Qualitative' },
+// Older records stored the display label, or no method at all. Both display as Qualitative.
+export const canonicalFitTestMethod = (value) => {
+  if (value == null || String(value).trim() === '' || value === 'Locked to Qualitative') {
+    return 'Qualitative';
+  }
+  return value;
+};
+
+export const RESPIRATOR_STYLE_OPTIONS = [
+  { value: 'Filtering facepiece', label: 'Filtering facepiece' },
+  { value: 'Half-facepiece', label: 'Half-facepiece' },
+  { value: 'Full-facepiece', label: 'Full-facepiece' },
 ];
 
 export const CLEANING_METHOD_OPTIONS = [

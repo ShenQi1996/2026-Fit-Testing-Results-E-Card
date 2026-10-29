@@ -8,6 +8,9 @@ const validForm = () => ({
   issueDate: '01/15/2026',
   fitTestType: 'N95',
   respiratorMfg: '3M',
+  model: '1860',
+  style: 'Filtering facepiece',
+  fitTestMethod: 'Qualitative',
   testingAgent: 'Bitrex',
   maskSize: 'Regular',
   result: 'Pass',
@@ -54,5 +57,28 @@ describe('form validators', () => {
 
     expect(result.isValid).toBe(false);
     expect(result.fieldErrors.solutionExpirationDate).toMatch(/on or after open date/i);
+  });
+
+  test('respirator make, model, style, and size are required', () => {
+    const missingModel = validateFitTestForm({ ...validForm(), model: ' ' }, true, true);
+    expect(missingModel.fieldErrors.model).toMatch(/model/i);
+
+    const missingStyle = validateFitTestForm({ ...validForm(), style: '' }, true, true);
+    expect(missingStyle.fieldErrors.style).toBe('Please select the respirator style.');
+
+    const whitespaceMfg = validateFitTestForm({ ...validForm(), respiratorMfg: '   ' }, true, true);
+    expect(whitespaceMfg.fieldErrors.respiratorMfg).toMatch(/manufacturer/i);
+
+    const whitespaceSize = validateFitTestForm({ ...validForm(), maskSize: '  ' }, true, true);
+    expect(whitespaceSize.fieldErrors.maskSize).toMatch(/mask size/i);
+
+    const savedAsQualitative = validateFitTestForm({
+      ...validForm(),
+      fitTestMethod: '',
+      fitFactor: '100',
+    }, true, true);
+    expect(savedAsQualitative.isValid).toBe(true);
+    expect(savedAsQualitative.fieldErrors.fitTestMethod).toBeUndefined();
+    expect(savedAsQualitative.fieldErrors.fitFactor).toBeUndefined();
   });
 });

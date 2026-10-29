@@ -156,11 +156,6 @@ service cloud.firestore {
         && resource.data.creatorSchool in facultySchools();
     }
 
-    function creatorStampUnchanged() {
-      return request.resource.data.get('creatorRole', null) == resource.data.get('creatorRole', null)
-        && request.resource.data.get('creatorSchool', null) == resource.data.get('creatorSchool', null);
-    }
-
     // creatorSchool is the profile school for a tester, or one of the actor's own
     // schools for an admin. It is never taken from the card's schoolsList.
     // A tester with no profile school cannot create a fit test.
@@ -323,7 +318,9 @@ service cloud.firestore {
     }
 
     function fitTestSchoolOkOnUpdate() {
-      return schoolsListOf(request.resource.data) == schoolsListOf(resource.data)
+      let next = request.resource.data.get('schoolsList', '');
+      let prev = resource.data.get('schoolsList', '');
+      return (next is string ? next : '') == (prev is string ? prev : '')
         ? true
         : fitTestSchoolListed();
     }
@@ -483,6 +480,83 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    function notSoftDeleted() {
+      return resource.data.get('deletedAt', null) == null;
+    }
+
+    function deletionReasonOk(reason) {
+      return reason is string
+        && reason.size() > 0
+        && reason.size() <= 500
+        && reason.matches('.*\\S.*');
+    }
+
+    // Scoped admins may soft-delete only a fit test whose school is one of theirs.
+    // A blank school is left to a super admin. The record owner is not enough.
+    function canSoftDeleteFitTestData(data) {
+      return data == null
+        ? false
+        : isSuperAdmin()
+          || (
+            isScopedAdmin()
+            && schoolsListOf(data) != ''
+            && schoolsListOf(data) in actorSchools()
+          );
+    }
+
+    // The log document id is the fit test id, so this write and the stamp share one batch.
+    // Compare the strings here. Each write pins its own deletedAt to request.time;
+    // a server timestamp read back with getAfter is not a reliable timestamp.
+    function deletionLogAfterOk(fitTestId) {
+      return existsAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId))
+        && getAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId)).data.get('fitTestId', '') == fitTestId
+        && getAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId)).data.get('deletedBy', '') == request.auth.uid
+        && getAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId)).data.get('deleteReason', '') == request.resource.data.deleteReason
+        && getAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId)).data.get('userId', '') == resource.data.get('userId', '')
+        && getAfter(/databases/$(database)/documents/fitTestDeletionLogs/$(fitTestId)).data.get('schoolsList', '')
+          == resource.data.get('schoolsList', '');
+    }
+
+    // In-scope admins and super admins keep the record. They may stamp it once.
+    // A normal edit fails the deletedAt check before softDeleteFieldsOk is entered.
+    function softDeleteUpdate() {
+      return notSoftDeleted()
+        && request.resource.data.get('deletedAt', null) == request.time
+        && request.resource.data.deletedBy == request.auth.uid
+        && deletionReasonOk(request.resource.data.get('deleteReason', ''))
+        && softDeleteFieldsOk();
+    }
+    function softDeleteFieldsOk() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['deletedAt', 'deletedBy', 'deleteReason', 'updatedAt'])
+        && canSoftDeleteFitTestData(resource.data);
+    }
+
+    function softDeleteLogCreate(logId) {
+      return isSignedIn()
+        && isApproved()
+        && logId == request.resource.data.fitTestId
+        && request.resource.data.fitTestId is string
+        && request.resource.data.fitTestId.size() > 0
+        && request.resource.data.userId is string
+        && request.resource.data.deletedBy == request.auth.uid
+        && request.resource.data.deletedAt == request.time
+        && deletionReasonOk(request.resource.data.deleteReason)
+        && existsAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId))
+        && getAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data.get('userId', '')
+          == request.resource.data.userId
+        && getAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data.get('deletedBy', '')
+          == request.auth.uid
+        && getAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data.get('deleteReason', '')
+          == request.resource.data.deleteReason
+        && request.resource.data.schoolsList is string
+        && getAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data.get('schoolsList', '')
+          == request.resource.data.schoolsList
+        && canSoftDeleteFitTestData(
+          getAfter(/databases/$(database)/documents/fitTests/$(request.resource.data.fitTestId)).data
+        );
+    }
+
     match /fitTests/{fitTestId} {
       // Faculty read only when creatorSchool equals their profile school
       // and their startDate/endDate window is open. A missing start or end
@@ -497,51 +571,508 @@ service cloud.firestore {
           || facultyCanReadFitTest()
           || (!isFacultyRole() && request.auth.uid == resource.data.userId)
         );
-      allow update: if
-        isSignedIn() &&
-        isApproved() &&
-        !isFacultyRole() &&
-        (request.auth.uid == resource.data.userId || isAdmin())
-        && fitTestSchoolOkOnUpdate()
-        && creatorStampUnchanged();
-      allow delete: if
-        isSignedIn() &&
-        isApproved() &&
-        !isFacultyRole() &&
-        (request.auth.uid == resource.data.userId || isAdmin());
+      // OSHA 1910.134 record integrity: result, test date, and the dates derived
+      // from the test date stay fixed after create. A material edit writes its
+      // history entry in the same batch. Soft delete is the exception.
+      function onlyHousekeeping() {
+        return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['updatedAt', 'lookupKey', 'verificationToken']);
+      }
+      function lastEditChanged() {
+        return request.resource.data.get('lastEditId', '') != resource.data.get('lastEditId', '');
+      }
+      function editHistoryAfterOk() {
+        let entryId = request.resource.data.get('lastEditId', '');
+        let historyPath = /databases/$(database)/documents/fitTests/$(fitTestId)/editHistory/$(entryId);
+        return entryId is string
+          && entryId.size() > 0
+          && entryId.size() <= 80
+          && resource.data.get('lastEditId', '') != entryId
+          && !exists(historyPath)
+          && existsAfter(historyPath);
+      }
+      // One read of the caller. Do not call isAdmin or isSuperAdmin here: each of
+      // those reads the profile again, and an in-scope admin was crossing the
+      // expression limit before the history write was checked.
+      function canEditThisFitTest() {
+        let actor = currentUserDoc().data;
+        let school = resource.data.get('schoolsList', '');
+        return actor.get('role', '') != 'faculty'
+          && (
+            request.auth.uid == resource.data.userId
+            || actor.get('role', '') == 'superadmin'
+            || (
+              actor.get('role', '') == 'admin'
+              && adminWindowOpen(actor)
+              && school is string
+              && school.size() > 0
+              && school in schoolsOf(actor)
+            )
+          );
+      }
+      function historyRecord() {
+        let entryId = request.resource.data.get('lastEditId', '');
+        return getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)/editHistory/$(entryId)).data;
+      }
+      // One diff of the fit test against a fixed allowlist. The history field
+      // list has to be exactly that set. Value checks are separate so this
+      // function stays small enough to enter on a full record.
+      function historyShapeOk() {
+        let history = historyRecord();
+        let names = history.fields;
+        let material = request.resource.data.diff(resource.data).affectedKeys()
+          .difference(['updatedAt', 'lookupKey', 'verificationToken', 'lastEditId'].toSet());
+        let tracked = [
+          'recipientEmail', 'clientName', 'dob', 'testLocation', 'schoolsList',
+          'fitTestType', 'respiratorMfg', 'model', 'style', 'fitTestMethod',
+          'fitFactor', 'maskSize', 'testingAgent', 'fitTester', 'failureReason',
+          'correctiveActionNote', 'userId'
+        ];
+        return names is list
+          && names.size() > 0
+          && names.size() <= 40
+          && history.changes is map
+          && history.changes.keys().hasOnly(['old', 'new'])
+          && material.hasOnly(tracked)
+          && material.hasOnly(names)
+          && material.hasAll(names)
+          && history.changes.old.keys().hasOnly(names)
+          && history.changes.old.keys().hasAll(names)
+          && history.changes.new.keys().hasOnly(names)
+          && history.changes.new.keys().hasAll(names);
+      }
+      // Inline on purpose. A helper counts its whole body on every call, so a
+      // per-field function crosses the expression limit once several fields change.
+      // The || below reads a stored value only when that field is in this edit.
+      // One diff per side, not a get() per field. A per-field read of the fit test
+      // crosses the expression limit once an in-scope admin changes several fields.
+      // changedKeys covers fields that are stored. addedKeys are fields the record
+      // does not have, so the history value has to be null.
+      // Inline on purpose. A helper counts its whole body on every call, and a
+      // second diff of the fit test crosses the expression limit. The || reads a
+      // stored value only when that field is in this edit. A missing field is null.
+      function historyValuesOk() {
+        let history = historyRecord();
+        let names = history.fields;
+        let old = history.changes.old;
+        let neu = history.changes.new;
+        return (!names.hasAny(['recipientEmail']) || (old.recipientEmail == resource.data.get('recipientEmail', null) && neu.recipientEmail == request.resource.data.get('recipientEmail', null)))
+          && (!names.hasAny(['clientName']) || (old.clientName == resource.data.get('clientName', null) && neu.clientName == request.resource.data.get('clientName', null)))
+          && (!names.hasAny(['dob']) || (old.dob == resource.data.get('dob', null) && neu.dob == request.resource.data.get('dob', null)))
+          && (!names.hasAny(['testLocation']) || (old.testLocation == resource.data.get('testLocation', null) && neu.testLocation == request.resource.data.get('testLocation', null)))
+          && (!names.hasAny(['schoolsList']) || (old.schoolsList == resource.data.get('schoolsList', null) && neu.schoolsList == request.resource.data.get('schoolsList', null)))
+          && (!names.hasAny(['fitTestType']) || (old.fitTestType == resource.data.get('fitTestType', null) && neu.fitTestType == request.resource.data.get('fitTestType', null)))
+          && (!names.hasAny(['respiratorMfg']) || (old.respiratorMfg == resource.data.get('respiratorMfg', null) && neu.respiratorMfg == request.resource.data.get('respiratorMfg', null) && keptText(old.respiratorMfg, neu.respiratorMfg, 200)))
+          && (!names.hasAny(['model']) || (old.model == resource.data.get('model', null) && neu.model == request.resource.data.get('model', null) && keptText(old.model, neu.model, 200)))
+          && (!names.hasAny(['style']) || (old.style == resource.data.get('style', null) && neu.style == request.resource.data.get('style', null)))
+          && (!names.hasAny(['fitTestMethod']) || (old.fitTestMethod == resource.data.get('fitTestMethod', null) && neu.fitTestMethod == request.resource.data.get('fitTestMethod', null) && keptText(old.fitTestMethod, neu.fitTestMethod, 100)))
+          && (!names.hasAny(['fitFactor']) || (old.fitFactor == resource.data.get('fitFactor', null) && neu.fitFactor == request.resource.data.get('fitFactor', null)))
+          && (!names.hasAny(['maskSize']) || (old.maskSize == resource.data.get('maskSize', null) && neu.maskSize == request.resource.data.get('maskSize', null) && keptText(old.maskSize, neu.maskSize, 50)))
+          && (!names.hasAny(['testingAgent']) || (old.testingAgent == resource.data.get('testingAgent', null) && neu.testingAgent == request.resource.data.get('testingAgent', null)))
+          && (!names.hasAny(['fitTester']) || (old.fitTester == resource.data.get('fitTester', null) && neu.fitTester == request.resource.data.get('fitTester', null)))
+          && (!names.hasAny(['failureReason']) || (old.failureReason == resource.data.get('failureReason', null) && neu.failureReason == request.resource.data.get('failureReason', null)))
+          && (!names.hasAny(['correctiveActionNote']) || (old.correctiveActionNote == resource.data.get('correctiveActionNote', null) && neu.correctiveActionNote == request.resource.data.get('correctiveActionNote', null)))
+          && (!names.hasAny(['userId']) || (old.userId == resource.data.get('userId', null) && neu.userId == request.resource.data.get('userId', null)));
+      }
+      // A field that already had text cannot be blanked. An empty legacy value can stay empty.
+      function hadStoredText(value) {
+        return value is string && value.matches('.*\\S.*');
+      }
+      function keptText(before, after, maxSize) {
+        return hadStoredText(before)
+          ? textOk(after, maxSize)
+          : after == null
+            || (after is string && after.size() == 0)
+            || textOk(after, maxSize);
+      }
+      // Every material edit, including one that does not touch the method.
+      // A legacy record that never stored a method may leave it blank. A stored
+      // method, including "Locked to Qualitative", may be saved as Qualitative.
+      // An existing Quantitative method and its fit factor may stay exactly as
+      // stored. They cannot be added or changed, and a fit factor cannot be
+      // added to any other record. The stored method is read on a Qualitative
+      // save so a legacy Quantitative record cannot be rewritten.
+      function methodStillOk() {
+        let method = request.resource.data.get('fitTestMethod', '');
+        return method == 'Quantitative'
+          ? (
+            resource.data.get('fitTestMethod', '') == 'Quantitative'
+            && request.resource.data.get('fitFactor', null) == resource.data.get('fitFactor', null)
+            && request.resource.data.keys().hasAny(['fitFactor'])
+              == resource.data.keys().hasAny(['fitFactor'])
+          )
+          : (
+            (
+              method == 'Qualitative'
+                ? resource.data.get('fitTestMethod', '') != 'Quantitative'
+                : (
+                  !hadStoredText(method)
+                  && !hadStoredText(resource.data.get('fitTestMethod', ''))
+                )
+            )
+            && !request.resource.data.keys().hasAny(['fitFactor'])
+          );
+      }
+      // One allow rule. Extra allow update rules are all evaluated, and their
+      // expression counts add up past the limit on a full record.
+      allow update: if isSignedIn() && isApproved() && (
+        (softDeleteUpdate() && deletionLogAfterOk(fitTestId))
+        || (
+          canEditThisFitTest()
+          && notSoftDeleted()
+          // Locked fields, deletion stamps, and creator stamps are not in the
+          // history allowlist, so historyShapeOk rejects those writes. Reading
+          // each of them here crossed the expression limit on a full record.
+          && fitTestSchoolOkOnUpdate()
+          && (
+            lastEditChanged()
+              ? (
+                editHistoryAfterOk()
+                && historyShapeOk()
+                && historyValuesOk()
+                && textOk(request.resource.data.get('style', ''), 100)
+                && methodStillOk()
+              )
+              : onlyHousekeeping()
+          )
+        )
+      );
+      // OSHA 1910.134(m)(3): fit test records are retained. Hard delete is denied.
+      allow delete: if false;
+      function textOk(value, maxSize) {
+        return value is string
+          && value.size() > 0
+          && value.size() <= maxSize
+          && value.matches('.*\\S.*');
+      }
+
+      function hadText(data, field) {
+        return data.keys().hasAny([field])
+          && data[field] is string
+          && data[field].matches('.*\\S.*');
+      }
+
+      function textNotBlanked(field, maxSize) {
+        return request.resource.data.keys().hasAny([field])
+          ? (
+            textOk(request.resource.data[field], maxSize)
+            || (
+              !hadText(resource.data, field)
+              && request.resource.data[field] is string
+              && request.resource.data[field].size() == 0
+            )
+          )
+          : !hadText(resource.data, field);
+      }
+
+      // Creates must be exactly Qualitative. An update may write Qualitative over a
+      // legacy "Locked to Qualitative" or missing method. A record that never had a
+      // method may stay blank. An existing Quantitative method and its fit factor
+      // may stay exactly as stored, and cannot be added or changed.
+      function qualitativeMethod() {
+        return request.resource.data.get('fitTestMethod', '') == 'Qualitative';
+      }
+
+      function quantitativeUnchanged() {
+        return request.resource.data.get('fitTestMethod', '') == 'Quantitative'
+          && resource.data.get('fitTestMethod', '') == 'Quantitative'
+          && request.resource.data.get('fitFactor', null) == resource.data.get('fitFactor', null)
+          && request.resource.data.keys().hasAny(['fitFactor'])
+            == resource.data.keys().hasAny(['fitFactor']);
+      }
+
+      function methodAndFactorOk() {
+        return quantitativeUnchanged()
+          || (
+            resource.data.get('fitTestMethod', '') != 'Quantitative'
+            && qualitativeOrLegacyBlank()
+            && fitFactorAbsent()
+          );
+      }
+
+      function qualitativeOrLegacyBlank() {
+        return qualitativeMethod()
+          || (
+            !hadText(resource.data, 'fitTestMethod')
+            && (
+              !request.resource.data.keys().hasAny(['fitTestMethod'])
+              || (
+                request.resource.data.fitTestMethod is string
+                && request.resource.data.fitTestMethod.size() == 0
+              )
+            )
+          );
+      }
+
+      function fitFactorAbsent() {
+        return !request.resource.data.keys().hasAny(['fitFactor']);
+      }
+
+      // Style is required on create and on every material edit. A housekeeping
+      // write can refresh the token on a record that has no style.
+      function styleRequired() {
+        return textOk(request.resource.data.get('style', ''), 100);
+      }
+
+      function respiratorFieldsOkOnUpdate() {
+        return textNotBlanked('respiratorMfg', 200)
+          && textNotBlanked('model', 200)
+          && styleRequired()
+          && textNotBlanked('maskSize', 50)
+          && methodAndFactorOk();
+      }
+
+      // OSHA 1910.134(m)(2): make, model, style, and size. Method is Qualitative.
+      function respiratorRecordOk() {
+        return textOk(request.resource.data.get('respiratorMfg', ''), 200)
+          && textOk(request.resource.data.get('model', ''), 200)
+          && styleRequired()
+          && textOk(request.resource.data.get('maskSize', ''), 50)
+          && qualitativeMethod()
+          && fitFactorAbsent();
+      }
+
       allow create: if
         isSignedIn() &&
         isApproved() &&
         !isFacultyRole() &&
         request.auth.uid == request.resource.data.userId
         && fitTestSchoolOkOnCreate()
+        && request.resource.data.deletedAt == null
+        && !request.resource.data.keys().hasAny(['deletedBy', 'deleteReason'])
+        && respiratorRecordOk()
         && creatorStampMatchesProfile();
+
+      match /editHistory/{entryId} {
+        // Owner, super admin, or an admin whose schools include this record.
+        // A blank school is left to the owner or a super admin. The value diff
+        // lives on the parent update, so this create stays a shape check.
+        function historyActorOk() {
+          let parent = get(/databases/$(database)/documents/fitTests/$(fitTestId)).data;
+          let actor = currentUserDoc().data;
+          let school = parent.get('schoolsList', '');
+          return request.auth.uid == parent.get('userId', '')
+            || actor.get('role', '') == 'superadmin'
+            || (
+              actor.get('role', '') == 'admin'
+              && adminWindowOpen(actor)
+              && school is string
+              && school.size() > 0
+              && school in schoolsOf(actor)
+            );
+        }
+        allow read: if isSignedIn() && isApproved() && historyActorOk();
+        // The parent update already checked who may edit and that these values
+        // match. This create only checks the writer and the link back to lastEditId,
+        // so it does not read the fit test a second time.
+        allow create: if isSignedIn() && isApproved() &&
+          request.resource.data.keys().hasOnly(['fitTestId', 'editedBy', 'editedAt', 'fields', 'changes']) &&
+          request.resource.data.editedBy == request.auth.uid &&
+          request.resource.data.editedAt == request.time &&
+          request.resource.data.fitTestId == fitTestId &&
+          request.resource.data.fields is list &&
+          request.resource.data.fields.size() > 0 &&
+          request.resource.data.fields.size() <= 40 &&
+          request.resource.data.changes is map &&
+          request.resource.data.changes.keys().hasOnly(['old', 'new']) &&
+          getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('lastEditId', '') == entryId;
+        allow update, delete: if false;
+      }
+    }
+
+    // Append-only log written in the same batch as the soft delete. The fit test stays.
+    // The owning tester cannot write a log. Get and list are the record owner,
+    // the admin who deleted it, or an admin whose schools include the log's school.
+    match /fitTestDeletionLogs/{logId} {
+      function deletionLogInScope() {
+        return isSuperAdmin()
+          || (
+            isScopedAdmin()
+            && resource.data.get('schoolsList', '') is string
+            && resource.data.get('schoolsList', '').size() > 0
+            && resource.data.get('schoolsList', '') in actorSchools()
+          );
+      }
+      allow get: if isSignedIn() && isApproved() && (
+        deletionLogInScope()
+        || resource.data.deletedBy == request.auth.uid
+        || resource.data.userId == request.auth.uid
+      );
+      allow list: if isSignedIn() && isApproved() && deletionLogInScope();
+      allow create: if softDeleteLogCreate(logId);
+      allow update, delete: if false;
+    }
+
+    // Card copies. getAfter lets them be written in the same batch as the fit test.
+    // revokedAt, once set, cannot be cleared. There is no restore.
+    function cardParentReady(fitTestId) {
+      return fitTestId is string
+        && fitTestId.size() > 0
+        && fitTestId.size() <= 200
+        && existsAfter(/databases/$(database)/documents/fitTests/$(fitTestId));
+    }
+
+    function canWriteParentId(fitTestId) {
+      let ownerId = getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('userId', '');
+      let school = getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('schoolsList', '');
+      return request.auth.uid == ownerId
+        || isSuperAdmin()
+        || (isScopedAdmin() && school is string && school.size() > 0 && school in actorSchools());
+    }
+
+    // Create reads the parent as stored. A fit test that is already hidden cannot gain a card.
+    function parentLive(fitTestId) {
+      return get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedAt', null) == null;
+    }
+
+    // Revoke reads the parent after this batch, so the hide and the revoke can commit together.
+    function parentHidden(fitTestId) {
+      return getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedAt', null) != null;
+    }
+
+    function revokedAtNotCleared() {
+      return resource.data.keys().hasAny(['revokedAt'])
+        ? request.resource.data.get('revokedAt', null) == resource.data.get('revokedAt', null)
+        : (
+          request.resource.data.keys().hasAny(['revokedAt'])
+            ? (
+              (isSuperAdmin() || isScopedAdmin())
+              && parentHidden(request.resource.data.get('fitTestId', ''))
+            )
+            : true
+        );
+    }
+
+    function canRevokeStoredCard() {
+      let fitTestId = resource.data.get('fitTestId', '');
+      return !resource.data.keys().hasAny(['revokedAt'])
+        && request.resource.data.keys().hasAny(['revokedAt'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revokedAt'])
+        && (isSuperAdmin() || isScopedAdmin())
+        && request.resource.data.get('userId', '') == resource.data.get('userId', '')
+        && cardParentReady(fitTestId)
+        && canWriteParentId(fitTestId)
+        && parentHidden(fitTestId);
     }
 
     // Public resend: guests can get a lookup doc only if they know the name+DOB hash.
     // Listing is denied so the collection cannot be dumped.
     match /fitTestLookups/{lookupKey} {
+      function lookupFieldsMatch(fitTestId) {
+        let parent = getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data;
+        return canWriteParentId(fitTestId)
+          && request.resource.data.get('userId', '') == parent.get('userId', '')
+          && request.resource.data.get('lookupKey', '') == lookupKey
+          && parent.get('lookupKey', '') == lookupKey
+          && request.resource.data.get('recipientEmail', '') == parent.get('recipientEmail', '')
+          && request.resource.data.get('clientName', '') == parent.get('clientName', '')
+          && request.resource.data.get('dob', '') == parent.get('dob', '')
+          && request.resource.data.get('testLocation', '') == parent.get('testLocation', '')
+          && request.resource.data.get('issueDate', '') == parent.get('issueDate', '')
+          && request.resource.data.get('expirationDate', '') == parent.get('expirationDate', '')
+          && request.resource.data.get('fitTestType', '') == parent.get('fitTestType', '')
+          && request.resource.data.get('respiratorMfg', '') == parent.get('respiratorMfg', '')
+          && request.resource.data.get('testingAgent', '') == parent.get('testingAgent', '')
+          && request.resource.data.get('maskSize', '') == parent.get('maskSize', '')
+          && request.resource.data.get('model', '') == parent.get('model', '')
+          && request.resource.data.get('style', '') == parent.get('style', '')
+          && request.resource.data.get('fitTestMethod', '') == parent.get('fitTestMethod', '')
+          && request.resource.data.get('fitFactor', '') == parent.get('fitFactor', '')
+          && request.resource.data.get('result', '') == parent.get('result', '')
+          && request.resource.data.get('fitTester', '') == parent.get('fitTester', '')
+          && request.resource.data.get('verificationToken', '') == parent.get('verificationToken', '');
+      }
+      function lookupMatchesParent() {
+        let fitTestId = request.resource.data.get('fitTestId', '');
+        return cardParentReady(fitTestId) && lookupFieldsMatch(fitTestId);
+      }
       allow get: if true;
       allow list: if false;
-      allow create, update: if isSignedIn() && isApproved() && !isFacultyRole();
-      allow delete: if
-        isSignedIn() &&
-        isApproved() &&
-        !isFacultyRole() &&
-        (isAdmin() || request.auth.uid == resource.data.userId);
+      allow create: if isSignedIn() && isApproved() && !isFacultyRole()
+        && !request.resource.data.keys().hasAny(['revokedAt'])
+        && lookupMatchesParent()
+        && parentLive(request.resource.data.fitTestId);
+      allow update: if isSignedIn() && isApproved() && !isFacultyRole()
+        && (
+          canRevokeStoredCard()
+          || (
+            request.resource.data.get('userId', '') == resource.data.get('userId', '')
+            && revokedAtNotCleared()
+            && lookupMatchesParent()
+          )
+        );
+      // Deactivate with revokedAt. The lookup document is kept.
+      allow delete: if false;
     }
 
     // Public verify: guests can read one verification doc only if they know the token.
     // Listing is denied so the collection cannot be dumped.
     match /fitTestVerifications/{token} {
+      function verificationFieldsMatch(fitTestId) {
+        let parent = getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data;
+        return canWriteParentId(fitTestId)
+          && request.resource.data.get('userId', '') == parent.get('userId', '')
+          && request.resource.data.get('verificationToken', '') == token
+          && parent.get('verificationToken', '') == token
+          && request.resource.data.get('clientName', '') == parent.get('clientName', '')
+          && request.resource.data.get('testLocation', '') == parent.get('testLocation', '')
+          && request.resource.data.get('issueDate', '') == parent.get('issueDate', '')
+          && request.resource.data.get('expirationDate', '') == parent.get('expirationDate', '')
+          && request.resource.data.get('fitTestType', '') == parent.get('fitTestType', '')
+          && request.resource.data.get('respiratorMfg', '') == parent.get('respiratorMfg', '')
+          && request.resource.data.get('maskSize', '') == parent.get('maskSize', '')
+          && request.resource.data.get('model', '') == parent.get('model', '')
+          && request.resource.data.get('style', '') == parent.get('style', '')
+          && request.resource.data.get('fitTestMethod', '') == parent.get('fitTestMethod', '')
+          && request.resource.data.get('fitFactor', '') == parent.get('fitFactor', '')
+          && request.resource.data.get('result', '') == parent.get('result', '')
+          && request.resource.data.get('fitTester', '') == parent.get('fitTester', '');
+      }
+      function verificationMatchesParent() {
+        let fitTestId = request.resource.data.get('fitTestId', '');
+        return cardParentReady(fitTestId) && verificationFieldsMatch(fitTestId);
+      }
+      function verificationKeysOk() {
+        return request.resource.data.keys().hasOnly([
+          'clientName',
+          'testLocation',
+          'issueDate',
+          'expirationDate',
+          'fitTestType',
+          'respiratorMfg',
+          'maskSize',
+          'model',
+          'style',
+          'fitTestMethod',
+          'fitFactor',
+          'result',
+          'fitTester',
+          'userId',
+          'fitTestId',
+          'verificationToken',
+          'updatedAt',
+          'revokedAt'
+        ]);
+      }
       allow get: if true;
       allow list: if false;
-      allow create, update: if isSignedIn() && isApproved() && !isFacultyRole();
-      allow delete: if
-        isSignedIn() &&
-        isApproved() &&
-        !isFacultyRole() &&
-        (isAdmin() || request.auth.uid == resource.data.userId);
+      allow create: if isSignedIn() && isApproved() && !isFacultyRole()
+        && !request.resource.data.keys().hasAny(['revokedAt'])
+        && verificationKeysOk()
+        && verificationMatchesParent()
+        && parentLive(request.resource.data.fitTestId);
+      allow update: if isSignedIn() && isApproved() && !isFacultyRole()
+        && verificationKeysOk()
+        && (
+          canRevokeStoredCard()
+          || (
+            request.resource.data.get('userId', '') == resource.data.get('userId', '')
+            && revokedAtNotCleared()
+            && verificationMatchesParent()
+          )
+        );
+      // Deactivate with revokedAt. The verification document is kept.
+      allow delete: if false;
     }
 
     // One log per signed-in staff uid. Used to cap the two test accounts at 1 send / 24h.

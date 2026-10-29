@@ -1,4 +1,5 @@
 // Fit Testing Results E-Card Template
+import { canonicalFitTestMethod } from '../constants/fitTestOptions';
 import { calculateExpirationDate } from './dateUtils';
 import { getVerifyUrl } from './verificationToken';
 
@@ -14,6 +15,8 @@ export const generateFitTestCard = (formData) => {
     testingAgent,
     maskSize,
     model,
+    style,
+    fitTestMethod,
     result,
     fitTester,
     recipientEmail,
@@ -21,6 +24,7 @@ export const generateFitTestCard = (formData) => {
   } = formData;
 
   const displayExpirationDate = expirationDate || calculateExpirationDate(issueDate);
+  const displayMethod = canonicalFitTestMethod(fitTestMethod) || '';
 
   // Follow-up booking links by testing location. The QR itself verifies the card.
   const LOCATION_BOOKING_URLS = {
@@ -167,6 +171,16 @@ export const generateFitTestCard = (formData) => {
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Model:</td>
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${model || '[Model]'}</td>
+                                </tr>
+                                ${style ? `
+                                <tr>
+                                  <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Style:</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${style}</td>
+                                </tr>
+                                ` : ''}
+                                <tr>
+                                  <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Test Method:</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${displayMethod}</td>
                                 </tr>
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Result:</td>

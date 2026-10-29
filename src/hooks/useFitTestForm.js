@@ -142,7 +142,7 @@ export const useFitTestForm = () => {
   }, [user]);
 
   const handleInputChange = (field, value) => {
-    if (field === 'fitTester' || field === 'fitTestMethod') {
+    if (field === 'fitTester') {
       return;
     }
 
@@ -364,13 +364,16 @@ export const useFitTestForm = () => {
         printedName: formData.printedName.trim(),
         testLocation: formData.testLocation?.trim() || '',
         fitTester: user?.name || formData.fitTester || '',
-        fitTestMethod: 'Locked to Qualitative',
+        model: (formData.model || '').trim(),
+        style: formData.style || '',
+        fitTestMethod: 'Qualitative',
         failureReason: showFailureReasonUI ? formData.failureReason : '',
         correctiveActionNote: showFailureReasonUI ? formData.correctiveActionNote : '',
         testerMedicalRestrictionsNote: formData.testerMedicalRestrictionsReceived === true
           ? (formData.testerMedicalRestrictionsNote || '').trim()
           : '',
       };
+      delete cleanedFormData.fitFactor;
 
       const expirationDate = calculateExpirationDate(cleanedFormData.issueDate);
       const formDataWithSignature = {

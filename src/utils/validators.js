@@ -69,6 +69,14 @@ export const validateFitTestForm = (formData, hasStrokes = false, hasTesterStrok
     fieldErrors.maskSize = 'Please select mask size.';
   }
 
+  if (!formData.model?.trim()) {
+    fieldErrors.model = 'Please enter the respirator model.';
+  }
+
+  if (!formData.style?.trim()) {
+    fieldErrors.style = 'Please select the respirator style.';
+  }
+
   // Validate result
   if (!formData.result?.trim()) {
     fieldErrors.result = 'Please select result.';

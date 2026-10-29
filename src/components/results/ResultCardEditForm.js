@@ -4,12 +4,13 @@ import {
   TEST_LOCATION_OPTIONS,
   FIT_TEST_TYPE_OPTIONS,
   RESPIRATOR_MFG_OPTIONS,
+  RESPIRATOR_STYLE_OPTIONS,
   TESTING_AGENT_OPTIONS,
   MASK_SIZE_OPTIONS,
   isCustomOptionValue,
 } from '../../constants/fitTestOptions';
 
-const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
+const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editError }) => {
   const isCustomMfg = isCustomOptionValue(editData.respiratorMfg, RESPIRATOR_MFG_OPTIONS);
 
   return (
@@ -56,7 +57,10 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
           type="text"
           className="edit-input"
           value={editData.issueDate || ''}
-          onChange={(e) => onChange('issueDate', e.target.value)}
+          readOnly
+          disabled
+          aria-disabled="true"
+          title="The test date cannot be changed after the record is saved."
           placeholder="MM/DD/YYYY"
         />
       </div>
@@ -117,9 +121,10 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
         <label>Testing Agent:</label>
         <select
           className="edit-select"
-          value={editData.testingAgent || 'Bitrex'}
+          value={editData.testingAgent || ''}
           onChange={(e) => onChange('testingAgent', e.target.value)}
         >
+          <option value="">Select testing agent</option>
           {TESTING_AGENT_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
@@ -147,6 +152,22 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation }) => {
           placeholder="e.g., 1870+"
         />
       </div>
+      <div className="edit-form-row">
+        <label>Style:</label>
+        <select
+          className="edit-select"
+          value={editData.style || ''}
+          onChange={(e) => onChange('style', e.target.value)}
+        >
+          <option value="">Select style</option>
+          {RESPIRATOR_STYLE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
+      {editError ? (
+        <span className="form-error-message">{editError}</span>
+      ) : null}
       <div className="edit-form-row">
         <label>Fit Tester:</label>
         <input

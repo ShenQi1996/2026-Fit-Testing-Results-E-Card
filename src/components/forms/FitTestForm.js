@@ -150,7 +150,9 @@ const FitTestForm = () => {
             formData.testerAttestationConsentWitnessed === false ||
             formData.testerAttestationRespiratorMatchesRecord === false ||
             (formData.testerMedicalRestrictionsReceived !== true && formData.testerMedicalRestrictionsReceived !== false) ||
-            (formData.testerMedicalRestrictionsReceived === true && !formData.testerMedicalRestrictionsNote?.trim())
+            (formData.testerMedicalRestrictionsReceived === true && !formData.testerMedicalRestrictionsNote?.trim()) ||
+            !formData.model?.trim() ||
+            !formData.style?.trim()
           }
         />
       </div>

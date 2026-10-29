@@ -35,6 +35,8 @@ const record = {
   issueDate: '10/01/2026',
   testLocation: 'Harlem',
   recipientEmail: 'ada@example.com',
+  style: 'Filtering facepiece',
+  fitTestMethod: 'Qualitative',
 };
 
 const Probe = ({ apiRef }) => {
@@ -77,7 +79,7 @@ afterEach(() => {
   jest.clearAllTimers();
 });
 
-test('an issue-date edit reloads the results list', async () => {
+test('an issue-date or result edit is ignored and the list is not reloaded', async () => {
   const apiRef = { current: null };
   await renderProbe(apiRef);
 
@@ -85,25 +87,30 @@ test('an issue-date edit reloads the results list', async () => {
   expect(getUserFitTests).toHaveBeenCalledWith('admin-1');
 
   await act(async () => {
-    apiRef.current.handleEditClick(record);
+    apiRef.current.handleEditClick({ ...record, result: 'Pass' });
   });
   await act(async () => {
     apiRef.current.handleEditChange('issueDate', '09/01/2026');
+    apiRef.current.handleEditChange('result', 'Fail');
+    apiRef.current.handleEditChange('clientName', 'Ada King');
   });
 
-  getUserFitTests.mockResolvedValue([{ ...record, issueDate: '09/01/2026' }]);
+  expect(apiRef.current.editData.issueDate).toBe('10/01/2026');
+  expect(apiRef.current.editData.result).toBe('Pass');
+  expect(apiRef.current.editData.clientName).toBe('Ada King');
+
   await act(async () => {
     await apiRef.current.handleEditSave('ft-1');
   });
   await flush();
 
-  expect(updateFitTest).toHaveBeenCalledWith(
-    'ft-1',
-    expect.objectContaining({ issueDate: '09/01/2026' }),
-    'admin-1',
-  );
-  expect(getUserFitTests).toHaveBeenCalledTimes(2);
-  expect(apiRef.current.fitTests.map((test) => test.issueDate)).toEqual(['09/01/2026']);
+  const updates = updateFitTest.mock.calls[0][1];
+  expect(updateFitTest).toHaveBeenCalledWith('ft-1', updates, 'admin-1');
+  expect(updates.issueDate).toBeUndefined();
+  expect(updates.result).toBeUndefined();
+  expect(updates.clientName).toBe('Ada King');
+  expect(getUserFitTests).toHaveBeenCalledTimes(1);
+  expect(apiRef.current.fitTests.map((test) => test.issueDate)).toEqual(['10/01/2026']);
 });
 
 test('an edit that keeps the issue date does not reload the results list', async () => {
@@ -123,6 +130,124 @@ test('an edit that keeps the issue date does not reload the results list', async
   expect(updateFitTest).toHaveBeenCalledTimes(1);
   expect(getUserFitTests).toHaveBeenCalledTimes(1);
   expect(apiRef.current.fitTests.map((test) => test.clientName)).toEqual(['Ada King']);
+});
+
+test('an edit does not ask for a method and strips any fit factor', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, fitTestMethod: undefined, fitFactor: 100 });
+  });
+  expect(apiRef.current.editData.fitTestMethod).toBeUndefined();
+  expect(apiRef.current.editData.fitFactor).toBeUndefined();
+
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
+  expect(updateFitTest).toHaveBeenCalledWith(
+    'ft-1',
+    expect.objectContaining({
+      fitTestMethod: 'Qualitative',
+      fitFactor: { kind: 'deleteField' },
+    }),
+    'admin-1',
+  );
+});
+
+test('a legacy Locked to Qualitative value saves as Qualitative', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, fitTestMethod: 'Locked to Qualitative' });
+  });
+  expect(apiRef.current.editData.fitTestMethod).toBeUndefined();
+
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
+  const payload = updateFitTest.mock.calls[0][1];
+  expect(payload.fitTestMethod).toBe('Qualitative');
+  expect(payload.fitFactor).toEqual({ kind: 'deleteField' });
+});
+
+test('editing a legacy quantitative record keeps its method and fit factor', async () => {
+  const quantitative = {
+    ...record,
+    fitTestMethod: 'Quantitative',
+    fitFactor: 180,
+  };
+  getUserFitTests.mockResolvedValue([quantitative]);
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick(quantitative);
+  });
+  await act(async () => {
+    apiRef.current.handleEditChange('clientName', 'Ada King');
+  });
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
+  const payload = updateFitTest.mock.calls[0][1];
+  expect(payload.fitTestMethod).toBe('Quantitative');
+  expect(payload.fitFactor).toBe(180);
+  expect(payload.clientName).toBe('Ada King');
+});
+
+test('editing a legacy quantitative record with no fit factor does not add one', async () => {
+  const quantitative = {
+    ...record,
+    fitTestMethod: 'Quantitative',
+  };
+  getUserFitTests.mockResolvedValue([quantitative]);
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick(quantitative);
+  });
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
+  const payload = updateFitTest.mock.calls[0][1];
+  expect(payload.fitTestMethod).toBe('Quantitative');
+  expect(payload.fitFactor).toBeUndefined();
+});
+
+test('editing a legacy record with no testing agent does not add Bitrex', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, testingAgent: undefined });
+  });
+  expect(apiRef.current.editData.testingAgent).toBe('');
+
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+
+  const payload = updateFitTest.mock.calls[0][1];
+  expect(payload.testingAgent).toBeUndefined();
+  expect(Object.prototype.hasOwnProperty.call(payload, 'testingAgent')).toBe(false);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, testingAgent: '' });
+  });
+  await act(async () => {
+    apiRef.current.handleEditChange('testingAgent', 'Saccharin');
+  });
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+  expect(updateFitTest.mock.calls[1][1].testingAgent).toBe('Saccharin');
 });
 
 test('faculty load results by school instead of user id', async () => {
