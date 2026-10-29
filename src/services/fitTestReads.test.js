@@ -342,11 +342,11 @@ test('updateFitTest keeps a legacy quantitative method and fit factor', async ()
     fitFactor: { kind: 'deleteField' },
   }, 'admin-1');
 
-  expect(update).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-    clientName: 'Ada Lovelace',
-    fitTestMethod: 'Quantitative',
-    fitFactor: 180,
-  }));
+  expect(update).toHaveBeenCalledWith(expect.anything(), expect.any(Object));
+  const written = update.mock.calls[0][1];
+  expect(written.fitTestMethod).toBeUndefined();
+  expect(written.fitFactor).toBeUndefined();
+  expect(written.clientName).toBe('Ada Lovelace');
 });
 
 test('updateFitTest does not add a fit factor to a quantitative record that has none', async () => {
@@ -377,8 +377,9 @@ test('updateFitTest does not add a fit factor to a quantitative record that has 
   }, 'admin-1');
 
   const written = update.mock.calls[0][1];
-  expect(written.fitTestMethod).toBe('Quantitative');
-  expect(written.fitFactor).toBeUndefined();
+  expect(written.clientName).toBe('Ada Lovelace');
+  expect(written).not.toHaveProperty('fitTestMethod');
+  expect(written).not.toHaveProperty('fitFactor');
 });
 
 test('updateFitTest still records a non-quantitative edit as qualitative with no fit factor', async () => {
