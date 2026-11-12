@@ -175,4 +175,6 @@ export const getEcardFormDataFromTest = (test) => ({
   result: test.result || '',
   fitTester: test.fitTester || '',
   verificationToken: test.verificationToken || '',
+  programAdministratorName: test.programAdministratorName || '',
+  programAdministratorContact: test.programAdministratorContact || '',
 });

@@ -1102,6 +1102,8 @@ service cloud.firestore {
           && request.resource.data.get('fitFactor', '') == parent.get('fitFactor', '')
           && request.resource.data.get('result', '') == parent.get('result', '')
           && request.resource.data.get('fitTester', '') == parent.get('fitTester', '')
+          && request.resource.data.get('programAdministratorName', '') == parent.get('programAdministratorName', '')
+          && request.resource.data.get('programAdministratorContact', '') == parent.get('programAdministratorContact', '')
           && request.resource.data.get('verificationToken', '') == parent.get('verificationToken', '');
       }
       function lookupMatchesParent() {
@@ -1150,7 +1152,9 @@ service cloud.firestore {
           && request.resource.data.get('fitTestMethod', '') == parent.get('fitTestMethod', '')
           && request.resource.data.get('fitFactor', '') == parent.get('fitFactor', '')
           && request.resource.data.get('result', '') == parent.get('result', '')
-          && request.resource.data.get('fitTester', '') == parent.get('fitTester', '');
+          && request.resource.data.get('fitTester', '') == parent.get('fitTester', '')
+          && request.resource.data.get('programAdministratorName', '') == parent.get('programAdministratorName', '')
+          && request.resource.data.get('programAdministratorContact', '') == parent.get('programAdministratorContact', '');
       }
       function verificationMatchesParent() {
         let fitTestId = request.resource.data.get('fitTestId', '');
@@ -1171,6 +1175,8 @@ service cloud.firestore {
           'fitFactor',
           'result',
           'fitTester',
+          'programAdministratorName',
+          'programAdministratorContact',
           'userId',
           'fitTestId',
           'verificationToken',

@@ -80,6 +80,9 @@ const LOOKUP_CARD_FIELDS = [
   'result',
   'fitTester',
   'verificationToken',
+  // Carried for resend; the emailed card does not print them.
+  'programAdministratorName',
+  'programAdministratorContact',
 ];
 
 const VERIFY_CARD_FIELDS = [
@@ -95,6 +98,9 @@ const VERIFY_CARD_FIELDS = [
   'fitTestMethod',
   'result',
   'fitTester',
+  // Stored on the verification record; the public verify page does not list them.
+  'programAdministratorName',
+  'programAdministratorContact',
 ];
 
 const MEDICAL_NOTE_FIELDS = [

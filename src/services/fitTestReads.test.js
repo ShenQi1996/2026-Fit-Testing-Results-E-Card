@@ -771,3 +771,80 @@ test('token refresh on a style-less record writes the lookup key and keeps the o
   ]));
   expect(writes.every((write) => write.userId === 'tester-1')).toBe(true);
 });
+
+const PROGRAM_ADMIN = {
+  programAdministratorName: 'Ada Admin',
+  programAdministratorContact: 'ada-admin@example.com',
+};
+
+test('saveFitTest carries program administrator fields to the resend lookup and verification', async () => {
+  getDoc.mockImplementation(async (ref) => (
+    ref?.args?.[1] === 'users'
+      ? userDoc('tester', { school: 'Helene College of Nursing' })
+      : { exists: () => false, data: () => null }
+  ));
+  setDoc.mockClear();
+
+  await saveFitTest('tester-1', {
+    clientName: 'Ada Lovelace',
+    dob: '01/02/1990',
+    recipientEmail: 'ada@example.com',
+    schoolsList: 'Helene College of Nursing',
+    result: 'Pass',
+    ...PROGRAM_ADMIN,
+  });
+
+  const writeTo = (collectionName) => setDoc.mock.calls
+    .find((call) => call[0].args[1] === collectionName)?.[1];
+  expect(writeTo('fitTestLookups')).toEqual(expect.objectContaining(PROGRAM_ADMIN));
+  expect(writeTo('fitTestVerifications')).toEqual(expect.objectContaining(PROGRAM_ADMIN));
+});
+
+test('a verification refresh keeps the stored program administrator fields', async () => {
+  getDoc.mockResolvedValue({ exists: () => false, data: () => null });
+  setDoc.mockClear();
+
+  await ensureFitTestVerification({
+    id: 'ft-program',
+    userId: 'tester-1',
+    clientName: 'Ada Lovelace',
+    dob: '01/02/1990',
+    recipientEmail: 'ada@example.com',
+    result: 'Pass',
+    ...PROGRAM_ADMIN,
+  }, 'tester-1');
+
+  const writeTo = (collectionName) => setDoc.mock.calls
+    .find((call) => call[0].args[1] === collectionName)?.[1];
+  expect(writeTo('fitTestLookups')).toEqual(expect.objectContaining(PROGRAM_ADMIN));
+  expect(writeTo('fitTestVerifications')).toEqual(expect.objectContaining(PROGRAM_ADMIN));
+});
+
+test('resend and verify lookups return the program administrator fields on file', async () => {
+  getDoc.mockResolvedValue({
+    exists: () => true,
+    id: 'lookup',
+    data: () => ({
+      clientName: 'Ada Lovelace',
+      dob: '01/02/1990',
+      recipientEmail: 'ada@example.com',
+      result: 'Pass',
+      ...PROGRAM_ADMIN,
+    }),
+  });
+  await expect(lookupFitTestForResend('Ada Lovelace', '01/02/1990', 'ada@example.com'))
+    .resolves.toEqual(expect.objectContaining(PROGRAM_ADMIN));
+
+  getDoc.mockResolvedValue({
+    exists: () => true,
+    id: 'token',
+    data: () => ({
+      clientName: 'Ada Lovelace',
+      result: 'Pass',
+      expirationDate: '01/01/2099',
+      ...PROGRAM_ADMIN,
+    }),
+  });
+  const verified = await lookupFitTestForVerification('ab'.repeat(16));
+  expect(verified.card).toEqual(expect.objectContaining(PROGRAM_ADMIN));
+});
