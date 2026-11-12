@@ -10,8 +10,12 @@ import {
   isCustomOptionValue,
 } from '../../constants/fitTestOptions';
 
+const STYLE_REQUIRED_MESSAGE = 'Please select the respirator style.';
+
 const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editError }) => {
   const isCustomMfg = isCustomOptionValue(editData.respiratorMfg, RESPIRATOR_MFG_OPTIONS);
+  const styleError = editError === STYLE_REQUIRED_MESSAGE ? editError : '';
+  const otherError = Boolean(editError) && !styleError;
 
   return (
     <div className="result-card-body edit-mode">
@@ -155,17 +159,22 @@ const ResultCardEditForm = ({ editData, onChange, isCustomEditLocation, editErro
       <div className="edit-form-row">
         <label>Style:</label>
         <select
-          className="edit-select"
+          className={`edit-select${styleError ? ' form-input-error' : ''}`}
           value={editData.style || ''}
           onChange={(e) => onChange('style', e.target.value)}
+          aria-invalid={styleError ? 'true' : 'false'}
+          aria-describedby={styleError ? 'edit-style-error' : undefined}
         >
           <option value="">Select style</option>
           {RESPIRATOR_STYLE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
+        {styleError ? (
+          <span id="edit-style-error" className="form-error-message">{styleError}</span>
+        ) : null}
       </div>
-      {editError ? (
+      {otherError ? (
         <span className="form-error-message">{editError}</span>
       ) : null}
       <div className="edit-form-row">

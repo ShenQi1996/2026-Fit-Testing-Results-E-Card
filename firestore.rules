@@ -153,7 +153,8 @@ service cloud.firestore {
         && resource.data.keys().hasAny(['creatorSchool'])
         && resource.data.creatorSchool is string
         && resource.data.creatorSchool.size() > 0
-        && resource.data.creatorSchool in facultySchools();
+        && resource.data.creatorSchool in facultySchools()
+        && resource.data.deletedAt == null;
     }
 
     // creatorSchool is the profile school for a tester, or one of the actor's own
@@ -571,12 +572,35 @@ service cloud.firestore {
           || facultyCanReadFitTest()
           || (!isFacultyRole() && request.auth.uid == resource.data.userId)
         );
-      // OSHA 1910.134 record integrity: result, test date, and the dates derived
-      // from the test date stay fixed after create. A material edit writes its
-      // history entry in the same batch. Soft delete is the exception.
+
+      function medicalNoteFieldsAbsent() {
+        return request.resource.data.get('testerMedicalRestrictionsReceived', null) == null
+          && request.resource.data.get('testerMedicalRestrictionsNote', null) == null;
+      }
+      // Token and lookup refresh. Note fields may stay as they are. Stripping
+      // them is allowed only when the separate note doc exists after the batch.
       function onlyHousekeeping() {
-        return request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['updatedAt', 'lookupKey', 'verificationToken']);
+        let affected = request.resource.data.diff(resource.data).affectedKeys();
+        return affected.hasOnly([
+            'updatedAt',
+            'lookupKey',
+            'verificationToken',
+            'testerMedicalRestrictionsReceived',
+            'testerMedicalRestrictionsNote'
+          ])
+          && (
+            !affected.hasAny(['testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'])
+            || (
+              medicalNoteFieldsAbsent()
+              && existsAfter(/databases/$(database)/documents/fitTestMedicalNotes/$(fitTestId))
+            )
+          );
+      }
+      function noteFieldsUnchanged() {
+        return request.resource.data.get('testerMedicalRestrictionsReceived', null)
+            == resource.data.get('testerMedicalRestrictionsReceived', null)
+          && request.resource.data.get('testerMedicalRestrictionsNote', null)
+            == resource.data.get('testerMedicalRestrictionsNote', null);
       }
       function lastEditChanged() {
         return request.resource.data.get('lastEditId', '') != resource.data.get('lastEditId', '');
@@ -591,15 +615,18 @@ service cloud.firestore {
           && !exists(historyPath)
           && existsAfter(historyPath);
       }
-      // One read of the caller. Do not call isAdmin or isSuperAdmin here: each of
-      // those reads the profile again, and an in-scope admin was crossing the
-      // expression limit before the history write was checked.
+      // A material edit still requires the inline notes to be gone before the
+      // owner may change the record. An in-scope admin may remove them. A
+      // housekeeping write is checked separately and may leave the notes in place.
       function canEditThisFitTest() {
         let actor = currentUserDoc().data;
         let school = resource.data.get('schoolsList', '');
         return actor.get('role', '') != 'faculty'
           && (
-            request.auth.uid == resource.data.userId
+            (
+              request.auth.uid == resource.data.userId
+              && !resource.data.keys().hasAny(['testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'])
+            )
             || actor.get('role', '') == 'superadmin'
             || (
               actor.get('role', '') == 'admin'
@@ -614,14 +641,13 @@ service cloud.firestore {
         let entryId = request.resource.data.get('lastEditId', '');
         return getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)/editHistory/$(entryId)).data;
       }
-      // One diff of the fit test against a fixed allowlist. The history field
-      // list has to be exactly that set. Value checks are separate so this
-      // function stays small enough to enter on a full record.
+      // One diff against a fixed allowlist. Medical note fields are removed
+      // here, so stripping a legacy note is not an edit-history field.
       function historyShapeOk() {
         let history = historyRecord();
         let names = history.fields;
-        let material = request.resource.data.diff(resource.data).affectedKeys()
-          .difference(['updatedAt', 'lookupKey', 'verificationToken', 'lastEditId'].toSet());
+        let affected = request.resource.data.diff(resource.data).affectedKeys();
+        let material = affected.difference(['updatedAt', 'lookupKey', 'verificationToken', 'lastEditId', 'testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'].toSet());
         let tracked = [
           'recipientEmail', 'clientName', 'dob', 'testLocation', 'schoolsList',
           'fitTestType', 'respiratorMfg', 'model', 'style', 'fitTestMethod',
@@ -639,15 +665,15 @@ service cloud.firestore {
           && history.changes.old.keys().hasOnly(names)
           && history.changes.old.keys().hasAll(names)
           && history.changes.new.keys().hasOnly(names)
-          && history.changes.new.keys().hasAll(names);
+          && history.changes.new.keys().hasAll(names)
+          && (
+            !affected.hasAny(['testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'])
+            || (
+              medicalNoteFieldsAbsent()
+              && existsAfter(/databases/$(database)/documents/fitTestMedicalNotes/$(fitTestId))
+            )
+          );
       }
-      // Inline on purpose. A helper counts its whole body on every call, so a
-      // per-field function crosses the expression limit once several fields change.
-      // The || below reads a stored value only when that field is in this edit.
-      // One diff per side, not a get() per field. A per-field read of the fit test
-      // crosses the expression limit once an in-scope admin changes several fields.
-      // changedKeys covers fields that are stored. addedKeys are fields the record
-      // does not have, so the history value has to be null.
       // Inline on purpose. A helper counts its whole body on every call, and a
       // second diff of the fit test crosses the expression limit. The || reads a
       // stored value only when that field is in this edit. A missing field is null.
@@ -674,7 +700,6 @@ service cloud.firestore {
           && (!names.hasAny(['correctiveActionNote']) || (old.correctiveActionNote == resource.data.get('correctiveActionNote', null) && neu.correctiveActionNote == request.resource.data.get('correctiveActionNote', null)))
           && (!names.hasAny(['userId']) || (old.userId == resource.data.get('userId', null) && neu.userId == request.resource.data.get('userId', null)));
       }
-      // A field that already had text cannot be blanked. An empty legacy value can stay empty.
       function hadStoredText(value) {
         return value is string && value.matches('.*\\S.*');
       }
@@ -715,25 +740,35 @@ service cloud.firestore {
       }
       // One allow rule. Extra allow update rules are all evaluated, and their
       // expression counts add up past the limit on a full record.
+      // Housekeeping (resend or token refresh) may leave a legacy inline note
+      // unchanged, including for the owner. Faculty cannot write. Stripping the
+      // note still requires the separate note doc, and the owner cannot strip it.
       allow update: if isSignedIn() && isApproved() && (
         (softDeleteUpdate() && deletionLogAfterOk(fitTestId))
         || (
-          canEditThisFitTest()
-          && notSoftDeleted()
-          // Locked fields, deletion stamps, and creator stamps are not in the
-          // history allowlist, so historyShapeOk rejects those writes. Reading
-          // each of them here crossed the expression limit on a full record.
+          notSoftDeleted()
           && fitTestSchoolOkOnUpdate()
           && (
             lastEditChanged()
               ? (
-                editHistoryAfterOk()
+                canEditThisFitTest()
+                && editHistoryAfterOk()
                 && historyShapeOk()
                 && historyValuesOk()
                 && textOk(request.resource.data.get('style', ''), 100)
                 && methodStillOk()
               )
-              : onlyHousekeeping()
+              : (
+                onlyHousekeeping()
+                && !isFacultyRole()
+                && (
+                  canEditThisFitTest()
+                  || (
+                    request.auth.uid == resource.data.userId
+                    && noteFieldsUnchanged()
+                  )
+                )
+              )
           )
         )
       );
@@ -841,7 +876,8 @@ service cloud.firestore {
         && request.resource.data.deletedAt == null
         && !request.resource.data.keys().hasAny(['deletedBy', 'deleteReason'])
         && respiratorRecordOk()
-        && creatorStampMatchesProfile();
+        && creatorStampMatchesProfile()
+        && medicalNoteFieldsAbsent();
 
       match /editHistory/{entryId} {
         // Owner, super admin, or an admin whose schools include this record.
@@ -878,6 +914,68 @@ service cloud.firestore {
           getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('lastEditId', '') == entryId;
         allow update, delete: if false;
       }
+    }
+
+    // Medical restriction notes are not on the fit test. The owner can read their
+    // own. A super admin can read any. A scoped admin can read only notes whose
+    // school is one of theirs. Writes follow the same scope. getAfter lets the
+    // note be created in the same batch as a new fit test, and deleted in the
+    // same batch as a soft delete.
+    match /fitTestMedicalNotes/{fitTestId} {
+      function parentAfter() {
+        return getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data;
+      }
+      function noteShapeOk() {
+        return request.resource.data.fitTestId == fitTestId
+          && request.resource.data.get('userId', '') == parentAfter().get('userId', '')
+          && request.resource.data.get('schoolsList', '') == schoolsListOf(parentAfter())
+          && request.resource.data.updatedBy == request.auth.uid
+          && request.resource.data.testerMedicalRestrictionsReceived is bool
+          && request.resource.data.testerMedicalRestrictionsNote is string
+          && request.resource.data.testerMedicalRestrictionsNote.size() <= 2000
+          && (
+            request.resource.data.testerMedicalRestrictionsReceived == true
+            || request.resource.data.testerMedicalRestrictionsNote.size() == 0
+          );
+      }
+      function noteInAdminScope() {
+        return isSuperAdmin()
+          || (
+            isScopedAdmin()
+            && resource.data.get('schoolsList', '') != ''
+            && resource.data.get('schoolsList', '') in actorSchools()
+          );
+      }
+      function noteWriteInScope() {
+        return isSuperAdmin()
+          || (
+            isScopedAdmin()
+            && parentAfter().get('schoolsList', '') is string
+            && parentAfter().get('schoolsList', '').size() > 0
+            && parentAfter().get('schoolsList', '') in actorSchools()
+          );
+      }
+      allow get: if isSignedIn() && isApproved() &&
+        (resource.data.userId == request.auth.uid || noteInAdminScope());
+      allow list: if isSignedIn() && isApproved() && (
+        resource.data.userId == request.auth.uid
+        || isSuperAdmin()
+        || (
+          isScopedAdmin()
+          && resource.data.schoolsList in actorSchools()
+        )
+      );
+      allow create, update: if isSignedIn() && isApproved() && !isFacultyRole() &&
+        parentLive(fitTestId) &&
+        (request.auth.uid == parentAfter().get('userId', '') || noteWriteInScope()) &&
+        noteShapeOk();
+      allow delete: if isSignedIn() && isApproved() && !isFacultyRole()
+        && existsAfter(/databases/$(database)/documents/fitTests/$(fitTestId))
+        && getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedAt', null) == request.time
+        && getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedBy', '') == request.auth.uid
+        && canSoftDeleteFitTestData(
+          getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data
+        );
     }
 
     // Append-only log written in the same batch as the soft delete. The fit test stays.
@@ -920,9 +1018,10 @@ service cloud.firestore {
         || (isScopedAdmin() && school is string && school.size() > 0 && school in actorSchools());
     }
 
-    // Create reads the parent as stored. A fit test that is already hidden cannot gain a card.
+    // getAfter, so a note or card written in the same batch as a new fit test can
+    // see that parent. A parent that is deleted after the batch is not live.
     function parentLive(fitTestId) {
-      return get(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedAt', null) == null;
+      return getAfter(/databases/$(database)/documents/fitTests/$(fitTestId)).data.get('deletedAt', null) == null;
     }
 
     // Revoke reads the parent after this batch, so the hide and the revoke can commit together.
@@ -997,8 +1096,10 @@ service cloud.firestore {
           canRevokeStoredCard()
           || (
             request.resource.data.get('userId', '') == resource.data.get('userId', '')
+            && !resource.data.keys().hasAny(['revokedAt'])
             && revokedAtNotCleared()
             && lookupMatchesParent()
+            && parentLive(request.resource.data.get('fitTestId', ''))
           )
         );
       // Deactivate with revokedAt. The lookup document is kept.
@@ -1067,8 +1168,10 @@ service cloud.firestore {
           canRevokeStoredCard()
           || (
             request.resource.data.get('userId', '') == resource.data.get('userId', '')
+            && !resource.data.keys().hasAny(['revokedAt'])
             && revokedAtNotCleared()
             && verificationMatchesParent()
+            && parentLive(request.resource.data.get('fitTestId', ''))
           )
         );
       // Deactivate with revokedAt. The verification document is kept.
