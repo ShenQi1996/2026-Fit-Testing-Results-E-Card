@@ -63,7 +63,13 @@ beforeEach(() => {
   limit.mockClear();
   addDoc.mockClear();
   getCountFromServer.mockClear();
-  writeBatch.mockClear();
+  writeBatch.mockReset();
+  writeBatch.mockImplementation(() => ({
+    delete: jest.fn(),
+    update: jest.fn(),
+    set: jest.fn(),
+    commit: jest.fn(async () => {}),
+  }));
   updateDoc.mockClear();
   deleteDoc.mockClear();
   addDoc.mockClear();
