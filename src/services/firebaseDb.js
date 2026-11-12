@@ -3,7 +3,6 @@
 
 import {
   collection,
-  addDoc,
   getDocs,
   doc,
   getDoc,
@@ -60,7 +59,9 @@ const FIT_TESTS_COLLECTION = 'fitTests';
 const FIT_TEST_DELETION_LOGS_COLLECTION = 'fitTestDeletionLogs';
 const FIT_TEST_LOOKUPS_COLLECTION = 'fitTestLookups';
 const FIT_TEST_VERIFICATIONS_COLLECTION = 'fitTestVerifications';
+const FIT_TEST_MEDICAL_NOTES_COLLECTION = 'fitTestMedicalNotes';
 const USERS_COLLECTION = 'users';
+const MEDICAL_NOTE_MAX_LENGTH = 2000;
 
 const LOOKUP_CARD_FIELDS = [
   'recipientEmail',
@@ -95,6 +96,58 @@ const VERIFY_CARD_FIELDS = [
   'result',
   'fitTester',
 ];
+
+const MEDICAL_NOTE_FIELDS = [
+  'testerMedicalRestrictionsReceived',
+  'testerMedicalRestrictionsNote',
+];
+
+const withoutMedicalNote = (data = {}) => {
+  const rest = { ...data };
+  MEDICAL_NOTE_FIELDS.forEach((field) => {
+    delete rest[field];
+  });
+  return rest;
+};
+
+const medicalNoteFromRecord = (data = {}) => {
+  const received = data.testerMedicalRestrictionsReceived === true;
+  const note = received ? String(data.testerMedicalRestrictionsNote || '').trim() : '';
+  if (note.length > MEDICAL_NOTE_MAX_LENGTH) {
+    throw new Error('Medical restriction notes must be 2000 characters or fewer.');
+  }
+  return {
+    testerMedicalRestrictionsReceived: received,
+    testerMedicalRestrictionsNote: note,
+  };
+};
+
+const hasMedicalNoteInput = (data = {}) => MEDICAL_NOTE_FIELDS.some((field) => (
+  Object.prototype.hasOwnProperty.call(data, field)
+));
+
+const queueMedicalNote = (batch, fitTestId, ownerUserId, actorUserId, note, updatedAt, schoolsList) => {
+  batch.set(doc(db, FIT_TEST_MEDICAL_NOTES_COLLECTION, fitTestId), {
+    fitTestId,
+    userId: ownerUserId,
+    updatedBy: actorUserId,
+    updatedAt,
+    schoolsList: typeof schoolsList === 'string' ? schoolsList : '',
+    ...note,
+  });
+};
+
+const applyMedicalNote = (test, note) => {
+  if (!note) return test;
+  if (note.testerMedicalRestrictionsReceived !== true && note.testerMedicalRestrictionsReceived !== false) {
+    return test;
+  }
+  return {
+    ...test,
+    testerMedicalRestrictionsReceived: note.testerMedicalRestrictionsReceived,
+    testerMedicalRestrictionsNote: note.testerMedicalRestrictionsNote || '',
+  };
+};
 
 const toLookupCardData = (record = {}) => {
   const data = {};
@@ -402,7 +455,9 @@ export const saveFitTest = async (userId, fitTestData) => {
     if (access.role === USER_ROLE_FACULTY) {
       throw permissionError('Faculty cannot create fit test records.');
     }
-    const clientData = { ...(fitTestData || {}) };
+    const notePresent = hasMedicalNoteInput(fitTestData);
+    const note = notePresent ? medicalNoteFromRecord(fitTestData) : null;
+    const clientData = withoutMedicalNote(fitTestData || {});
     delete clientData[CREATOR_ROLE_FIELD];
     delete clientData[CREATOR_SCHOOL_FIELD];
     clientData.fitTestMethod = 'Qualitative';
@@ -416,7 +471,10 @@ export const saveFitTest = async (userId, fitTestData) => {
     };
     const createdAt = Timestamp.now();
     const retentionDate = retentionDateValue({ ...recordToSave, createdAt });
-    const docRef = await addDoc(collection(db, FIT_TESTS_COLLECTION), {
+    const fitTestId = createVerificationToken();
+    const docRef = doc(db, FIT_TESTS_COLLECTION, fitTestId);
+    const batch = writeBatch(db);
+    batch.set(docRef, {
       userId,
       ...recordToSave,
       lookupKey: lookupKey || null,
@@ -425,6 +483,18 @@ export const saveFitTest = async (userId, fitTestData) => {
       updatedAt: createdAt,
       ...(retentionDate ? { retentionDate } : {}),
     });
+    if (note) {
+      queueMedicalNote(
+        batch,
+        fitTestId,
+        userId,
+        userId,
+        note,
+        createdAt,
+        recordToSave.schoolsList,
+      );
+    }
+    await batch.commit();
     if (lookupKey) {
       await upsertFitTestLookup(lookupKey, recordToSave, docRef.id, userId);
     }
@@ -433,6 +503,9 @@ export const saveFitTest = async (userId, fitTestData) => {
     return docRef.id;
   } catch (error) {
     console.error('Error saving fit test:', error);
+    if (error.message === 'Medical restriction notes must be 2000 characters or fewer.') {
+      throw error;
+    }
     if (error.code === 'PERMISSION_DENIED') throw error;
     throw new Error('Failed to save fit test record. Please try again.');
   }
@@ -459,7 +532,7 @@ const indexRequiredError = (error) => {
 };
 
 const mapFitTestDoc = (docSnap) => {
-  const data = docSnap.data() || {};
+  const data = withoutMedicalNote(docSnap.data() || {});
   return {
     id: docSnap.id,
     ...data,
@@ -488,11 +561,26 @@ export const getUserFitTests = async (userId, options = {}) => {
     );
     
     const querySnapshot = await getDocs(q);
+    // A notes failure must not hide the fit tests. Inline fields are already
+    // stripped, including for faculty once that role reads this list, so a
+    // failed notes read does not fall back to the legacy copy.
+    let notesById = new Map();
+    try {
+      const notesSnap = await getDocs(query(
+        collection(db, FIT_TEST_MEDICAL_NOTES_COLLECTION),
+        where('userId', '==', userId),
+      ));
+      notesById = new Map(
+        notesSnap.docs.map((noteSnap) => [noteSnap.id, noteSnap.data() || {}])
+      );
+    } catch (noteError) {
+      console.error('Error fetching medical notes:', noteError);
+    }
 
     return querySnapshot.docs
       .filter((docSnap) => !isSoftDeletedFitTest(docSnap.data() || {}))
       .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now))
-      .map(mapFitTestDoc);
+      .map((docSnap) => applyMedicalNote(mapFitTestDoc(docSnap), notesById.get(docSnap.id)));
   } catch (error) {
     console.error('Error fetching fit tests:', error);
 
@@ -551,7 +639,7 @@ const facultySchoolConstraint = (chunk) => (
 
 /**
  * Fit tests whose creatorSchool is one of the faculty member's schools.
- * Matches the creatorSchool + createdAt composite index. Legacy tests with no
+ * Matches the creatorSchool + deletedAt + createdAt composite index. Legacy tests with no
  * creatorSchool are not returned. Does not read the whole collection.
  * @param {string|string[]|object} schools
  * @param {{ now?: Date, limit?: number }} [options]
@@ -579,6 +667,7 @@ export const getFacultyFitTests = async (schools, options = {}) => {
       snapshots.push(await getDocs(query(
         collection(db, FIT_TESTS_COLLECTION),
         facultySchoolConstraint(chunk),
+        where('deletedAt', '==', null),
         orderBy('createdAt', 'desc'),
         limit(pageLimit),
       )));
@@ -597,7 +686,7 @@ export const getFacultyFitTests = async (schools, options = {}) => {
     console.error('Error fetching faculty fit tests:', error);
     if (isIndexError(error)) {
       console.error(
-        'Firestore fitTests query needs a composite index on creatorSchool and createdAt. That index is deployed separately from this change.',
+        'Firestore fitTests query needs a composite index on creatorSchool, deletedAt, and createdAt. That index is deployed separately from this change.',
         error,
       );
       throw indexRequiredError(error);
@@ -662,12 +751,7 @@ export const getFitTest = async (fitTestId) => {
     const docSnap = await getDoc(docRef);
     
     if (docSnap.exists()) {
-      return {
-        id: docSnap.id,
-        ...docSnap.data(),
-        createdAt: docSnap.data().createdAt?.toDate()?.toISOString(),
-        updatedAt: docSnap.data().updatedAt?.toDate()?.toISOString(),
-      };
+      return mapFitTestDoc(docSnap);
     } else {
       throw new Error('Fit test record not found.');
     }
@@ -797,12 +881,16 @@ export const ensureFitTestVerification = async (record, userId) => {
   if (!record) return record;
 
   const verificationToken = resolveVerificationToken(record);
-  const nextRecord = { ...record, verificationToken };
+  const lookupKey = await resolveLookupKey(record);
+  const nextRecord = { ...record, verificationToken, ...(lookupKey ? { lookupKey } : {}) };
+  const parentPatch = {};
+  if (record.verificationToken !== verificationToken) parentPatch.verificationToken = verificationToken;
+  if (lookupKey && record.lookupKey !== lookupKey) parentPatch.lookupKey = lookupKey;
 
-  if (record.id && record.verificationToken !== verificationToken) {
+  if (record.id && Object.keys(parentPatch).length > 0) {
     try {
       await updateDoc(doc(db, FIT_TESTS_COLLECTION, record.id), {
-        verificationToken,
+        ...parentPatch,
         updatedAt: Timestamp.now(),
       });
     } catch (error) {
@@ -811,15 +899,17 @@ export const ensureFitTestVerification = async (record, userId) => {
   }
 
   if (record.id) {
+    // The card belongs to the fit test owner. An admin refreshing a token is
+    // the signed-in writer, not a new owner.
+    const ownerId = record.userId || userId;
     await upsertFitTestVerification(
       verificationToken,
       nextRecord,
       record.id,
-      userId || record.userId
+      ownerId
     );
-    const lookupKey = await resolveLookupKey(nextRecord);
     if (lookupKey) {
-      await upsertFitTestLookup(lookupKey, nextRecord, record.id, userId || record.userId);
+      await upsertFitTestLookup(lookupKey, nextRecord, record.id, ownerId);
     }
   }
 
@@ -951,16 +1041,36 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     if (lockedChange) {
       throw new Error(LOCKED_FIT_TEST_MESSAGE);
     }
-    const writable = { ...normalizedUpdates };
+    const formNote = hasMedicalNoteInput(normalizedUpdates)
+      ? medicalNoteFromRecord(normalizedUpdates)
+      : null;
+    const writable = withoutMedicalNote(normalizedUpdates);
     LOCKED_FIT_TEST_FIELDS.forEach((field) => {
       delete writable[field];
     });
     delete writable[CREATOR_ROLE_FIELD];
     delete writable[CREATOR_SCHOOL_FIELD];
+
+    const schoolsList = typeof existing.schoolsList === 'string' ? existing.schoolsList : '';
+    const canStripLegacyNotes = isSuperAdmin(access.role)
+      || (schoolsList !== '' && normalizeSchoolList(access.schools).includes(schoolsList));
+    const hasLegacyInlineNote = MEDICAL_NOTE_FIELDS.some((field) => (
+      Object.prototype.hasOwnProperty.call(existing, field)
+    ));
+    const noteStrips = {};
+    let note = formNote;
+    if (canStripLegacyNotes && hasLegacyInlineNote) {
+      MEDICAL_NOTE_FIELDS.forEach((field) => {
+        noteStrips[field] = deleteField();
+      });
+      if (!note) note = medicalNoteFromRecord(existing);
+    }
+
     const oldValues = {};
     const newValues = {};
     const changedFieldNames = Object.keys(writable).filter((field) => (
       !EDIT_HISTORY_SKIP.has(field)
+      && !MEDICAL_NOTE_FIELDS.includes(field)
       && writable[field] !== undefined
       && !sameStoredValue(
         isDeleteSentinel(writable[field]) ? null : writable[field],
@@ -982,22 +1092,38 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     changedFields.forEach((field) => {
       changedWritable[field] = writable[field];
     });
-    const nextRecord = { ...existing, ...writable };
-    if (isDeleteSentinel(writable.fitFactor) || !Object.prototype.hasOwnProperty.call(existing, 'fitFactor')) {
+    const nextRecord = { ...existing, ...writable, ...noteStrips };
+    Object.keys(nextRecord).forEach((field) => {
+      if (isDeleteSentinel(nextRecord[field])) delete nextRecord[field];
+    });
+    if (!Object.prototype.hasOwnProperty.call(existing, 'fitFactor')) {
       delete nextRecord.fitFactor;
     }
     const previousKey = await resolveLookupKey(existing);
     const nextKey = await resolveLookupKey(nextRecord);
     const verificationToken = resolveVerificationToken(nextRecord);
     nextRecord.verificationToken = verificationToken;
+
     const ownerId = existing.userId || userId;
     const payload = {
       ...changedWritable,
+      ...noteStrips,
       lookupKey: nextKey || null,
       verificationToken,
       updatedAt: serverTimestamp(),
     };
     const batch = writeBatch(db);
+    if (note) {
+      queueMedicalNote(
+        batch,
+        fitTestId,
+        ownerId,
+        userId,
+        note,
+        serverTimestamp(),
+        schoolsList,
+      );
+    }
     if (changedFields.size > 0) {
       const lastEditId = createVerificationToken();
       payload.lastEditId = lastEditId;
@@ -1052,16 +1178,14 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     notifyFitTestActivity();
   } catch (error) {
     console.error('Error updating fit test:', error);
-    // Re-throw permission denied errors
     if (
       error.code === 'PERMISSION_DENIED'
+      || error.message === 'Medical restriction notes must be 2000 characters or fewer.'
       || error.message === LOCKED_FIT_TEST_MESSAGE
       || error.message === 'Fit test record not found.'
       || error.message === 'User ID is required to update fit test records.'
+      || error.message === 'This fit test record is already hidden.'
     ) {
-      throw error;
-    }
-    if (error.message === 'This fit test record is already hidden.') {
       throw error;
     }
     throw new Error('Failed to update fit test record. Please try again.');
@@ -1185,6 +1309,12 @@ export const deleteFitTest = async (fitTestId, userId, reason) => {
       } else {
         batch.update(plan.lookupRef, { revokedAt: serverTimestamp() });
       }
+    }
+
+    const noteRef = doc(db, FIT_TEST_MEDICAL_NOTES_COLLECTION, fitTestId);
+    const noteSnap = await getDoc(noteRef);
+    if (noteSnap.exists()) {
+      batch.delete(noteRef);
     }
 
     await batch.commit();

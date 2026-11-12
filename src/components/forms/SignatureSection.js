@@ -256,6 +256,7 @@ const SignatureSection = ({
               placeholder="Type the medical restrictions received"
               required
               disabled={isLoading}
+              maxLength={2000}
               rows={3}
             />
             {fieldErrors?.testerMedicalRestrictionsNote ? (

@@ -10,6 +10,7 @@
     "lint": "eslint src",
     "test": "jest",
     "test:rules": "firebase emulators:exec --only firestore --project demo-fit-test-rules \"jest --config jest.rules.config.js --forceExit\"",
+    "backfill:deleted-at": "node scripts/backfillDeletedAt.js",
     "backfill:schools": "node scripts/backfill-schools.js",
     "backfill:user-status": "node scripts/backfillUserStatus.js",
     "seed:staging": "node scripts/seed-staging.js"

@@ -17,7 +17,11 @@ const testingAgentSelect = (renderer) => selects(renderer).find((select) => (
   (select.children || []).some((child) => child?.props?.value === 'Bitrex')
 ));
 
-const renderForm = (editData) => {
+const styleSelect = (renderer) => renderer.root.findAllByType('select').find((node) => (
+  node.findAllByType('option').some((option) => option.children && option.children.includes('Select style'))
+));
+
+const renderForm = (editData, editError) => {
   let renderer;
   act(() => {
     renderer = TestRenderer.create(
@@ -25,11 +29,32 @@ const renderForm = (editData) => {
         editData={editData}
         onChange={() => {}}
         isCustomEditLocation={false}
+        editError={editError}
       />
     );
   });
   return renderer;
 };
+
+test('a legacy edit with no style shows the message on the style field', () => {
+  const renderer = renderForm({
+    style: '',
+    testLocation: 'Harlem',
+  }, 'Please select the respirator style.');
+
+  const select = styleSelect(renderer);
+  expect(select.props.className).toContain('form-input-error');
+  expect(select.props['aria-invalid']).toBe('true');
+  expect(select.props['aria-describedby']).toBe('edit-style-error');
+  expect(renderer.root.findByProps({ id: 'edit-style-error' }).children).toEqual([
+    'Please select the respirator style.',
+  ]);
+  expect(JSON.stringify(renderer.toJSON())).not.toContain('Fit Factor');
+  expect(JSON.stringify(renderer.toJSON())).not.toContain('Fit Test Method');
+  act(() => {
+    renderer.unmount();
+  });
+});
 
 test('the edit form does not default a missing testing agent to Bitrex', () => {
   const renderer = renderForm({ testingAgent: '' });
