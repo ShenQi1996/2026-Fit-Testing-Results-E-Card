@@ -84,7 +84,7 @@ Public verify and resend read one document by known key. Listing those collectio
 
 1. Open Firebase Console → Firestore → **Rules**
 2. Publish the contents of [`firestore.rules`](./firestore.rules) in this repo
-3. Create the composite index if Test Results asks for it: `fitTests` with `userId` ascending, `createdAt` descending
+3. Create the composite index if Test Results asks for it: `fitTests` with `userId` ascending, `createdAt` descending. Faculty results use `fitTests` with `creatorSchool` ascending and `createdAt` descending.
 
 Composite indexes are listed in [`firestore.indexes.json`](./firestore.indexes.json). Deploy them to staging with:
 
