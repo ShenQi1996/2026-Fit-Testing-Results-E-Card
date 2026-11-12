@@ -18,3 +18,14 @@ test('the e-card shows a missing or legacy method as Qualitative and has no fit 
   expect(legacy).not.toContain('Fit Factor');
   expect(legacy).not.toContain('[Method]');
 });
+
+test('the emailed e-card does not print program administrator fields', () => {
+  const html = generateFitTestCard({
+    clientName: 'Ada',
+    programAdministratorName: 'Ada Admin',
+    programAdministratorContact: 'ada-admin@example.com',
+  });
+  expect(html).not.toContain('Ada Admin');
+  expect(html).not.toContain('ada-admin@example.com');
+  expect(html).not.toContain('Program Administrator');
+});

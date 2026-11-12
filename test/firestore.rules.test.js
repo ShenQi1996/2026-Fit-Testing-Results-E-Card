@@ -2229,6 +2229,59 @@ test('lookup and verification copies match the fit test and stay inside the admi
   }));
 });
 
+test('resend and verify cards carry the parent program administrator fields', async () => {
+  const token = 'cd'.repeat(16);
+  const program = {
+    programAdministratorName: 'Ada Admin',
+    programAdministratorContact: 'ada-admin@example.com',
+  };
+  const parent = {
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    lookupKey: 'lookup-2',
+    verificationToken: token,
+    clientName: 'Ada',
+    result: 'Pass',
+    ...program,
+    ...respiratorRecord(),
+  };
+  const lookup = {
+    clientName: 'Ada',
+    result: 'Pass',
+    verificationToken: token,
+    userId: 'tester-1',
+    fitTestId: 'own-2',
+    lookupKey: 'lookup-2',
+    ...program,
+    ...respiratorRecord(),
+  };
+  const verification = {
+    clientName: 'Ada',
+    result: 'Pass',
+    userId: 'tester-1',
+    fitTestId: 'own-2',
+    verificationToken: token,
+    ...program,
+    ...respiratorRecord(),
+  };
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['fitTests/own-2', parent],
+  ]);
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+
+  await assertFails(setDoc(doc(ownerDb, 'fitTestLookups/lookup-2'), {
+    ...lookup,
+    programAdministratorName: 'Someone Else',
+  }));
+  await assertFails(setDoc(doc(ownerDb, `fitTestVerifications/${token}`), {
+    ...verification,
+    programAdministratorContact: 'someone@example.com',
+  }));
+  await assertSucceeds(setDoc(doc(ownerDb, 'fitTestLookups/lookup-2'), lookup));
+  await assertSucceeds(setDoc(doc(ownerDb, `fitTestVerifications/${token}`), verification));
+});
+
 test('medical restriction notes stay off the fit test and follow the admin school scope', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
