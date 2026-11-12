@@ -11,6 +11,7 @@ import {
   getAuthInstance,
   handleGoogleRedirect,
 } from '../services/firebaseAuth';
+import { updateOwnProgramAdministrator } from '../services/firebaseDb';
 
 const AuthContext = createContext(null);
 
@@ -122,6 +123,13 @@ export const AuthProvider = ({ children }) => {
           updateData.name || user.name,
           updateData.email || user.email
         );
+      }
+
+      if (
+        typeof updateData.programAdministratorName === 'string'
+        || typeof updateData.programAdministratorContact === 'string'
+      ) {
+        await updateOwnProgramAdministrator(firebaseUser.uid, updateData);
       }
 
       // Update password if provided

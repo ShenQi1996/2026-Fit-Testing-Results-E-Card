@@ -38,6 +38,8 @@ const EditAccount = ({ onBack, onManageSchools }) => {
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
+    programAdministratorName: '',
+    programAdministratorContact: '',
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -64,6 +66,8 @@ const EditAccount = ({ onBack, onManageSchools }) => {
         currentPassword: '',
         newPassword: '',
         confirmPassword: '',
+        programAdministratorName: user.programAdministratorName || '',
+        programAdministratorContact: user.programAdministratorContact || '',
       });
     }
   }, [user]);
@@ -130,15 +134,17 @@ const EditAccount = ({ onBack, onManageSchools }) => {
         email: formData.email,
         currentPassword: formData.currentPassword || undefined,
         newPassword: formData.newPassword || undefined,
+        programAdministratorName: formData.programAdministratorName,
+        programAdministratorContact: formData.programAdministratorContact,
       });
       setSuccess('Account updated successfully!');
 
-      setFormData({
-        ...formData,
+      setFormData((prev) => ({
+        ...prev,
         currentPassword: '',
         newPassword: '',
         confirmPassword: '',
-      });
+      }));
     } catch (err) {
       setError(err.message || 'Failed to update account. Please try again.');
     } finally {
@@ -189,6 +195,34 @@ const EditAccount = ({ onBack, onManageSchools }) => {
                 value={formData.email}
                 onChange={handleChange}
                 required
+                disabled={isLoading}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="programAdministratorName">Program administrator name</label>
+              <input
+                type="text"
+                id="programAdministratorName"
+                name="programAdministratorName"
+                className="form-input"
+                placeholder="Optional"
+                value={formData.programAdministratorName}
+                onChange={handleChange}
+                disabled={isLoading}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="programAdministratorContact">Program administrator contact</label>
+              <input
+                type="text"
+                id="programAdministratorContact"
+                name="programAdministratorContact"
+                className="form-input"
+                placeholder="Optional email or phone"
+                value={formData.programAdministratorContact}
+                onChange={handleChange}
                 disabled={isLoading}
               />
             </div>

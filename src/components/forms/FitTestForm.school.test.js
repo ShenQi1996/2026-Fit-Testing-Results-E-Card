@@ -2,7 +2,7 @@ import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../../context/AuthContext';
 import { saveFitTest } from '../../services/firebaseDb';
-import { listMasterSchools } from '../../services/masterSchools';
+import { getMasterSchoolRecord, listMasterSchoolRecords } from '../../services/masterSchools';
 import FitTestForm from './FitTestForm';
 import { NO_ASSIGNED_SCHOOL_MESSAGE, SELECT_SCHOOL_MESSAGE } from '../../utils/ecardSchools';
 
@@ -21,10 +21,23 @@ jest.mock('../../context/AuthContext', () => ({
 }));
 
 jest.mock('../../services/masterSchools', () => ({
-  listMasterSchools: jest.fn(() => Promise.resolve([
-    'Helene College of Nursing',
-    'Example Second School',
+  listMasterSchoolRecords: jest.fn(() => Promise.resolve([
+    {
+      name: 'Helene College of Nursing',
+      programAdministratorName: 'School Admin',
+      programAdministratorContact: 'school@example.com',
+    },
+    {
+      name: 'Example Second School',
+      programAdministratorName: '',
+      programAdministratorContact: '',
+    },
   ])),
+  getMasterSchoolRecord: jest.fn(async (name) => ({
+    name,
+    programAdministratorName: name === 'Helene College of Nursing' ? 'School Admin' : '',
+    programAdministratorContact: name === 'Helene College of Nursing' ? 'school@example.com' : '',
+  })),
 }));
 
 jest.mock('../../services/firebaseDb', () => ({
@@ -73,7 +86,18 @@ const submit = async (renderer) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  listMasterSchools.mockResolvedValue([HELENE, SECOND]);
+  listMasterSchoolRecords.mockResolvedValue([
+    {
+      name: HELENE,
+      programAdministratorName: 'School Admin',
+      programAdministratorContact: 'school@example.com',
+    },
+    {
+      name: SECOND,
+      programAdministratorName: '',
+      programAdministratorContact: '',
+    },
+  ]);
 });
 
 test('a tester sees only their school, pre-selected and read-only', async () => {
@@ -90,7 +114,11 @@ test('a tester sees only their school, pre-selected and read-only', async () => 
   expect(renderer.root.findAllByType('select').some((node) => node.props.id === 'schoolsList')).toBe(false);
   expect(renderer.root.findAllByType('input').some((node) => node.props.id === 'schoolsListOther')).toBe(false);
   expect(JSON.stringify(renderer.toJSON())).not.toContain('Other / Add new school');
-  expect(listMasterSchools).not.toHaveBeenCalled();
+  expect(JSON.stringify(renderer.toJSON())).not.toContain('Program administrator name');
+  expect(renderer.root.findAllByProps({ id: 'programAdministratorName' })).toHaveLength(0);
+  expect(renderer.root.findAllByProps({ id: 'programAdministratorContact' })).toHaveLength(0);
+  expect(listMasterSchoolRecords).not.toHaveBeenCalled();
+  expect(getMasterSchoolRecord).toHaveBeenCalledWith(HELENE);
 });
 
 test('an admin picks from their schools array and one school is pre-selected', async () => {
@@ -127,7 +155,7 @@ test('a super admin picks from the master school list', async () => {
     email: 'sam@example.com',
   });
 
-  expect(listMasterSchools).toHaveBeenCalled();
+  expect(listMasterSchoolRecords).toHaveBeenCalled();
   const select = renderer.root.findByProps({ id: 'schoolsList' });
   expect(optionValues(select)).toEqual(['', HELENE, SECOND]);
   expect(JSON.stringify(renderer.toJSON())).not.toContain('Other / Add new school');
