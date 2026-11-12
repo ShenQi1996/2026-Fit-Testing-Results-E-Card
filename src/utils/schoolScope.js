@@ -1,4 +1,10 @@
-import { isAdminOrAbove, isSuperAdmin, USER_ROLE_ADMIN, USER_ROLE_TESTER } from './roles';
+import {
+  isAdminOrAbove,
+  isSuperAdmin,
+  USER_ROLE_ADMIN,
+  USER_ROLE_FACULTY,
+  USER_ROLE_TESTER,
+} from './roles';
 
 /** School names stored on a user document. Blank entries are dropped. */
 export const normalizeSchoolList = (value) => {
@@ -24,6 +30,14 @@ export const isTesterInSchools = (actorSchools, user) => {
   return school !== '' && schools.includes(school);
 };
 
+/** Faculty use the same single `school` string as testers. */
+export const isFacultyInSchools = (actorSchools, user) => {
+  const schools = normalizeSchoolList(actorSchools);
+  if (user?.role !== USER_ROLE_FACULTY) return false;
+  const school = schoolName(user);
+  return school !== '' && schools.includes(school);
+};
+
 /**
  * Admin `schools` must be a non-empty subset of the actor's schools.
  * One school outside the actor's list is enough to hide the admin.
@@ -37,7 +51,7 @@ export const isAdminWithinSchools = (actorSchools, user) => {
 
 /**
  * Super admins see every user. A scoped admin sees their own profile,
- * testers in their schools, and admins whose schools sit inside that list.
+ * testers and faculty in their schools, and admins whose schools sit inside that list.
  */
 export const filterUsersForActor = (actor, users) => {
   if (!Array.isArray(users)) return [];
@@ -46,6 +60,7 @@ export const filterUsersForActor = (actor, users) => {
   return users.filter((user) => (
     user?.id === actor?.uid
     || isTesterInSchools(actor?.schools, user)
+    || isFacultyInSchools(actor?.schools, user)
     || isAdminWithinSchools(actor?.schools, user)
   ));
 };

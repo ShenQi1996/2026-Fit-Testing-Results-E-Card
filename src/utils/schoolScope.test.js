@@ -1,6 +1,7 @@
 import {
   filterUsersForActor,
   isAdminWithinSchools,
+  isFacultyInSchools,
   isTesterInSchools,
   parseSchoolListInput,
 } from './schoolScope';
@@ -26,6 +27,8 @@ const USERS = [
   admin('admin-helene', [HELENE]),
   tester('tester-helene', HELENE),
   tester('tester-second', SECOND),
+  { id: 'faculty-helene', role: 'faculty', school: HELENE },
+  { id: 'faculty-second', role: 'faculty', school: SECOND },
   tester('tester-blank', ''),
   { id: 'legacy-tester', role: 'tester' },
 ];
@@ -51,7 +54,9 @@ test('a scoped admin sees only users in their schools, and a super admin sees ev
     USERS,
   ).map((user) => user.id);
 
-  expect(scoped).toEqual(['admin-helene', 'tester-helene']);
+  expect(scoped).toEqual(['admin-helene', 'tester-helene', 'faculty-helene']);
+  expect(isFacultyInSchools([HELENE], { role: 'faculty', school: HELENE })).toBe(true);
+  expect(isFacultyInSchools([HELENE], { role: 'faculty', school: SECOND })).toBe(false);
 
   expect(filterUsersForActor(
     { uid: 'super-1', role: 'superadmin', schools: [] },

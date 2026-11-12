@@ -35,6 +35,13 @@ test('an admin uses their schools array and locks a single school', () => {
   expect(accountSchoolLabel(several)).toBe(`${SECOND}, ${HELENE}`);
 });
 
+test('faculty cannot send an e-card', () => {
+  const user = { role: 'faculty', school: HELENE, schools: [SECOND] };
+  expect(schoolsForSignedInUser(user, MASTER)).toEqual([]);
+  expect(ecardSchoolChoices(user, MASTER).blockedMessage).toBe(NO_ASSIGNED_SCHOOL_MESSAGE);
+  expect(accountSchoolLabel(user)).toBe(HELENE);
+});
+
 test('a super admin uses the master list', () => {
   const user = { role: 'superadmin', school: HELENE, schools: [HELENE] };
 

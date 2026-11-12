@@ -20,6 +20,7 @@ import {
 } from '../../services/masterSchools';
 import {
   USER_ROLE_ADMIN,
+  USER_ROLE_FACULTY,
   USER_ROLE_SUPERADMIN,
   USER_ROLE_TESTER,
   accessDateInputValue,
@@ -91,7 +92,7 @@ const withAssignedNames = (masterNames, assignedNames) => {
   return [...masterNames, ...extras];
 };
 
-const NO_SCHOOLS_CREATE_MESSAGE = 'You have no schools assigned, so you cannot add a tester. Ask a super admin to assign a school.';
+const NO_SCHOOLS_CREATE_MESSAGE = 'You have no schools assigned, so you cannot add this user. Ask a super admin to assign a school.';
 const SCHOOL_REQUIRED_MESSAGE = 'At least one school is required.';
 const FIELD_REQUIRED_MESSAGES = {
   name: 'Name is required.',
@@ -372,6 +373,14 @@ const UsersManagement = () => {
     ) {
       fieldErrors.schools = FIELD_REQUIRED_MESSAGES.schools;
     }
+    if (
+      superAdmin
+      && targetUserId !== user.uid
+      && tagRole === USER_ROLE_FACULTY
+      && isBlank(draft.school)
+    ) {
+      fieldErrors.school = 'Choose one school for this faculty member.';
+    }
     if (Object.keys(fieldErrors).length > 0) {
       setEditFieldErrors((prev) => ({ ...prev, [targetUserId]: fieldErrors }));
       setSuccess('');
@@ -398,10 +407,13 @@ const UsersManagement = () => {
           updates.schools = selectedSchools;
         } else if (tagRole === USER_ROLE_SUPERADMIN) {
           if (selectedSchools.length > 0) updates.schools = selectedSchools;
+        } else if (tagRole === USER_ROLE_FACULTY) {
+          updates.school = (draft.school || '').trim();
+          updates.schools = [];
         } else {
           updates.school = draft.school || '';
         }
-        if (tagRole === USER_ROLE_ADMIN) {
+        if (tagRole === USER_ROLE_ADMIN || tagRole === USER_ROLE_FACULTY) {
           const orderError = accessWindowOrderError(draft.startDate, draft.endDate);
           if (orderError) {
             setError(orderError);
@@ -500,13 +512,16 @@ const UsersManagement = () => {
 
   const actorSchools = normalizeSchoolList(user?.schools);
   const createRole = creatableRoles.includes(createForm.role) ? createForm.role : 'tester';
-  const creatingTester = createRole === USER_ROLE_TESTER;
+  const creatingSingleSchool = createRole === USER_ROLE_TESTER || createRole === USER_ROLE_FACULTY;
   const createSchoolMissing = !superAdmin
-    && creatingTester
+    && creatingSingleSchool
     && actorSchools.length > 1
     && !actorSchools.includes(createForm.school);
+  const createFacultySchoolMissing = superAdmin
+    && createRole === USER_ROLE_FACULTY
+    && isBlank(createForm.school);
   const creatingAdmin = superAdmin && createRole === USER_ROLE_ADMIN;
-  const createBlocked = !superAdmin && creatingTester && actorSchools.length === 0;
+  const createBlocked = !superAdmin && creatingSingleSchool && actorSchools.length === 0;
 
   const setCreateValue = (field, value) => {
     const fixed = field === 'schools'
@@ -528,6 +543,9 @@ const UsersManagement = () => {
     if (role === USER_ROLE_ADMIN && normalizeSchoolList(createForm.schools).length === 0) {
       fieldErrors.schools = FIELD_REQUIRED_MESSAGES.schools;
     }
+    if (role === USER_ROLE_FACULTY && isBlank(createForm.school) && superAdmin) {
+      fieldErrors.school = 'Choose one school for this faculty member.';
+    }
     if (Object.keys(fieldErrors).length > 0) {
       setCreateFieldErrors(fieldErrors);
       setSuccess('');
@@ -539,12 +557,13 @@ const UsersManagement = () => {
     setError('');
     setSuccess('');
     try {
-      if (!superAdmin && role === USER_ROLE_TESTER && actorSchools.length === 0) {
+      const singleSchoolRole = role === USER_ROLE_TESTER || role === USER_ROLE_FACULTY;
+      if (!superAdmin && singleSchoolRole && actorSchools.length === 0) {
         throw new Error(NO_SCHOOLS_CREATE_MESSAGE);
       }
-      if (!superAdmin && role === USER_ROLE_TESTER && actorSchools.length > 1
+      if (!superAdmin && singleSchoolRole && actorSchools.length > 1
         && !actorSchools.includes(createForm.school)) {
-        throw new Error('Choose one of your schools before adding a tester.');
+        throw new Error('Choose one of your schools before adding this user.');
       }
       const school = superAdmin
         ? (createForm.school || '').trim()
@@ -556,7 +575,7 @@ const UsersManagement = () => {
         role,
         status: createForm.status,
       };
-      if (role === USER_ROLE_TESTER && school) payload.school = school;
+      if (singleSchoolRole && school) payload.school = school;
       if (role === USER_ROLE_ADMIN) {
         payload.schools = normalizeSchoolList(createForm.schools);
       }
@@ -915,7 +934,7 @@ const UsersManagement = () => {
                   ))}
                 </select>
               </label>
-              {creatingTester && superAdmin && (
+              {creatingSingleSchool && superAdmin && (
                 <label>
                   School
                   <select
@@ -924,7 +943,7 @@ const UsersManagement = () => {
                     onChange={(e) => setCreateForm((prev) => ({ ...prev, school: e.target.value }))}
                     disabled={creating}
                   >
-                    <option value="">Leave unset</option>
+                    {createRole !== USER_ROLE_FACULTY && <option value="">Leave unset</option>}
                     {masterSchools.map((school) => (
                       <option key={school} value={school}>
                         {school}
@@ -933,7 +952,7 @@ const UsersManagement = () => {
                   </select>
                 </label>
               )}
-              {creatingTester && !superAdmin && actorSchools.length === 1 && (
+              {creatingSingleSchool && !superAdmin && actorSchools.length === 1 && (
                 <label>
                   School
                   <div className="user-school-readonly" aria-label="School">
@@ -941,7 +960,7 @@ const UsersManagement = () => {
                   </div>
                 </label>
               )}
-              {creatingTester && !superAdmin && actorSchools.length > 1 && (
+              {creatingSingleSchool && !superAdmin && actorSchools.length > 1 && (
                 <label>
                   School
                   <select
@@ -976,7 +995,7 @@ const UsersManagement = () => {
             <button
               type="submit"
               className="users-primary-button"
-              disabled={creating || createBlocked || createSchoolMissing}
+              disabled={creating || createBlocked || createSchoolMissing || createFacultySchoolMissing}
             >
               {creating ? 'Creating...' : 'Create User'}
             </button>
@@ -1065,7 +1084,9 @@ const UsersManagement = () => {
                 : locked
                   ? [currentRole]
                   : assignableRoles.filter((role) => role !== USER_ROLE_SUPERADMIN);
-              const schoolTagIsList = currentRole === USER_ROLE_ADMIN;
+              const draftRole = draft.role || currentRole;
+              const schoolTagIsList = draftRole === USER_ROLE_ADMIN;
+              const editingFaculty = draftRole === USER_ROLE_FACULTY;
               const schoolTagLabel = roleIsSuperAdmin || schoolTagIsList ? 'Schools' : 'School';
               const assignedSchools = normalizeSchoolList(draft.schools);
               const schoolTagValue = roleIsSuperAdmin
@@ -1222,7 +1243,7 @@ const UsersManagement = () => {
                             onChange={(e) => handleDraftChange(item.id, 'school', e.target.value)}
                             disabled={savingId === item.id}
                           >
-                            <option value="">Leave unset</option>
+                            {!editingFaculty && <option value="">Leave unset</option>}
                             {schoolChoices.map((school) => (
                               <option key={school} value={school}>{school}</option>
                             ))}
@@ -1234,7 +1255,7 @@ const UsersManagement = () => {
                         )}
                       </label>
                     )}
-                    {superAdmin && !isSelf && currentRole === USER_ROLE_ADMIN && (
+                    {superAdmin && !isSelf && (currentRole === USER_ROLE_ADMIN || currentRole === USER_ROLE_FACULTY) && (
                       <>
                         <label>
                           Access start

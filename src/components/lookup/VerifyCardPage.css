@@ -33,6 +33,7 @@
 }
 
 .verify-status-badge--invalid,
+.verify-status-badge--revoked,
 .verify-status-badge--error {
   background: rgba(11, 45, 74, 0.08);
   color: #0B2D4A;
