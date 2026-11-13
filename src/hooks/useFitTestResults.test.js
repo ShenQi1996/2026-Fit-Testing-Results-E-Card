@@ -35,7 +35,7 @@ const record = {
   issueDate: '10/01/2026',
   testLocation: 'Harlem',
   recipientEmail: 'ada@example.com',
-  style: 'Filtering facepiece',
+  style: 'Cup (molded)',
   fitTestMethod: 'Qualitative',
 };
 
@@ -353,4 +353,46 @@ test('a successful soft delete removes the record from the list', async () => {
 
   expect(apiRef.current.error).toBe('');
   expect(apiRef.current.fitTests).toEqual([]);
+});
+
+test('a legacy edit with an earlier style value opens blank and must pick a new style', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, style: 'Filtering facepiece' });
+  });
+  expect(apiRef.current.editData.style).toBe('');
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+  expect(updateFitTest).not.toHaveBeenCalled();
+  expect(apiRef.current.editError).toBe('Please select the respirator style.');
+
+  await act(async () => {
+    apiRef.current.handleEditChange('style', 'Duckbill');
+  });
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+  expect(updateFitTest).toHaveBeenCalledTimes(1);
+  expect(updateFitTest.mock.calls[0][1].style).toBe('Duckbill');
+});
+
+test('a legacy edit with no style saves once a style is chosen', async () => {
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, style: undefined });
+  });
+  expect(apiRef.current.editData.style).toBe('');
+  await act(async () => {
+    apiRef.current.handleEditChange('style', 'Flat-fold');
+  });
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+  expect(updateFitTest).toHaveBeenCalledTimes(1);
+  expect(updateFitTest.mock.calls[0][1].style).toBe('Flat-fold');
 });

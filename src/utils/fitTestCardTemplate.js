@@ -185,7 +185,7 @@ export const generateFitTestCard = (formData) => {
                                 ${style ? `
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Style:</td>
-                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${style}</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${escapeHtml(style)}</td>
                                 </tr>
                                 ` : ''}
                                 <tr>

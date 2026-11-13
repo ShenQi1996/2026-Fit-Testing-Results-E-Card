@@ -36,3 +36,10 @@ test('only legacy Quantitative records display a fit factor', () => {
   expect(legacyFitFactorDisplay({ fitTestMethod: 'Quantitative', fitFactor: '' })).toBe('');
   expect(legacyFitFactorDisplay(null)).toBe('');
 });
+
+test('card copies carry the respirator style and tolerate a legacy record without one', () => {
+  expect(toVerifyCardData({ ...legacy, style: 'Cup (molded)' }).style).toBe('Cup (molded)');
+  expect(toLookupCardData({ ...legacy, style: 'Cup (molded)' }).style).toBe('Cup (molded)');
+  expect(() => toVerifyCardData(legacy)).not.toThrow();
+  expect(() => toLookupCardData(legacy)).not.toThrow();
+});
