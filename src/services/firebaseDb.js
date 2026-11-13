@@ -54,6 +54,7 @@ import {
   isSuperAdmin,
 } from '../utils/roles';
 import { normalizeSchoolList } from '../utils/schoolScope';
+import { toLookupCardData, toVerifyCardData } from '../utils/cardCopies';
 
 const FIT_TESTS_COLLECTION = 'fitTests';
 const FIT_TEST_DELETION_LOGS_COLLECTION = 'fitTestDeletionLogs';
@@ -62,46 +63,6 @@ const FIT_TEST_VERIFICATIONS_COLLECTION = 'fitTestVerifications';
 const FIT_TEST_MEDICAL_NOTES_COLLECTION = 'fitTestMedicalNotes';
 const USERS_COLLECTION = 'users';
 const MEDICAL_NOTE_MAX_LENGTH = 2000;
-
-const LOOKUP_CARD_FIELDS = [
-  'recipientEmail',
-  'clientName',
-  'dob',
-  'testLocation',
-  'issueDate',
-  'expirationDate',
-  'fitTestType',
-  'respiratorMfg',
-  'testingAgent',
-  'maskSize',
-  'model',
-  'style',
-  'fitTestMethod',
-  'result',
-  'fitTester',
-  'verificationToken',
-  // Carried for resend; the emailed card does not print them.
-  'programAdministratorName',
-  'programAdministratorContact',
-];
-
-const VERIFY_CARD_FIELDS = [
-  'clientName',
-  'testLocation',
-  'issueDate',
-  'expirationDate',
-  'fitTestType',
-  'respiratorMfg',
-  'maskSize',
-  'model',
-  'style',
-  'fitTestMethod',
-  'result',
-  'fitTester',
-  // Stored on the verification record; the public verify page does not list them.
-  'programAdministratorName',
-  'programAdministratorContact',
-];
 
 const MEDICAL_NOTE_FIELDS = [
   'testerMedicalRestrictionsReceived',
@@ -153,22 +114,6 @@ const applyMedicalNote = (test, note) => {
     testerMedicalRestrictionsReceived: note.testerMedicalRestrictionsReceived,
     testerMedicalRestrictionsNote: note.testerMedicalRestrictionsNote || '',
   };
-};
-
-const toLookupCardData = (record = {}) => {
-  const data = {};
-  LOOKUP_CARD_FIELDS.forEach((field) => {
-    data[field] = record[field] || '';
-  });
-  return data;
-};
-
-const toVerifyCardData = (record = {}) => {
-  const data = {};
-  VERIFY_CARD_FIELDS.forEach((field) => {
-    data[field] = record[field] || '';
-  });
-  return data;
 };
 
 const resolveVerificationToken = (record = {}) => {
@@ -272,6 +217,24 @@ export const USER_STATUSES = [
   USER_STATUS_APPROVED,
   USER_STATUS_REJECTED,
 ];
+
+// Firestore SDK errors carry a lowercase code such as 'permission-denied'.
+// Keep it on the message so staff and QA can tell a rules rejection from a
+// network problem instead of seeing only the generic text.
+const FIRESTORE_ERROR_CODE = /^[a-z]+(-[a-z]+)*$/;
+
+const withFirestoreCode = (action, error) => {
+  const code = typeof error?.code === 'string' && FIRESTORE_ERROR_CODE.test(error.code)
+    ? error.code
+    : '';
+  const wrapped = new Error(
+    code
+      ? `Failed to ${action} fit test record (${code}). Please try again.`
+      : `Failed to ${action} fit test record. Please try again.`
+  );
+  if (code) wrapped.code = code;
+  return wrapped;
+};
 
 const permissionError = (message) => {
   const error = new Error(message);
@@ -1194,7 +1157,7 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     ) {
       throw error;
     }
-    throw new Error('Failed to update fit test record. Please try again.');
+    throw withFirestoreCode('update', error);
   }
 };
 
@@ -1336,7 +1299,7 @@ export const deleteFitTest = async (fitTestId, userId, reason) => {
       || error.message === 'This fit test record is already hidden.') {
       throw error;
     }
-    throw new Error('Failed to delete fit test record. Please try again.');
+    throw withFirestoreCode('delete', error);
   }
 };
 

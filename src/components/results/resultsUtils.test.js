@@ -17,3 +17,18 @@ test('an in-app resend carries the program administrator fields on the record', 
     programAdministratorContact: '',
   }));
 });
+
+test('the card and PDF data carry the fit factor only for legacy Quantitative records', () => {
+  expect(getEcardFormDataFromTest({
+    clientName: 'Legacy Quant',
+    fitTestMethod: 'Quantitative',
+    fitFactor: 180,
+  })).toEqual(expect.objectContaining({ fitTestMethod: 'Quantitative', fitFactor: '180' }));
+
+  expect(getEcardFormDataFromTest({
+    clientName: 'Qual',
+    fitTestMethod: 'Qualitative',
+    fitFactor: 100,
+  })).not.toHaveProperty('fitFactor');
+  expect(getEcardFormDataFromTest({ clientName: 'New' })).not.toHaveProperty('fitFactor');
+});

@@ -23,6 +23,8 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 
+import { toLookupCardData, toVerifyCardData } from '../src/utils/cardCopies';
+
 const RULES = fs.readFileSync('firestore.rules', 'utf8');
 
 let testEnv;
@@ -2672,5 +2674,177 @@ test('a hidden fit test cannot gain a card, and a revoke is allowed only after i
   }));
   await assertFails(updateDoc(doc(outsideDb, 'fitTestLookups/live-lookup'), {
     revokedAt: serverTimestamp(),
+  }));
+});
+
+// Legacy Quantitative records are the only ones with a stored fitFactor. The card
+// copies below are built with the same helpers the app uses, so a copy that drops
+// fitFactor fails here the way it failed on staging.
+const legacyQuantParent = (extra = {}) => ({
+  userId: 'tester-1',
+  schoolsList: HELENE,
+  clientName: 'Ada',
+  dob: '01/01/1990',
+  recipientEmail: 'ada@example.com',
+  testLocation: 'Harlem',
+  issueDate: '01/15/2026',
+  expirationDate: '01/15/2027',
+  fitTestType: 'Annual',
+  testingAgent: 'Bitrex',
+  result: 'Pass',
+  fitTester: 'Sam',
+  programAdministratorName: 'Ada SchoolAdmin',
+  programAdministratorContact: 'ada-school@example.com',
+  ...respiratorRecord({ fitTestMethod: 'Quantitative', fitFactor: 180 }),
+  ...extra,
+});
+
+test('a legacy Quantitative record accepts card copies that carry its stored fit factor', async () => {
+  const token = 'd'.repeat(32);
+  const parent = legacyQuantParent({ lookupKey: 'legacy-lookup', verificationToken: token });
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['fitTests/legacy-1', parent],
+  ]);
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+
+  const verification = {
+    ...toVerifyCardData({ ...parent, verificationToken: token }),
+    userId: 'tester-1',
+    fitTestId: 'legacy-1',
+    verificationToken: token,
+    updatedAt: serverTimestamp(),
+  };
+  const lookup = {
+    ...toLookupCardData(parent),
+    userId: 'tester-1',
+    fitTestId: 'legacy-1',
+    lookupKey: 'legacy-lookup',
+    testCreatedAtMs: 1,
+    updatedAt: serverTimestamp(),
+  };
+  expect(verification.fitFactor).toBe(180);
+  expect(lookup.fitFactor).toBe(180);
+
+  // The copy the app wrote before this fix: fitFactor dropped, so it no longer matches the parent.
+  const { fitFactor: droppedVerify, ...verificationWithoutFactor } = verification;
+  const { fitFactor: droppedLookup, ...lookupWithoutFactor } = lookup;
+  expect(droppedVerify).toBe(180);
+  expect(droppedLookup).toBe(180);
+  await assertFails(setDoc(doc(adminDb, `fitTestVerifications/${token}`), verificationWithoutFactor));
+  await assertFails(setDoc(doc(adminDb, 'fitTestLookups/legacy-lookup'), lookupWithoutFactor));
+
+  await assertSucceeds(setDoc(doc(adminDb, `fitTestVerifications/${token}`), verification));
+  await assertSucceeds(setDoc(doc(adminDb, 'fitTestLookups/legacy-lookup'), lookup));
+  // A changed fit factor still does not match the parent.
+  await assertFails(setDoc(doc(adminDb, `fitTestVerifications/${token}`), { ...verification, fitFactor: 200 }));
+  await assertFails(setDoc(doc(adminDb, 'fitTestLookups/legacy-lookup'), { ...lookup, fitFactor: 200 }));
+});
+
+test('a qualitative record gets card copies with no fit factor key', async () => {
+  const token = 'e'.repeat(32);
+  const parent = {
+    ...legacyQuantParent({ lookupKey: 'qual-lookup', verificationToken: token }),
+    fitTestMethod: 'Qualitative',
+  };
+  delete parent.fitFactor;
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['fitTests/qual-1', parent],
+  ]);
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const verification = {
+    ...toVerifyCardData({ ...parent, verificationToken: token }),
+    userId: 'tester-1',
+    fitTestId: 'qual-1',
+    verificationToken: token,
+    updatedAt: serverTimestamp(),
+  };
+  expect(Object.prototype.hasOwnProperty.call(verification, 'fitFactor')).toBe(false);
+  await assertSucceeds(setDoc(doc(adminDb, `fitTestVerifications/${token}`), verification));
+  await assertFails(setDoc(doc(adminDb, `fitTestVerifications/${token}`), { ...verification, fitFactor: 100 }));
+});
+
+test('soft delete can hand the lookup to a legacy Quantitative sibling', async () => {
+  const newToken = 'f'.repeat(32);
+  const legacyToken = '1'.repeat(32);
+  const newer = {
+    ...legacyQuantParent({
+      lookupKey: 'shared-lookup',
+      verificationToken: newToken,
+      issueDate: '10/01/2026',
+      expirationDate: '10/01/2027',
+    }),
+    fitTestMethod: 'Qualitative',
+  };
+  delete newer.fitFactor;
+  const legacy = legacyQuantParent({ lookupKey: 'shared-lookup', verificationToken: legacyToken });
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['fitTests/new-1', newer],
+    ['fitTests/legacy-1', legacy],
+    ['fitTestLookups/shared-lookup', {
+      ...toLookupCardData(newer),
+      userId: 'tester-1',
+      fitTestId: 'new-1',
+      lookupKey: 'shared-lookup',
+      testCreatedAtMs: 2,
+    }],
+    [`fitTestVerifications/${newToken}`, {
+      ...toVerifyCardData(newer),
+      userId: 'tester-1',
+      fitTestId: 'new-1',
+      verificationToken: newToken,
+    }],
+  ]);
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+
+  // Same writes, in the same order, as deleteFitTest's batch.
+  const softDelete = (siblingCopy) => {
+    const batch = writeBatch(adminDb);
+    batch.update(doc(adminDb, 'fitTests/new-1'), {
+      deletedAt: serverTimestamp(),
+      deletedBy: 'admin-1',
+      deleteReason: 'Duplicate entry',
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(adminDb, 'fitTestDeletionLogs/new-1'), {
+      fitTestId: 'new-1',
+      userId: 'tester-1',
+      schoolsList: HELENE,
+      deletedAt: serverTimestamp(),
+      deletedBy: 'admin-1',
+      deleteReason: 'Duplicate entry',
+    });
+    batch.update(doc(adminDb, `fitTestVerifications/${newToken}`), {
+      revokedAt: serverTimestamp(),
+    });
+    batch.set(doc(adminDb, 'fitTestLookups/shared-lookup'), {
+      ...siblingCopy,
+      userId: 'tester-1',
+      fitTestId: 'legacy-1',
+      lookupKey: 'shared-lookup',
+      testCreatedAtMs: 1,
+      updatedAt: serverTimestamp(),
+    });
+    return batch.commit();
+  };
+
+  const { fitFactor: dropped, ...siblingWithoutFactor } = toLookupCardData(legacy);
+  expect(dropped).toBe(180);
+  await assertFails(softDelete(siblingWithoutFactor));
+  await assertSucceeds(softDelete(toLookupCardData(legacy)));
+
+  let handedOff;
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    handedOff = await getDoc(doc(context.firestore(), 'fitTestLookups/shared-lookup'));
+  });
+  expect(handedOff.data()).toEqual(expect.objectContaining({
+    fitTestId: 'legacy-1',
+    fitTestMethod: 'Quantitative',
+    fitFactor: 180,
   }));
 });

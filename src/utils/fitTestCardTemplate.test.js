@@ -29,3 +29,25 @@ test('the emailed e-card does not print program administrator fields', () => {
   expect(html).not.toContain('ada-admin@example.com');
   expect(html).not.toContain('Program Administrator');
 });
+
+test('a legacy Quantitative e-card prints its stored fit factor', () => {
+  const html = generateFitTestCard({
+    clientName: 'Ada',
+    fitTestMethod: 'Quantitative',
+    fitFactor: 180,
+  });
+  expect(html).toContain('Quantitative');
+  expect(html).toContain('Fit Factor:');
+  expect(html).toMatch(/Fit Factor:<\/td>\s*<td[^>]*>180<\/td>/);
+
+  const noFactor = generateFitTestCard({ clientName: 'Ada', fitTestMethod: 'Quantitative' });
+  expect(noFactor).not.toContain('Fit Factor');
+
+  const escaped = generateFitTestCard({
+    clientName: 'Ada',
+    fitTestMethod: 'Quantitative',
+    fitFactor: '<b>99</b>',
+  });
+  expect(escaped).toContain('&lt;b&gt;99&lt;/b&gt;');
+  expect(escaped).not.toContain('<b>99</b>');
+});

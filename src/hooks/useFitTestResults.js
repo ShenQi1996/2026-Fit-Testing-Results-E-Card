@@ -223,7 +223,7 @@ export const useFitTestResults = () => {
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
       console.error('Error deleting fit test:', err);
-      setError('Failed to delete fit test record. Please try again.');
+      setError(err?.message || 'Failed to delete fit test record. Please try again.');
       setDeleteConfirm(null);
     } finally {
       setDeleting(false);

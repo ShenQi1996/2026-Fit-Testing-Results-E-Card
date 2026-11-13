@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../context/AuthContext';
-import { getFacultyFitTests, getUserFitTests, updateFitTest } from '../services/firebaseDb';
+import { deleteFitTest, getFacultyFitTests, getUserFitTests, updateFitTest } from '../services/firebaseDb';
 import { useFitTestResults } from './useFitTestResults';
 
 jest.mock('../context/AuthContext', () => ({
@@ -299,4 +299,58 @@ test('faculty outside the access window do not load results', async () => {
   expect(getUserFitTests).not.toHaveBeenCalled();
   expect(apiRef.current.fitTests).toEqual([]);
   expect(apiRef.current.loading).toBe(false);
+});
+
+const confirmDelete = async (apiRef, reason = 'Duplicate entry') => {
+  await act(async () => {
+    apiRef.current.handleDeleteClick('ft-1', 'Ada Lovelace');
+  });
+  await act(async () => {
+    apiRef.current.handleDeleteReasonChange(reason);
+  });
+  await act(async () => {
+    await apiRef.current.handleDeleteConfirm();
+  });
+};
+
+test('a soft delete that Firestore rejects shows the real error code', async () => {
+  const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  const failure = new Error('Failed to delete fit test record (permission-denied). Please try again.');
+  failure.code = 'permission-denied';
+  deleteFitTest.mockRejectedValue(failure);
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await confirmDelete(apiRef);
+
+  expect(deleteFitTest).toHaveBeenCalledWith('ft-1', 'admin-1', 'Duplicate entry');
+  expect(apiRef.current.error).toBe('Failed to delete fit test record (permission-denied). Please try again.');
+  expect(apiRef.current.fitTests.map((test) => test.id)).toEqual(['ft-1']);
+  expect(consoleError).toHaveBeenCalledWith('Error deleting fit test:', failure);
+  consoleError.mockRestore();
+});
+
+test('a soft delete outside the admin schools shows that reason, not the generic message', async () => {
+  const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  const failure = new Error('You can only remove fit tests for your schools.');
+  failure.code = 'PERMISSION_DENIED';
+  deleteFitTest.mockRejectedValue(failure);
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await confirmDelete(apiRef);
+
+  expect(apiRef.current.error).toBe('You can only remove fit tests for your schools.');
+  consoleError.mockRestore();
+});
+
+test('a successful soft delete removes the record from the list', async () => {
+  deleteFitTest.mockResolvedValue(undefined);
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await confirmDelete(apiRef);
+
+  expect(apiRef.current.error).toBe('');
+  expect(apiRef.current.fitTests).toEqual([]);
 });

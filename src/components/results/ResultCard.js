@@ -17,6 +17,7 @@ import {
 } from './resultsUtils';
 import ResultCardEditForm from './ResultCardEditForm';
 import { isAdminOrAbove, isFaculty } from '../../utils/roles';
+import { legacyFitFactorDisplay } from '../../utils/cardCopies';
 
 const ResultRow = ({ label, value, wrap = false, style }) => (
   <div className="result-row">
@@ -51,6 +52,9 @@ const ResultCardView = ({ test, expanded, onToggleExpand }) => (
       <ResultRow label="Fit Test Type:" value={test.fitTestType || 'N/A'} />
       {canonicalFitTestMethod(test.fitTestMethod) && (
         <ResultRow label="Fit Test Method:" value={canonicalFitTestMethod(test.fitTestMethod)} />
+      )}
+      {legacyFitFactorDisplay(test) && (
+        <ResultRow label="Fit Factor:" value={legacyFitFactorDisplay(test)} />
       )}
       <ResultRow label="Fit Tester:" value={test.fitTester || 'N/A'} />
       {test.recipientEmail && (
