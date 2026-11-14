@@ -13,6 +13,7 @@ import { sendFitTestCard } from '../services/emailService';
 import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../utils/csvUtils';
 import { TEST_LOCATION_OPTIONS, isRespiratorStyle } from '../constants/fitTestOptions';
+import { isDeleteFieldSentinel } from '../utils/cardCopies';
 import {
   FILTER_ALL,
   getMonthKeyFromTest,
@@ -398,9 +399,17 @@ export const useFitTestResults = () => {
       }
       await updateFitTest(testId, updates, user.uid);
 
-      setFitTests((prev) => prev.map((test) =>
-        test.id === testId ? { ...test, ...updates } : test
-      ));
+      // Local state mirrors the stored record, so a deleteField() sentinel
+      // removes the field here instead of being kept and copied into a later
+      // verification or lookup set().
+      setFitTests((prev) => prev.map((test) => {
+        if (test.id !== testId) return test;
+        const next = { ...test, ...updates };
+        Object.keys(next).forEach((field) => {
+          if (isDeleteFieldSentinel(next[field])) delete next[field];
+        });
+        return next;
+      }));
 
       setSuccessMessage('Record updated successfully!');
       setEditing(null);

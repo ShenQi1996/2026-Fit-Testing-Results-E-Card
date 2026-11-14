@@ -1,7 +1,14 @@
 import React, { useEffect } from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../context/AuthContext';
-import { deleteFitTest, getFacultyFitTests, getUserFitTests, updateFitTest } from '../services/firebaseDb';
+import {
+  deleteFitTest,
+  ensureFitTestVerification,
+  getFacultyFitTests,
+  getUserFitTests,
+  updateFitTest,
+} from '../services/firebaseDb';
+import { previewFitTestPdf } from '../utils/pdfUtils';
 import { useFitTestResults } from './useFitTestResults';
 
 jest.mock('../context/AuthContext', () => ({
@@ -395,4 +402,33 @@ test('a legacy edit with no style saves once a style is chosen', async () => {
   });
   expect(updateFitTest).toHaveBeenCalledTimes(1);
   expect(updateFitTest.mock.calls[0][1].style).toBe('Flat-fold');
+});
+
+test('a Qualitative edit removes fitFactor from the list instead of keeping the deleteField sentinel', async () => {
+  getUserFitTests.mockResolvedValue([{ ...record, fitFactor: 100 }]);
+  ensureFitTestVerification.mockImplementation(async (test) => test);
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    apiRef.current.handleEditClick({ ...record, fitFactor: 100 });
+  });
+  await act(async () => {
+    await apiRef.current.handleEditSave('ft-1');
+  });
+  expect(updateFitTest).toHaveBeenCalledWith(
+    'ft-1',
+    expect.objectContaining({ fitFactor: { kind: 'deleteField' } }),
+    'admin-1',
+  );
+
+  const listed = apiRef.current.fitTests.find((test) => test.id === 'ft-1');
+  expect(listed).not.toHaveProperty('fitFactor');
+
+  await act(async () => {
+    await apiRef.current.handlePreviewResultPdf(listed);
+  });
+  const passed = ensureFitTestVerification.mock.calls[0][0];
+  expect(passed).not.toHaveProperty('fitFactor');
+  expect(previewFitTestPdf).toHaveBeenCalled();
 });

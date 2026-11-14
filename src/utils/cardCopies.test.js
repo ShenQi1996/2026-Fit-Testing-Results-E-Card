@@ -1,4 +1,5 @@
 import {
+  isDeleteFieldSentinel,
   legacyFitFactorDisplay,
   toLookupCardData,
   toVerifyCardData,
@@ -42,4 +43,22 @@ test('card copies carry the respirator style and tolerate a legacy record withou
   expect(toLookupCardData({ ...legacy, style: 'Cup (molded)' }).style).toBe('Cup (molded)');
   expect(() => toVerifyCardData(legacy)).not.toThrow();
   expect(() => toLookupCardData(legacy)).not.toThrow();
+});
+
+test('card copies drop deleteField sentinels instead of copying them into set()', () => {
+  const edited = {
+    clientName: 'Ada',
+    fitTestMethod: 'Qualitative',
+    result: 'Pass',
+    fitFactor: { kind: 'deleteField' },
+    style: { _methodName: 'deleteField' },
+  };
+  expect(isDeleteFieldSentinel(edited.fitFactor)).toBe(true);
+  expect(isDeleteFieldSentinel(edited.style)).toBe(true);
+  expect(isDeleteFieldSentinel(180)).toBe(false);
+  expect(isDeleteFieldSentinel(null)).toBe(false);
+  [toVerifyCardData(edited), toLookupCardData(edited)].forEach((copy) => {
+    expect(copy).not.toHaveProperty('fitFactor');
+    expect(copy.style).toBe('');
+  });
 });

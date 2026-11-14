@@ -963,3 +963,56 @@ test('a qualitative record writes card copies without a fit factor', async () =>
   expect(writes.length).toBeGreaterThan(0);
   writes.forEach((write) => expect(write).not.toHaveProperty('fitFactor'));
 });
+
+test('a soft delete never reads the medical note and deletes it in the batch', async () => {
+  // Records with no note doc failed here: the note get rule reads resource.data,
+  // which errors on a missing doc and came back as permission-denied.
+  getDoc.mockImplementation(async (ref) => {
+    if (ref?.args?.[1] === 'fitTestMedicalNotes') {
+      throw Object.assign(new Error('Null value error.'), { code: 'permission-denied' });
+    }
+    return liveFitTestForDelete(ref);
+  });
+
+  await deleteFitTest('live-1', 'admin-1', 'Duplicate entry');
+
+  const noteReads = getDoc.mock.calls.filter((call) => call[0]?.args?.[1] === 'fitTestMedicalNotes');
+  expect(noteReads).toHaveLength(0);
+  const batch = writeBatch.mock.results[0].value;
+  expect(batch.commit).toHaveBeenCalledTimes(1);
+  const noteDelete = batch.delete.mock.calls.find((call) => call[0].args[1] === 'fitTestMedicalNotes');
+  expect(noteDelete[0].args.slice(1)).toEqual(['fitTestMedicalNotes', 'live-1']);
+});
+
+test('card copies from a record holding a deleteField sentinel never carry it into setDoc', async () => {
+  getDoc.mockImplementation(async (ref) => (
+    ref?.args?.[1] === 'users'
+      ? userDoc('tester', { school: 'Helene College of Nursing' })
+      : { exists: () => false, data: () => null }
+  ));
+  setDoc.mockClear();
+
+  const returned = await ensureFitTestVerification({
+    id: 'ft-edited',
+    userId: 'tester-1',
+    clientName: 'Ada Lovelace',
+    dob: '01/02/1990',
+    recipientEmail: 'ada@example.com',
+    result: 'Pass',
+    fitTestMethod: 'Qualitative',
+    fitFactor: { kind: 'deleteField' },
+  }, 'tester-1');
+
+  const hasSentinel = (value) => Object.values(value || {}).some((field) => (
+    field && typeof field === 'object' && field.kind === 'deleteField'
+  ));
+  const cardWrites = setDoc.mock.calls.filter((call) => (
+    ['fitTestLookups', 'fitTestVerifications'].includes(call[0].args[1])
+  ));
+  expect(cardWrites).toHaveLength(2);
+  cardWrites.forEach((call) => {
+    expect(call[1]).not.toHaveProperty('fitFactor');
+    expect(hasSentinel(call[1])).toBe(false);
+  });
+  expect(returned).not.toHaveProperty('fitFactor');
+});
