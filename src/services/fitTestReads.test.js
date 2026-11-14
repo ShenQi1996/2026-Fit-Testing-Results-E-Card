@@ -848,3 +848,171 @@ test('resend and verify lookups return the program administrator fields on file'
   const verified = await lookupFitTestForVerification('ab'.repeat(16));
   expect(verified.card).toEqual(expect.objectContaining(PROGRAM_ADMIN));
 });
+
+const liveFitTestForDelete = (ref) => {
+  if (ref?.args?.[1] === 'users') return userDoc('admin');
+  if (ref?.args?.[1] === 'fitTests') {
+    return {
+      exists: () => true,
+      id: ref?.args?.[2],
+      data: () => ({
+        userId: 'tester-1',
+        clientName: 'Ada',
+        schoolsList: 'Helene College of Nursing',
+      }),
+    };
+  }
+  return { exists: () => false, data: () => null };
+};
+
+test('a soft delete that Firestore rejects keeps the Firestore error code', async () => {
+  const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  getDoc.mockImplementation(async (ref) => liveFitTestForDelete(ref));
+  const denied = Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
+  writeBatch.mockImplementation(() => ({
+    delete: jest.fn(),
+    update: jest.fn(),
+    set: jest.fn(),
+    commit: jest.fn(async () => { throw denied; }),
+  }));
+
+  const attempt = deleteFitTest('live-1', 'admin-1', 'Duplicate entry');
+  await expect(attempt).rejects.toThrow(
+    'Failed to delete fit test record (permission-denied). Please try again.'
+  );
+  await expect(attempt).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(consoleError).toHaveBeenCalledWith('Error deleting fit test:', denied);
+  consoleError.mockRestore();
+});
+
+test('a soft delete that fails without a Firestore code keeps the generic message', async () => {
+  const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  getDoc.mockImplementation(async (ref) => liveFitTestForDelete(ref));
+  writeBatch.mockImplementation(() => ({
+    delete: jest.fn(),
+    update: jest.fn(),
+    set: jest.fn(),
+    commit: jest.fn(async () => { throw new Error('boom'); }),
+  }));
+
+  await expect(deleteFitTest('live-1', 'admin-1', 'Duplicate entry')).rejects.toThrow(
+    /^Failed to delete fit test record\. Please try again\.$/
+  );
+  consoleError.mockRestore();
+});
+
+test('a legacy Quantitative record carries its fit factor to the lookup, verification, and verify page', async () => {
+  getDoc.mockImplementation(async (ref) => (
+    ref?.args?.[1] === 'users'
+      ? userDoc('tester', { school: 'Helene College of Nursing' })
+      : { exists: () => false, data: () => null }
+  ));
+  setDoc.mockClear();
+
+  await ensureFitTestVerification({
+    id: 'ft-quant',
+    userId: 'tester-1',
+    clientName: 'Ada Lovelace',
+    dob: '01/02/1990',
+    recipientEmail: 'ada@example.com',
+    result: 'Pass',
+    fitTestMethod: 'Quantitative',
+    fitFactor: 180,
+  }, 'tester-1');
+
+  const writeTo = (collectionName) => setDoc.mock.calls
+    .find((call) => call[0].args[1] === collectionName)?.[1];
+  expect(writeTo('fitTestLookups')).toEqual(expect.objectContaining({ fitFactor: 180 }));
+  expect(writeTo('fitTestVerifications')).toEqual(expect.objectContaining({ fitFactor: 180 }));
+
+  getDoc.mockResolvedValue({
+    exists: () => true,
+    id: 'token',
+    data: () => ({
+      clientName: 'Ada Lovelace',
+      issueDate: '01/15/2026',
+      expirationDate: '01/15/2099',
+      result: 'Pass',
+      fitTestMethod: 'Quantitative',
+      fitFactor: 180,
+    }),
+  });
+  const verified = await lookupFitTestForVerification('ab'.repeat(16));
+  expect(verified.card).toEqual(expect.objectContaining({ fitTestMethod: 'Quantitative', fitFactor: 180 }));
+});
+
+test('a qualitative record writes card copies without a fit factor', async () => {
+  getDoc.mockImplementation(async (ref) => (
+    ref?.args?.[1] === 'users'
+      ? userDoc('tester', { school: 'Helene College of Nursing' })
+      : { exists: () => false, data: () => null }
+  ));
+  setDoc.mockClear();
+
+  await ensureFitTestVerification({
+    id: 'ft-qual',
+    userId: 'tester-1',
+    clientName: 'Ada Lovelace',
+    dob: '01/02/1990',
+    recipientEmail: 'ada@example.com',
+    result: 'Pass',
+    fitTestMethod: 'Qualitative',
+  }, 'tester-1');
+
+  const writes = setDoc.mock.calls.map((call) => call[1]);
+  expect(writes.length).toBeGreaterThan(0);
+  writes.forEach((write) => expect(write).not.toHaveProperty('fitFactor'));
+});
+
+test('a soft delete never reads the medical note and deletes it in the batch', async () => {
+  // Records with no note doc failed here: the note get rule reads resource.data,
+  // which errors on a missing doc and came back as permission-denied.
+  getDoc.mockImplementation(async (ref) => {
+    if (ref?.args?.[1] === 'fitTestMedicalNotes') {
+      throw Object.assign(new Error('Null value error.'), { code: 'permission-denied' });
+    }
+    return liveFitTestForDelete(ref);
+  });
+
+  await deleteFitTest('live-1', 'admin-1', 'Duplicate entry');
+
+  const noteReads = getDoc.mock.calls.filter((call) => call[0]?.args?.[1] === 'fitTestMedicalNotes');
+  expect(noteReads).toHaveLength(0);
+  const batch = writeBatch.mock.results[0].value;
+  expect(batch.commit).toHaveBeenCalledTimes(1);
+  const noteDelete = batch.delete.mock.calls.find((call) => call[0].args[1] === 'fitTestMedicalNotes');
+  expect(noteDelete[0].args.slice(1)).toEqual(['fitTestMedicalNotes', 'live-1']);
+});
+
+test('card copies from a record holding a deleteField sentinel never carry it into setDoc', async () => {
+  getDoc.mockImplementation(async (ref) => (
+    ref?.args?.[1] === 'users'
+      ? userDoc('tester', { school: 'Helene College of Nursing' })
+      : { exists: () => false, data: () => null }
+  ));
+  setDoc.mockClear();
+
+  const returned = await ensureFitTestVerification({
+    id: 'ft-edited',
+    userId: 'tester-1',
+    clientName: 'Ada Lovelace',
+    dob: '01/02/1990',
+    recipientEmail: 'ada@example.com',
+    result: 'Pass',
+    fitTestMethod: 'Qualitative',
+    fitFactor: { kind: 'deleteField' },
+  }, 'tester-1');
+
+  const hasSentinel = (value) => Object.values(value || {}).some((field) => (
+    field && typeof field === 'object' && field.kind === 'deleteField'
+  ));
+  const cardWrites = setDoc.mock.calls.filter((call) => (
+    ['fitTestLookups', 'fitTestVerifications'].includes(call[0].args[1])
+  ));
+  expect(cardWrites).toHaveLength(2);
+  cardWrites.forEach((call) => {
+    expect(call[1]).not.toHaveProperty('fitFactor');
+    expect(hasSentinel(call[1])).toBe(false);
+  });
+  expect(returned).not.toHaveProperty('fitFactor');
+});

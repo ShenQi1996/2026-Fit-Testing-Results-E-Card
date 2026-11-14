@@ -54,6 +54,7 @@ import {
   isSuperAdmin,
 } from '../utils/roles';
 import { normalizeSchoolList } from '../utils/schoolScope';
+import { isDeleteFieldSentinel, toLookupCardData, toVerifyCardData } from '../utils/cardCopies';
 
 const FIT_TESTS_COLLECTION = 'fitTests';
 const FIT_TEST_DELETION_LOGS_COLLECTION = 'fitTestDeletionLogs';
@@ -62,46 +63,6 @@ const FIT_TEST_VERIFICATIONS_COLLECTION = 'fitTestVerifications';
 const FIT_TEST_MEDICAL_NOTES_COLLECTION = 'fitTestMedicalNotes';
 const USERS_COLLECTION = 'users';
 const MEDICAL_NOTE_MAX_LENGTH = 2000;
-
-const LOOKUP_CARD_FIELDS = [
-  'recipientEmail',
-  'clientName',
-  'dob',
-  'testLocation',
-  'issueDate',
-  'expirationDate',
-  'fitTestType',
-  'respiratorMfg',
-  'testingAgent',
-  'maskSize',
-  'model',
-  'style',
-  'fitTestMethod',
-  'result',
-  'fitTester',
-  'verificationToken',
-  // Carried for resend; the emailed card does not print them.
-  'programAdministratorName',
-  'programAdministratorContact',
-];
-
-const VERIFY_CARD_FIELDS = [
-  'clientName',
-  'testLocation',
-  'issueDate',
-  'expirationDate',
-  'fitTestType',
-  'respiratorMfg',
-  'maskSize',
-  'model',
-  'style',
-  'fitTestMethod',
-  'result',
-  'fitTester',
-  // Stored on the verification record; the public verify page does not list them.
-  'programAdministratorName',
-  'programAdministratorContact',
-];
 
 const MEDICAL_NOTE_FIELDS = [
   'testerMedicalRestrictionsReceived',
@@ -153,22 +114,6 @@ const applyMedicalNote = (test, note) => {
     testerMedicalRestrictionsReceived: note.testerMedicalRestrictionsReceived,
     testerMedicalRestrictionsNote: note.testerMedicalRestrictionsNote || '',
   };
-};
-
-const toLookupCardData = (record = {}) => {
-  const data = {};
-  LOOKUP_CARD_FIELDS.forEach((field) => {
-    data[field] = record[field] || '';
-  });
-  return data;
-};
-
-const toVerifyCardData = (record = {}) => {
-  const data = {};
-  VERIFY_CARD_FIELDS.forEach((field) => {
-    data[field] = record[field] || '';
-  });
-  return data;
 };
 
 const resolveVerificationToken = (record = {}) => {
@@ -272,6 +217,24 @@ export const USER_STATUSES = [
   USER_STATUS_APPROVED,
   USER_STATUS_REJECTED,
 ];
+
+// Firestore SDK errors carry a lowercase code such as 'permission-denied'.
+// Keep it on the message so staff and QA can tell a rules rejection from a
+// network problem instead of seeing only the generic text.
+const FIRESTORE_ERROR_CODE = /^[a-z]+(-[a-z]+)*$/;
+
+const withFirestoreCode = (action, error) => {
+  const code = typeof error?.code === 'string' && FIRESTORE_ERROR_CODE.test(error.code)
+    ? error.code
+    : '';
+  const wrapped = new Error(
+    code
+      ? `Failed to ${action} fit test record (${code}). Please try again.`
+      : `Failed to ${action} fit test record. Please try again.`
+  );
+  if (code) wrapped.code = code;
+  return wrapped;
+};
 
 const permissionError = (message) => {
   const error = new Error(message);
@@ -889,6 +852,11 @@ export const ensureFitTestVerification = async (record, userId) => {
   const verificationToken = resolveVerificationToken(record);
   const lookupKey = await resolveLookupKey(record);
   const nextRecord = { ...record, verificationToken, ...(lookupKey ? { lookupKey } : {}) };
+  // A record from local state may still hold a deleteField() sentinel from an
+  // edit. The card copies below are written with setDoc, so drop it here.
+  Object.keys(nextRecord).forEach((field) => {
+    if (isDeleteFieldSentinel(nextRecord[field])) delete nextRecord[field];
+  });
   const parentPatch = {};
   if (record.verificationToken !== verificationToken) parentPatch.verificationToken = verificationToken;
   if (lookupKey && record.lookupKey !== lookupKey) parentPatch.lookupKey = lookupKey;
@@ -946,11 +914,7 @@ const sameStoredValue = (left, right) => {
 
 const editHistoryValue = (value) => (value === undefined ? null : value);
 
-const isDeleteSentinel = (value) => (
-  value != null
-  && typeof value === 'object'
-  && (value.kind === 'deleteField' || value._methodName === 'deleteField')
-);
+const isDeleteSentinel = isDeleteFieldSentinel;
 
 const latestRemainingFitTest = async (lookupKey, removedFitTestId) => {
   if (!lookupKey) return null;
@@ -1194,7 +1158,7 @@ export const updateFitTest = async (fitTestId, updates, userId) => {
     ) {
       throw error;
     }
-    throw new Error('Failed to update fit test record. Please try again.');
+    throw withFirestoreCode('update', error);
   }
 };
 
@@ -1317,11 +1281,12 @@ export const deleteFitTest = async (fitTestId, userId, reason) => {
       }
     }
 
-    const noteRef = doc(db, FIT_TEST_MEDICAL_NOTES_COLLECTION, fitTestId);
-    const noteSnap = await getDoc(noteRef);
-    if (noteSnap.exists()) {
-      batch.delete(noteRef);
-    }
+    // Delete the note without reading it first. Most records, including
+    // legacy ones, have no note doc, and the note read rule uses resource.data,
+    // which fails on a missing doc and surfaced as permission-denied. A batch
+    // delete of a missing doc is a no-op, and the note delete rule checks only
+    // the parent's soft-delete stamp, so this works with or without a note.
+    batch.delete(doc(db, FIT_TEST_MEDICAL_NOTES_COLLECTION, fitTestId));
 
     await batch.commit();
     notifyFitTestActivity();
@@ -1336,7 +1301,7 @@ export const deleteFitTest = async (fitTestId, userId, reason) => {
       || error.message === 'This fit test record is already hidden.') {
       throw error;
     }
-    throw new Error('Failed to delete fit test record. Please try again.');
+    throw withFirestoreCode('delete', error);
   }
 };
 

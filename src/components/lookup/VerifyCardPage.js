@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { canonicalFitTestMethod } from '../../constants/fitTestOptions';
 import { lookupFitTestForVerification } from '../../services/firebaseDb';
+import { legacyFitFactorDisplay } from '../../utils/cardCopies';
 import {
   isValidVerificationToken,
   normalizeVerificationToken,
@@ -52,6 +53,22 @@ const DETAIL_FIELDS = [
   { key: 'fitTester', label: 'Fit tester' },
   { key: 'testLocation', label: 'Test location' },
 ];
+
+// Legacy Quantitative records list their stored fit factor after the method.
+// Qualitative records (every new test) have no fit factor row.
+export const verifyDetailRows = (card) => {
+  if (!card) return [];
+  const rows = [];
+  DETAIL_FIELDS.forEach(({ key, label }) => {
+    const value = key === 'fitTestMethod' ? canonicalFitTestMethod(card[key]) : card[key];
+    rows.push({ key, label, value: value || '—' });
+    if (key === 'fitTestMethod') {
+      const fitFactor = legacyFitFactorDisplay(card);
+      if (fitFactor) rows.push({ key: 'fitFactor', label: 'Fit factor', value: fitFactor });
+    }
+  });
+  return rows;
+};
 
 const MIN_LOADING_MS = 600;
 
@@ -184,11 +201,11 @@ const VerifyCardPage = ({ initialToken = '' }) => {
 
           {card && (status === 'valid' || status === 'expired' || status === 'failed') && (
             <dl className="verify-details">
-              {DETAIL_FIELDS.map(({ key, label }) => (
+              {verifyDetailRows(card).map(({ key, label, value }) => (
                 <div className="verify-details-row" key={key}>
                   <dt>{label}</dt>
                   <dd className={key === 'result' ? `verify-result verify-result--${(card.result || '').toLowerCase()}` : undefined}>
-                    {(key === 'fitTestMethod' ? canonicalFitTestMethod(card[key]) : card[key]) || '—'}
+                    {value}
                   </dd>
                 </div>
               ))}

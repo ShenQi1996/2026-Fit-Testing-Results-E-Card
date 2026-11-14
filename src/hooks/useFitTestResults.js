@@ -13,6 +13,7 @@ import { sendFitTestCard } from '../services/emailService';
 import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../utils/csvUtils';
 import { TEST_LOCATION_OPTIONS } from '../constants/fitTestOptions';
+import { isDeleteFieldSentinel } from '../utils/cardCopies';
 import {
   FILTER_ALL,
   getMonthKeyFromTest,
@@ -223,7 +224,7 @@ export const useFitTestResults = () => {
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
       console.error('Error deleting fit test:', err);
-      setError('Failed to delete fit test record. Please try again.');
+      setError(err?.message || 'Failed to delete fit test record. Please try again.');
       setDeleteConfirm(null);
     } finally {
       setDeleting(false);
@@ -396,9 +397,17 @@ export const useFitTestResults = () => {
       }
       await updateFitTest(testId, updates, user.uid);
 
-      setFitTests((prev) => prev.map((test) =>
-        test.id === testId ? { ...test, ...updates } : test
-      ));
+      // Local state mirrors the stored record, so a deleteField() sentinel
+      // removes the field here instead of being kept and copied into a later
+      // verification or lookup set().
+      setFitTests((prev) => prev.map((test) => {
+        if (test.id !== testId) return test;
+        const next = { ...test, ...updates };
+        Object.keys(next).forEach((field) => {
+          if (isDeleteFieldSentinel(next[field])) delete next[field];
+        });
+        return next;
+      }));
 
       setSuccessMessage('Record updated successfully!');
       setEditing(null);
