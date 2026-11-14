@@ -15,8 +15,14 @@ import {
   saveUserSolutionProfile,
 } from '../services/firebaseDb';
 import { getMasterSchoolRecord, listMasterSchoolRecords } from '../services/masterSchools';
+import {
+  deleteFitTestDraft,
+  draftToFormFields,
+  listFitTestDrafts,
+  saveFitTestDraft,
+} from '../services/fitTestDraftsDb';
 import { TESTING_AGENT_OPTIONS } from '../constants/fitTestOptions';
-import { isSuperAdmin } from '../utils/roles';
+import { isFaculty, isSuperAdmin } from '../utils/roles';
 import {
   SELECT_SCHOOL_MESSAGE,
   ecardSchoolChoices,
@@ -69,6 +75,11 @@ export const useFitTestForm = () => {
   const signatureCanvasRef = useRef(null);
   const testerSignatureCanvasRef = useRef(null);
   const printedNameManuallyEdited = useRef(false);
+  const [drafts, setDrafts] = useState([]);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const [activeDraftId, setActiveDraftId] = useState(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const canUseDrafts = Boolean(user?.uid) && !isFaculty(user);
 
   const solutionProfilesState = useSelectableProfiles({
     userId: user?.uid,
@@ -169,6 +180,48 @@ export const useFitTestForm = () => {
       }));
     }
   }, [user]);
+
+  const refreshDrafts = async () => {
+    if (!canUseDrafts) {
+      setDrafts([]);
+      return [];
+    }
+    setDraftsLoading(true);
+    try {
+      const next = await listFitTestDrafts(user.uid);
+      setDrafts(next);
+      return next;
+    } catch (error) {
+      console.error('Could not load drafts', error);
+      return null;
+    } finally {
+      setDraftsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!canUseDrafts) {
+      setDrafts([]);
+      setActiveDraftId(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setDraftsLoading(true);
+    listFitTestDrafts(user.uid)
+      .then((next) => {
+        if (!cancelled) setDrafts(next);
+      })
+      .catch((error) => {
+        console.error('Could not load drafts', error);
+        if (!cancelled) setDrafts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDraftsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseDrafts, user?.uid]);
 
   const handleInputChange = (field, value) => {
     if (
@@ -435,6 +488,18 @@ export const useFitTestForm = () => {
           setIsLoading(false);
           return;
         }
+        // The real record now exists, so the draft has done its job. A failed
+        // send before this point keeps the draft.
+        if (activeDraftId) {
+          const sentDraftId = activeDraftId;
+          setActiveDraftId(null);
+          try {
+            await deleteFitTestDraft(sentDraftId);
+          } catch (draftError) {
+            console.error('Could not delete the sent draft', draftError);
+          }
+          setDrafts((prev) => prev.filter((draft) => draft.id !== sentDraftId));
+        }
       } else {
         console.warn('User not logged in, skipping database save');
       }
@@ -492,7 +557,87 @@ export const useFitTestForm = () => {
 
   const resetForm = () => {
     applyDefaultSelections(solutionProfilesState.profiles);
+    setActiveDraftId(null);
     setStatus({ type: '', message: '' });
+  };
+
+  // Saves the form as an unsent draft. No validation, no email, no fit test
+  // record, no lookup and no verification card.
+  const handleSaveDraft = async () => {
+    if (!canUseDrafts) {
+      setStatus({ type: 'error', message: 'You must be signed in as staff to save a draft.' });
+      return;
+    }
+    setIsSavingDraft(true);
+    try {
+      const savedId = await saveFitTestDraft(user.uid, formData, activeDraftId);
+      setActiveDraftId(savedId);
+      setStatus({ type: 'warning', message: 'Draft saved. It has not been sent.' });
+      await refreshDrafts();
+    } catch (error) {
+      console.error('Error saving draft:', error);
+      const code = typeof error?.code === 'string' ? ` (${error.code})` : '';
+      setStatus({ type: 'error', message: `Could not save the draft${code}. Please try again.` });
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const solutionOptionForDraft = (fields, profiles) => {
+    const match = profiles.find((profile) => (
+      (profile.solutionType || '') === (fields.solutionType || '')
+      && (profile.solutionOpenDate || '') === (fields.solutionOpenDate || '')
+      && (profile.solutionExpirationDate || '') === (fields.solutionExpirationDate || '')
+    ));
+    if (match) return `${PROFILE_SOLUTION_OPTION_PREFIX}${match.id}`;
+    const isBase = TESTING_AGENT_OPTIONS.some((option) => option.value === fields.solutionType);
+    if (isBase && !fields.solutionOpenDate && !fields.solutionExpirationDate) {
+      return `${BASE_SOLUTION_OPTION_PREFIX}${fields.solutionType}`;
+    }
+    return NEW_SOLUTION_PROFILE_OPTION;
+  };
+
+  // One tap reopens a draft into the form. Signatures are never stored, so
+  // both have to be signed again before sending.
+  const handleOpenDraft = (draftId) => {
+    const draft = drafts.find((item) => item.id === draftId);
+    if (!draft) return;
+    const fields = draftToFormFields(draft);
+    const profiles = solutionProfilesState.profiles;
+    const defaultProfile = profiles.find((profile) => profile.isDefault);
+    const solutionFields = {
+      solutionType: defaultProfile?.solutionType || getDefaultBaseSolutionType(),
+      solutionOpenDate: defaultProfile?.solutionOpenDate || '',
+      solutionExpirationDate: defaultProfile?.solutionExpirationDate || '',
+      ...fields,
+    };
+    applyDefaultSelections(profiles, fields);
+    solutionProfilesState.setSelectedOption(solutionOptionForDraft(solutionFields, profiles));
+    printedNameManuallyEdited.current = Boolean(
+      (fields.printedName || '').trim()
+      && (fields.printedName || '').trim() !== (fields.clientName || '').trim(),
+    );
+    setActiveDraftId(draftId);
+    setStatus({
+      type: 'warning',
+      message: 'Draft opened. It has not been sent. Both signatures must be signed again before sending.',
+    });
+  };
+
+  const handleDeleteDraft = async (draftId) => {
+    if (!draftId) return;
+    try {
+      await deleteFitTestDraft(draftId);
+      setDrafts((prev) => prev.filter((draft) => draft.id !== draftId));
+      if (draftId === activeDraftId) {
+        setActiveDraftId(null);
+      }
+      setStatus({ type: 'success', message: 'Draft deleted.' });
+    } catch (error) {
+      console.error('Error deleting draft:', error);
+      const code = typeof error?.code === 'string' ? ` (${error.code})` : '';
+      setStatus({ type: 'error', message: `Could not delete the draft${code}. Please try again.` });
+    }
   };
 
   return {
@@ -525,5 +670,13 @@ export const useFitTestForm = () => {
     setSignatureCanvasRef,
     setTesterSignatureCanvasRef,
     resetForm,
+    canUseDrafts,
+    drafts,
+    draftsLoading,
+    activeDraftId,
+    isSavingDraft,
+    handleSaveDraft,
+    handleOpenDraft,
+    handleDeleteDraft,
   };
 };

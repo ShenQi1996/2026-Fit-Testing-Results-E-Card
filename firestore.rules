@@ -1207,6 +1207,51 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Unsent fit test drafts. Owner only: no admin, super admin, faculty or
+    // public access to anyone else's draft. A draft is not an OSHA record, so
+    // the owner can hard delete it. Get and delete check resource == null first
+    // so a missing draft returns "not found" instead of a null-value error.
+    // The app's list query filters on ownerUid, which this list rule requires.
+    match /fitTestDrafts/{draftId} {
+      function draftOwnedByCaller() {
+        return resource.data.get('ownerUid', null) == request.auth.uid;
+      }
+      function draftShapeOk() {
+        let data = request.resource.data;
+        return data.ownerUid == request.auth.uid
+          && data.keys().size() <= 80
+          && !data.keys().hasAny([
+            'fitFactor',
+            'userId',
+            'fitTestId',
+            'deletedAt',
+            'verificationToken',
+            'signatureDataUrl',
+            'testerSignatureDataUrl'
+          ])
+          && data.updatedAt == request.time
+          && data.createdAt is timestamp
+          && data.get('fitTestMethod', 'Qualitative') == 'Qualitative'
+          && (
+            !data.keys().hasAny(['testerMedicalRestrictionsNote'])
+            || (
+              data.testerMedicalRestrictionsNote is string
+              && data.testerMedicalRestrictionsNote.size() <= 2000
+            )
+          );
+      }
+      allow get: if isApproved() && (resource == null || draftOwnedByCaller());
+      allow list: if isApproved() && draftOwnedByCaller();
+      allow create: if isApproved() && !isFacultyRole()
+        && draftShapeOk()
+        && request.resource.data.createdAt == request.time;
+      allow update: if isApproved() && !isFacultyRole()
+        && draftOwnedByCaller()
+        && draftShapeOk()
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isApproved() && (resource == null || draftOwnedByCaller());
+    }
+
     // One log per signed-in staff uid. Used to cap the two test accounts at 1 send / 24h.
     match /emailSendLog/{userId} {
       allow get: if isOwner(userId) && isApproved();

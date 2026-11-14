@@ -26,6 +26,12 @@ import {
 import { toLookupCardData, toVerifyCardData } from '../src/utils/cardCopies';
 import { buildLookupKey } from '../src/utils/lookupKey';
 import { deleteFitTest, ensureFitTestVerification } from '../src/services/firebaseDb';
+import {
+  deleteFitTestDraft,
+  listFitTestDrafts,
+  saveFitTestDraft,
+} from '../src/services/fitTestDraftsDb';
+import { createInitialFormData } from '../src/constants/initialFitTestForm';
 
 // The app's own firebaseDb functions run against the emulator as the signed-in
 // test user, so these tests exercise the exact reads and batches the app sends.
@@ -3057,4 +3063,201 @@ test('a record still holding a deleteField() sentinel refreshes its cards withou
   expect(verification.data().fitTestId).toBe('qual-1');
   expect(lookup.exists()).toBe(true);
   expect(lookup.data()).not.toHaveProperty('fitFactor');
+});
+
+describe('fit test drafts are owner only', () => {
+  const draftDoc = (ownerUid, extra = {}) => ({
+    ownerUid,
+    clientName: 'Draft Client',
+    recipientEmail: 'draft@example.com',
+    fitTestMethod: 'Qualitative',
+    style: '',
+    testerMedicalRestrictionsReceived: true,
+    testerMedicalRestrictionsNote: 'Private note',
+    createdAt: Timestamp.fromDate(new Date('2026-11-01T12:00:00Z')),
+    updatedAt: Timestamp.fromDate(new Date('2026-11-01T12:00:00Z')),
+    ...extra,
+  });
+
+  const seedUsers = (extra = []) => seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/tester-2', approved('tester', 'tester2@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ['users/faculty-1', approved('faculty', 'faculty@example.com', { school: HELENE })],
+    ...extra,
+  ]);
+
+  const newDraft = (ownerUid, extra = {}) => ({
+    ownerUid,
+    clientName: 'New Draft',
+    fitTestMethod: 'Qualitative',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...extra,
+  });
+
+  afterEach(() => {
+    mockAppDb = null;
+  });
+
+  test('the owner can create, get, list, update and delete their draft', async () => {
+    await seedUsers();
+    const db = testEnv.authenticatedContext('tester-1').firestore();
+    const ref = doc(db, 'fitTestDrafts/d-own');
+
+    await assertSucceeds(setDoc(ref, newDraft('tester-1')));
+    await assertSucceeds(getDoc(ref));
+    await assertSucceeds(getDocs(query(collection(db, 'fitTestDrafts'), where('ownerUid', '==', 'tester-1'))));
+    await assertSucceeds(updateDoc(ref, { clientName: 'Renamed', updatedAt: serverTimestamp() }));
+    await assertSucceeds(deleteDoc(ref));
+  });
+
+  test('getting or deleting a missing draft is not a permission error', async () => {
+    await seedUsers();
+    const db = testEnv.authenticatedContext('tester-1').firestore();
+    const snap = await assertSucceeds(getDoc(doc(db, 'fitTestDrafts/missing')));
+    expect(snap.exists()).toBe(false);
+    await assertSucceeds(deleteDoc(doc(db, 'fitTestDrafts/missing')));
+  });
+
+  test.each([
+    ['another tester', 'tester-2'],
+    ['a scoped admin of the same school', 'admin-1'],
+    ['a super admin', 'super-1'],
+    ['faculty of the same school', 'faculty-1'],
+  ])('%s cannot get, list, update or delete someone else\'s draft', async (_label, uid) => {
+    await seedUsers([['fitTestDrafts/d-1', draftDoc('tester-1')]]);
+    const db = testEnv.authenticatedContext(uid).firestore();
+    const ref = doc(db, 'fitTestDrafts/d-1');
+
+    await assertFails(getDoc(ref));
+    await assertFails(getDocs(query(collection(db, 'fitTestDrafts'), where('ownerUid', '==', 'tester-1'))));
+    await assertFails(getDocs(collection(db, 'fitTestDrafts')));
+    await assertFails(updateDoc(ref, { clientName: 'Hijacked', updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(ref, { ownerUid: uid, updatedAt: serverTimestamp() }));
+    await assertFails(deleteDoc(ref));
+  });
+
+  test('an unauthenticated user cannot get, list, create, update or delete a draft', async () => {
+    await seedUsers([['fitTestDrafts/d-1', draftDoc('tester-1')]]);
+    const db = testEnv.unauthenticatedContext().firestore();
+    const ref = doc(db, 'fitTestDrafts/d-1');
+
+    await assertFails(getDoc(ref));
+    await assertFails(getDocs(query(collection(db, 'fitTestDrafts'), where('ownerUid', '==', 'tester-1'))));
+    await assertFails(setDoc(doc(db, 'fitTestDrafts/d-anon'), newDraft('tester-1')));
+    await assertFails(updateDoc(ref, { clientName: 'Anon', updatedAt: serverTimestamp() }));
+    await assertFails(deleteDoc(ref));
+  });
+
+  test('a list query without the ownerUid filter is denied, even for the owner', async () => {
+    await seedUsers([['fitTestDrafts/d-1', draftDoc('tester-1')]]);
+    const db = testEnv.authenticatedContext('tester-1').firestore();
+    await assertFails(getDocs(collection(db, 'fitTestDrafts')));
+  });
+
+  test('ownerUid cannot be spoofed on create or changed on update', async () => {
+    await seedUsers([['fitTestDrafts/d-1', draftDoc('tester-1')]]);
+    const db = testEnv.authenticatedContext('tester-1').firestore();
+
+    await assertFails(setDoc(doc(db, 'fitTestDrafts/d-spoof'), newDraft('tester-2')));
+    await assertFails(setDoc(doc(db, 'fitTestDrafts/d-none'), {
+      clientName: 'No owner',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, 'fitTestDrafts/d-1'), {
+      ownerUid: 'tester-2',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, 'fitTestDrafts/d-1'), {
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  test('a draft cannot carry a fit factor, a quantitative method, signatures or an oversized note', async () => {
+    await seedUsers();
+    const db = testEnv.authenticatedContext('tester-1').firestore();
+
+    await assertFails(setDoc(doc(db, 'fitTestDrafts/x1'), newDraft('tester-1', { fitFactor: 150 })));
+    await assertFails(setDoc(doc(db, 'fitTestDrafts/x2'), newDraft('tester-1', { fitTestMethod: 'Quantitative' })));
+    await assertFails(setDoc(doc(db, 'fitTestDrafts/x3'), newDraft('tester-1', { signatureDataUrl: 'data:' })));
+    await assertFails(setDoc(doc(db, 'fitTestDrafts/x4'), newDraft('tester-1', {
+      testerMedicalRestrictionsNote: 'x'.repeat(2001),
+    })));
+    const tooMany = {};
+    for (let i = 0; i < 80; i += 1) tooMany[`extra${i}`] = i;
+    await assertFails(setDoc(doc(db, 'fitTestDrafts/x5'), newDraft('tester-1', tooMany)));
+    await assertSucceeds(setDoc(doc(db, 'fitTestDrafts/x6'), newDraft('tester-1', {
+      testerMedicalRestrictionsNote: 'x'.repeat(2000),
+    })));
+  });
+
+  test('faculty cannot create drafts, and an unapproved tester cannot use them', async () => {
+    await seedUsers([['users/pending-1', testerAt(HELENE)]]);
+    const facultyDb = testEnv.authenticatedContext('faculty-1').firestore();
+    await assertFails(setDoc(doc(facultyDb, 'fitTestDrafts/f1'), newDraft('faculty-1')));
+    const pendingDb = testEnv.authenticatedContext('pending-1').firestore();
+    await assertFails(setDoc(doc(pendingDb, 'fitTestDrafts/p1'), newDraft('pending-1')));
+  });
+
+  test('admins and super admins can create and manage only their own drafts', async () => {
+    await seedUsers();
+    for (const uid of ['admin-1', 'super-1']) {
+      const db = testEnv.authenticatedContext(uid).firestore();
+      const ref = doc(db, `fitTestDrafts/own-${uid}`);
+      await assertSucceeds(setDoc(ref, newDraft(uid)));
+      await assertSucceeds(getDocs(query(collection(db, 'fitTestDrafts'), where('ownerUid', '==', uid))));
+      await assertSucceeds(deleteDoc(ref));
+    }
+  });
+
+  test('the app draft service saves, lists, updates and deletes through the rules', async () => {
+    await seedUsers([['fitTestDrafts/other', draftDoc('tester-2')]]);
+    mockAppDb = testEnv.authenticatedContext('tester-1').firestore();
+
+    const form = createInitialFormData({
+      clientName: 'Ada',
+      recipientEmail: 'ada@example.com',
+      fitTester: 'Tess',
+      fitFactor: 200,
+      signatureDataUrl: 'data:image/png;base64,AAA',
+      testerMedicalRestrictionsReceived: true,
+      testerMedicalRestrictionsNote: 'Keep private',
+    });
+    const id = await saveFitTestDraft('tester-1', form);
+    let drafts = await listFitTestDrafts('tester-1');
+    expect(drafts.map((draft) => draft.id)).toEqual([id]);
+    expect(drafts[0]).toMatchObject({
+      ownerUid: 'tester-1',
+      clientName: 'Ada',
+      fitTestMethod: 'Qualitative',
+      testerMedicalRestrictionsNote: 'Keep private',
+    });
+    expect(drafts[0]).not.toHaveProperty('fitFactor');
+    expect(drafts[0]).not.toHaveProperty('signatureDataUrl');
+    expect(drafts[0]).not.toHaveProperty('verificationToken');
+    expect(drafts[0]).not.toHaveProperty('fitTester');
+
+    await saveFitTestDraft('tester-1', { ...form, clientName: 'Ada Lovelace' }, id);
+    drafts = await listFitTestDrafts('tester-1');
+    expect(drafts[0].clientName).toBe('Ada Lovelace');
+
+    await deleteFitTestDraft(id);
+    expect(await listFitTestDrafts('tester-1')).toEqual([]);
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const adminDb = context.firestore();
+      const snaps = await getDocs(collection(adminDb, 'fitTests'));
+      expect(snaps.size).toBe(0);
+      const lookups = await getDocs(collection(adminDb, 'fitTestLookups'));
+      expect(lookups.size).toBe(0);
+      const verifications = await getDocs(collection(adminDb, 'fitTestVerifications'));
+      expect(verifications.size).toBe(0);
+      const notes = await getDocs(collection(adminDb, 'fitTestMedicalNotes'));
+      expect(notes.size).toBe(0);
+    });
+  });
 });
