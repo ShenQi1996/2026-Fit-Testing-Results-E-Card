@@ -50,11 +50,16 @@ export const canonicalFitTestMethod = (value) => {
   return value;
 };
 
+// Respirator style for new tests and edits. Older records may have no style or
+// an earlier value; they still display as stored, and an edit must pick one of these.
 export const RESPIRATOR_STYLE_OPTIONS = [
-  { value: 'Filtering facepiece', label: 'Filtering facepiece' },
-  { value: 'Half-facepiece', label: 'Half-facepiece' },
-  { value: 'Full-facepiece', label: 'Full-facepiece' },
+  { value: 'Cup (molded)', label: 'Cup (molded)' },
+  { value: 'Flat-fold', label: 'Flat-fold' },
+  { value: 'Duckbill', label: 'Duckbill' },
 ];
+
+export const isRespiratorStyle = (value) =>
+  RESPIRATOR_STYLE_OPTIONS.some((option) => option.value === value);
 
 export const CLEANING_METHOD_OPTIONS = [
   { value: 'Condition acceptable', label: 'Condition acceptable' },

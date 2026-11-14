@@ -45,3 +45,10 @@ test('the public verify page still hides program administrator fields', () => {
   expect(rows.map((row) => row.value)).not.toContain('Ada Admin');
   expect(rows.map((row) => row.value)).not.toContain('ada-admin@example.com');
 });
+
+test('the public verify page shows the style, or a dash for a legacy card', () => {
+  const styled = verifyDetailRows({ ...card, style: 'Duckbill' }).find((row) => row.key === 'style');
+  expect(styled).toEqual({ key: 'style', label: 'Style', value: 'Duckbill' });
+  const legacyRow = verifyDetailRows({ ...card, style: undefined }).find((row) => row.key === 'style');
+  expect(legacyRow.value).toBe('—');
+});

@@ -12,7 +12,7 @@ import { isAccessWindowOpen, isFaculty } from '../utils/roles';
 import { sendFitTestCard } from '../services/emailService';
 import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../utils/csvUtils';
-import { TEST_LOCATION_OPTIONS } from '../constants/fitTestOptions';
+import { TEST_LOCATION_OPTIONS, isRespiratorStyle } from '../constants/fitTestOptions';
 import { isDeleteFieldSentinel } from '../utils/cardCopies';
 import {
   FILTER_ALL,
@@ -317,7 +317,9 @@ export const useFitTestResults = () => {
       testingAgent: test.testingAgent || '',
       maskSize: test.maskSize || '',
       model: test.model || '',
-      style: test.style || '',
+      // A legacy record with no style, or an earlier style value, opens blank so
+      // the edit must pick Cup (molded), Flat-fold, or Duckbill before saving.
+      style: isRespiratorStyle(test.style) ? test.style : '',
       result: test.result || '',
       fitTester: test.fitTester || '',
     });
@@ -349,7 +351,7 @@ export const useFitTestResults = () => {
     const original = fitTests.find((test) => test.id === testId);
     const nextModel = (editData.model || '').trim();
     const nextStyle = (editData.style || '').trim();
-    if (!nextStyle) {
+    if (!isRespiratorStyle(nextStyle)) {
       setEditError('Please select the respirator style.');
       return;
     }

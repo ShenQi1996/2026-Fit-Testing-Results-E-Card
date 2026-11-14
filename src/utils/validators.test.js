@@ -9,7 +9,7 @@ const validForm = () => ({
   fitTestType: 'N95',
   respiratorMfg: '3M',
   model: '1860',
-  style: 'Filtering facepiece',
+  style: 'Cup (molded)',
   fitTestMethod: 'Qualitative',
   testingAgent: 'Bitrex',
   maskSize: 'Regular',
@@ -65,6 +65,13 @@ describe('form validators', () => {
 
     const missingStyle = validateFitTestForm({ ...validForm(), style: '' }, true, true);
     expect(missingStyle.fieldErrors.style).toBe('Please select the respirator style.');
+
+    const oldStyle = validateFitTestForm({ ...validForm(), style: 'Filtering facepiece' }, true, true);
+    expect(oldStyle.fieldErrors.style).toBe('Please select the respirator style.');
+
+    ['Cup (molded)', 'Flat-fold', 'Duckbill'].forEach((style) => {
+      expect(validateFitTestForm({ ...validForm(), style }, true, true).fieldErrors.style).toBeUndefined();
+    });
 
     const whitespaceMfg = validateFitTestForm({ ...validForm(), respiratorMfg: '   ' }, true, true);
     expect(whitespaceMfg.fieldErrors.respiratorMfg).toMatch(/manufacturer/i);
