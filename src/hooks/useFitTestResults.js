@@ -10,7 +10,7 @@ import {
 } from '../services/firebaseDb';
 import { isAccessWindowOpen, isFaculty } from '../utils/roles';
 import { sendFitTestCard } from '../services/emailService';
-import { downloadFitTestPdf, previewFitTestPdf } from '../utils/pdfUtils';
+import { downloadFitTestPdf, previewFitTestPdf, schedulePdfPrefetch } from '../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../utils/csvUtils';
 import { TEST_LOCATION_OPTIONS, isRespiratorStyle } from '../constants/fitTestOptions';
 import { isDeleteFieldSentinel } from '../utils/cardCopies';
@@ -142,6 +142,10 @@ export const useFitTestResults = () => {
     });
   }, [fitTests, monthFilter, schoolFilter, locationFilter]);
 
+  // Warm the PDF chunk after the results page settles so the first Preview
+  // or Download does not wait on a download.
+  useEffect(() => schedulePdfPrefetch(), []);
+
   const flashMessage = (setter, message, ms = 3000) => {
     setter(message);
     setTimeout(() => setter(''), ms);
@@ -258,7 +262,12 @@ export const useFitTestResults = () => {
     try {
       setPdfLoading({ id: test.id, action: 'preview' });
       setError('');
-      await previewFitTestPdf(await resolveCardFormData(test));
+      // previewFitTestPdf opens the tab synchronously (Safari needs that inside
+      // the click), then resolves the card data and the PDF chunk.
+      const result = await previewFitTestPdf(() => resolveCardFormData(test));
+      if (result?.mode === 'download' && result.message) {
+        flashMessage(setSuccessMessage, result.message, 6000);
+      }
     } catch (err) {
       console.error('Error previewing PDF:', err);
       flashMessage(setError, err.message || 'Failed to generate PDF preview. Please try again.', 5000);

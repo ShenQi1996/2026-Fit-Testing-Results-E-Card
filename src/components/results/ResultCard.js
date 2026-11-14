@@ -1,4 +1,5 @@
 import React from 'react';
+import { prefetchPdfLibraries } from '../../utils/pdfUtils';
 import { calculateExpirationDate } from '../../utils/dateUtils';
 import { RESULT_OPTIONS, canonicalFitTestMethod } from '../../constants/fitTestOptions';
 import {
@@ -405,6 +406,9 @@ const ResultCard = ({
             <button
               type="button"
               onClick={() => onPreviewPdf(test)}
+              onPointerEnter={prefetchPdfLibraries}
+              onFocus={prefetchPdfLibraries}
+              onTouchStart={prefetchPdfLibraries}
               className="result-pdf-preview-button"
               disabled={busy || !test.clientName?.trim()}
               title={!test.clientName?.trim() ? 'Client name required for PDF' : 'Open PDF preview'}
@@ -416,6 +420,9 @@ const ResultCard = ({
             <button
               type="button"
               onClick={() => onDownloadPdf(test)}
+              onPointerEnter={prefetchPdfLibraries}
+              onFocus={prefetchPdfLibraries}
+              onTouchStart={prefetchPdfLibraries}
               className="result-pdf-download-button"
               disabled={busy || !test.clientName?.trim()}
               title={!test.clientName?.trim() ? 'Client name required for PDF' : 'Download e-card as PDF'}

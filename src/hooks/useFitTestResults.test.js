@@ -29,7 +29,9 @@ jest.mock('../services/emailService', () => ({
 
 jest.mock('../utils/pdfUtils', () => ({
   downloadFitTestPdf: jest.fn(),
-  previewFitTestPdf: jest.fn(),
+  previewFitTestPdf: jest.fn(() => Promise.resolve({ mode: 'preview' })),
+  prefetchPdfLibraries: jest.fn(),
+  schedulePdfPrefetch: jest.fn(() => () => {}),
 }));
 
 jest.mock('../utils/csvUtils', () => ({
@@ -425,10 +427,16 @@ test('a Qualitative edit removes fitFactor from the list instead of keeping the 
   const listed = apiRef.current.fitTests.find((test) => test.id === 'ft-1');
   expect(listed).not.toHaveProperty('fitFactor');
 
+  previewFitTestPdf.mockImplementationOnce(async (load) => {
+    await load();
+    return { mode: 'preview' };
+  });
   await act(async () => {
     await apiRef.current.handlePreviewResultPdf(listed);
   });
   const passed = ensureFitTestVerification.mock.calls[0][0];
   expect(passed).not.toHaveProperty('fitFactor');
   expect(previewFitTestPdf).toHaveBeenCalled();
+  // A loader, not resolved data, so the preview tab opens before any await.
+  expect(typeof previewFitTestPdf.mock.calls[0][0]).toBe('function');
 });

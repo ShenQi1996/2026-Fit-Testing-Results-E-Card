@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useFitTestForm } from '../../hooks/useFitTestForm';
 import CardPreview from '../common/CardPreview';
 import RecipientInfoSection from './RecipientInfoSection';
@@ -13,7 +13,12 @@ import SignatureSection from './SignatureSection';
 import StatusMessage from '../common/StatusMessage';
 import SubmitButton from './SubmitButton';
 import FitTestDraftsPanel, { DraftBadge, DraftBanner } from './FitTestDraftsPanel';
-import { downloadFitTestPdf, previewFitTestPdf } from '../../utils/pdfUtils';
+import {
+  downloadFitTestPdf,
+  prefetchPdfLibraries,
+  previewFitTestPdf,
+  schedulePdfPrefetch,
+} from '../../utils/pdfUtils';
 import './FitTestForm.css';
 
 const FitTestForm = () => {
@@ -59,12 +64,40 @@ const FitTestForm = () => {
   const isDraft = Boolean(activeDraftId);
   const busy = isLoading || isSavingDraft;
 
+  const [pdfStatus, setPdfStatus] = useState({ type: '', message: '' });
+
+  useEffect(() => schedulePdfPrefetch(), []);
+
   const handleDownloadPdf = async () => {
-    await downloadFitTestPdf(formData);
+    setPdfStatus({ type: '', message: '' });
+    try {
+      await downloadFitTestPdf(formData);
+    } catch (err) {
+      console.error('Error downloading PDF:', err);
+      setPdfStatus({ type: 'error', message: 'Could not create the PDF. Please try again.' });
+    }
   };
 
-  const handlePreviewPdf = async () => {
-    await previewFitTestPdf(formData);
+  // Not async on purpose: previewFitTestPdf must run synchronously inside the
+  // click so Safari lets it open the preview tab.
+  const handlePreviewPdf = () => {
+    setPdfStatus({ type: '', message: '' });
+    return previewFitTestPdf(formData)
+      .then((result) => {
+        if (result?.mode === 'download' && result.message) {
+          setPdfStatus({ type: 'warning', message: result.message });
+        }
+      })
+      .catch((err) => {
+        console.error('Error previewing PDF:', err);
+        setPdfStatus({ type: 'error', message: 'Could not create the PDF preview. Please try again.' });
+      });
+  };
+
+  const pdfPrefetchProps = {
+    onPointerEnter: prefetchPdfLibraries,
+    onFocus: prefetchPdfLibraries,
+    onTouchStart: prefetchPdfLibraries,
   };
 
   const fieldProps = { formData, onChange: handleInputChange, isLoading, fieldErrors };
@@ -155,12 +188,14 @@ const FitTestForm = () => {
         )}
 
         <StatusMessage type={status.type} message={status.message} />
+        <StatusMessage type={pdfStatus.type} message={pdfStatus.message} />
 
         <div className="submit-button-container">
           <button
             type="button"
             className="preview-pdf-button"
             onClick={handlePreviewPdf}
+            {...pdfPrefetchProps}
             disabled={!formData.clientName?.trim() || isLoading}
           >
             Preview PDF
@@ -169,6 +204,7 @@ const FitTestForm = () => {
             type="button"
             className="download-pdf-button"
             onClick={handleDownloadPdf}
+            {...pdfPrefetchProps}
             disabled={!formData.clientName?.trim() || isLoading}
           >
             Download PDF
