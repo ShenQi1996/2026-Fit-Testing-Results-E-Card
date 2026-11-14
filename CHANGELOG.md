@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- The app bundle is split by page. The form, results, users, account, verify, and resend pages each load their own chunk the first time they open, behind a small CSS loading indicator; a chunk that fails to download shows a reload message instead of a blank page. Login and the home page stay in the main bundle
+- jspdf and html2canvas load only when a PDF is previewed or downloaded, and EmailJS loads only when an e-card is sent
+- The loading and verify animations use the svg-only Lottie build (`LottieSvg`), which keeps expressions, and the loading animation's engine loads on demand
+
 ## [1.2.0] - 2026-11-13
 
 ### Added

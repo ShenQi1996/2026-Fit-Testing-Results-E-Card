@@ -1,6 +1,17 @@
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
 import { generateFitTestCard } from './fitTestCardTemplate';
+
+// jspdf and html2canvas are large, so they load only when a PDF is previewed
+// or downloaded. webpack caches the chunk after the first use.
+const loadPdfLibraries = async () => {
+  const [jspdfModule, html2canvasModule] = await Promise.all([
+    import(/* webpackChunkName: "pdf-jspdf" */ 'jspdf'),
+    import(/* webpackChunkName: "pdf-html2canvas" */ 'html2canvas'),
+  ]);
+  return {
+    jsPDF: jspdfModule.jsPDF,
+    html2canvas: html2canvasModule.default || html2canvasModule,
+  };
+};
 
 const PDF_SHARE_TITLE = 'Fit Testing Results E-card';
 
@@ -60,6 +71,7 @@ const shareOrDownloadPdf = async (doc, filename) => {
 };
 
 const buildFitTestPdf = async (formData) => {
+  const { jsPDF, html2canvas } = await loadPdfLibraries();
   const renderElement = createCardRenderElement(formData);
 
   try {

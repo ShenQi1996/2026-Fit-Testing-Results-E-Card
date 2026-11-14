@@ -1,21 +1,43 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
-import FitTestForm from './components/forms/FitTestForm';
+// Page styles stay in main.css, in the order the pages used to be imported,
+// so App.css still comes last and the cascade is unchanged. Only page code is
+// split into chunks.
+import './components/common/CardPreview.css';
+import './components/forms/FitTestForm.css';
 import Login from './components/auth/Login';
 import Header from './components/common/Header';
-import EditAccount from './components/auth/EditAccount';
+import './components/auth/EditAccount.css';
 import Sidebar from './components/common/Sidebar';
-import FitTestResults from './components/results/FitTestResults';
-import UsersManagement from './components/admin/UsersManagement';
-import ResendCardPage from './components/lookup/ResendCardPage';
-import VerifyCardPage from './components/lookup/VerifyCardPage';
+import './components/results/FitTestResults.css';
+import './components/admin/UsersManagement.css';
+import './components/lookup/VerifyCardPage.css';
 import HomePage from './components/common/HomePage';
 import LoadingAnimation from './components/common/LoadingAnimation';
+import PageLoading from './components/common/PageLoading';
+import ChunkErrorBoundary from './components/common/ChunkErrorBoundary';
 import StagingBanner from './components/common/StagingBanner';
 import { resolveAppRoute } from './utils/appRoute';
 import { isAccessWindowOpen, isAdminOrAbove, isFaculty } from './utils/roles';
 import './styles/App.css';
+
+// Each page is its own chunk, downloaded the first time it is shown. Login,
+// home, the header and the sidebar stay in the main bundle.
+const FitTestForm = lazy(() => import(/* webpackChunkName: "page-form" */ './components/forms/FitTestForm'));
+const FitTestResults = lazy(() => import(/* webpackChunkName: "page-results" */ './components/results/FitTestResults'));
+const UsersManagement = lazy(() => import(/* webpackChunkName: "page-users" */ './components/admin/UsersManagement'));
+const EditAccount = lazy(() => import(/* webpackChunkName: "page-account" */ './components/auth/EditAccount'));
+const VerifyCardPage = lazy(() => import(/* webpackChunkName: "page-verify" */ './components/lookup/VerifyCardPage'));
+const ResendCardPage = lazy(() => import(/* webpackChunkName: "page-resend" */ './components/lookup/ResendCardPage'));
+
+const LazyPage = ({ children, pageKey }) => (
+  <ChunkErrorBoundary key={pageKey}>
+    <Suspense fallback={<PageLoading />}>
+      {children}
+    </Suspense>
+  </ChunkErrorBoundary>
+);
 
 const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }) => {
   const faculty = isFaculty(user);
@@ -46,24 +68,26 @@ const StaffApp = ({ user, currentPage, onNavigate, sidebarOpen, setSidebarOpen }
             </p>
           </div>
         )}
-        {page === 'editAccount' ? (
-          <div className="container">
-            <EditAccount
-              onBack={() => onNavigate(faculty ? 'results' : 'form')}
-              onManageSchools={() => onNavigate('users')}
-            />
-          </div>
-        ) : page === 'results' && faculty && !isAccessWindowOpen(user) ? null : page === 'results' ? (
-          <FitTestResults />
-        ) : page === 'users' && isAdminOrAbove(user) ? (
-          <div className="container">
-            <UsersManagement />
-          </div>
-        ) : (
-          <div className="container">
-            <FitTestForm />
-          </div>
-        )}
+        <LazyPage pageKey={page}>
+          {page === 'editAccount' ? (
+            <div className="container">
+              <EditAccount
+                onBack={() => onNavigate(faculty ? 'results' : 'form')}
+                onManageSchools={() => onNavigate('users')}
+              />
+            </div>
+          ) : page === 'results' && faculty && !isAccessWindowOpen(user) ? null : page === 'results' ? (
+            <FitTestResults />
+          ) : page === 'users' && isAdminOrAbove(user) ? (
+            <div className="container">
+              <UsersManagement />
+            </div>
+          ) : (
+            <div className="container">
+              <FitTestForm />
+            </div>
+          )}
+        </LazyPage>
       </div>
     </div>
   </div>
@@ -114,7 +138,9 @@ const AppContent = () => {
   if (route.kind === 'verify') {
     return (
       <PublicPage>
-        <VerifyCardPage initialToken={route.token} />
+        <LazyPage pageKey="verify">
+          <VerifyCardPage initialToken={route.token} />
+        </LazyPage>
       </PublicPage>
     );
   }
@@ -122,7 +148,9 @@ const AppContent = () => {
   if (route.kind === 'resend') {
     return (
       <PublicPage>
-        <ResendCardPage />
+        <LazyPage pageKey="resend">
+          <ResendCardPage />
+        </LazyPage>
       </PublicPage>
     );
   }
