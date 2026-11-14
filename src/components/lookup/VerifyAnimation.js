@@ -1,10 +1,10 @@
 import React from 'react';
-import { Lottie } from 'lottie-react';
+import { LottieSvg } from 'lottie-react';
 import verificationAnimation from '../../../public/verification.json';
 
 const VerifyAnimation = () => (
   <div className="verify-animation">
-    <Lottie
+    <LottieSvg
       src={verificationAnimation}
       loop={false}
       autoplay
