@@ -392,6 +392,23 @@ html:has(.auth-page) body {
   text-align: center;
 }
 
+/* Inline version of the page spinner for buttons that are saving. */
+.button-spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 0.45em;
+  vertical-align: -0.12em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: page-loading-spin 0.8s linear infinite;
+}
+
+button[aria-busy='true'] {
+  cursor: progress;
+}
+
 @keyframes page-loading-spin {
   to {
     transform: rotate(360deg);
@@ -399,7 +416,8 @@ html:has(.auth-page) body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .page-loading-spinner {
+  .page-loading-spinner,
+  .button-spinner {
     animation-duration: 2s;
   }
 }

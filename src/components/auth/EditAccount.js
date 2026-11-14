@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   getUserSolutionProfiles,
@@ -13,6 +13,7 @@ import { isAdminOrAbove, isSuperAdmin, USER_ROLE_ADMIN } from '../../utils/roles
 import { normalizeSchoolList } from '../../utils/schoolScope';
 import { accountSchoolLabel } from '../../utils/ecardSchools';
 import SavedProfilesPanel from './SavedProfilesPanel';
+import { busyContent } from '../common/BusyLabel';
 import './EditAccount.css';
 
 const EMPTY_SOLUTION_FORM = {
@@ -44,6 +45,7 @@ const EditAccount = ({ onBack, onManageSchools }) => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const submittingRef = useRef(false);
   const [masterSchools, setMasterSchools] = useState([]);
 
   const solutionProfiles = useSavedProfiles({
@@ -106,6 +108,8 @@ const EditAccount = ({ onBack, onManageSchools }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // A second click before React re-renders must not send a second update.
+    if (submittingRef.current) return;
     setError('');
     setSuccess('');
 
@@ -126,6 +130,7 @@ const EditAccount = ({ onBack, onManageSchools }) => {
       }
     }
 
+    submittingRef.current = true;
     setIsLoading(true);
 
     try {
@@ -148,6 +153,7 @@ const EditAccount = ({ onBack, onManageSchools }) => {
     } catch (err) {
       setError(err.message || 'Failed to update account. Please try again.');
     } finally {
+      submittingRef.current = false;
       setIsLoading(false);
     }
   };
@@ -416,8 +422,9 @@ const EditAccount = ({ onBack, onManageSchools }) => {
             type="submit"
             className="auth-button"
             disabled={isLoading}
+            aria-busy={isLoading || undefined}
           >
-            {isLoading ? 'Updating...' : 'Update Account'}
+            {busyContent(isLoading, 'Saving…', 'Update Account')}
           </button>
         </form>
       </div>

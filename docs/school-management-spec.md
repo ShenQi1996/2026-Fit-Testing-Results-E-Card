@@ -13,7 +13,7 @@ Sam's decisions, now part of this spec:
 
 1. Admins keep a `schools` array (several schools per admin). Testers keep a single `school` string. An admin cannot change their own `schools`. Only a super admin assigns them.
 2. Rules reject a school name that is not in the master `schools` collection, whether it is a tester's `school` or any element of an admin's `schools` array. A typo cannot be written.
-3. Renaming or removing a master-list school does not rewrite user documents or fit-test documents. They keep the old name. An update that does not change `school` or `schools` is still allowed.
+3. Renaming a master-list school does not rewrite user documents or fit-test documents. They keep the old name. Removing a school also removes it from every user's `schools` array (Nov 14, 2026). Fit-test documents and a tester or faculty single `school` string keep the name. An update that does not change `school` or `schools` is still allowed.
 
 ## 1. Superadmin owns the master school list
 
@@ -125,7 +125,7 @@ Impact of acting on the master list:
 
 - Add: the new id appears in the super-admin multi-select and in the super-admin tester picker. No user document changes.
 - Rename: create `schools/{newName}` and delete `schools/{oldName}`. `users.school`, `users.schools`, and `fitTests.schoolsList` that still contain `oldName` are left as written. A tester with that old `school` still matches an admin who still has `oldName` in `schools`, because the list rule compares those stored strings. This spec does not update them.
-- Remove: delete `schools/{name}`. User and fit-test documents that contain that name keep it. New writes of that name fail decision 2.
+- Remove: delete `schools/{name}` and remove the name from every user whose `schools` array contains it (an `array-contains` query, then `arrayRemove` in batches of up to 500, with the school delete and directory write in the last batch). Any other name on those users that is no longer on the master list is removed in the same update, because the rules reject a changed list that still holds one. A list that would be empty is deleted with `deleteField()`, since the rules reject `schools: []`; role and status do not change, and the super admin is told who has no schools left. The super admin's own document is skipped because nobody can change their own school tags. Fit-test documents and a tester or faculty `school` string keep the name; the confirm dialog and the success message name those users so the super admin can reassign them. New writes of that name fail decision 2.
 
 Decision 2 and decision 3 together:
 
@@ -198,7 +198,7 @@ No test may call production Firebase.
 
 1. **Resolved.** Keep the admin `schools` array. Testers keep a single `school` string. There is no migration from the array to one field. A super admin multi-selects the array on create. An admin cannot change their own `schools`.
 2. **Resolved.** Rules reject any school name that is not an id in the master `schools` collection, including a tester's `school` and every element of an admin's `schools`. The UI is not the only check.
-3. **Resolved.** Renaming or removing a school does not rewrite user documents or fit-test documents. They keep the old name. Reads of those documents stay allowed. An update that does not change `school` or `schools` stays allowed. An update that changes either field must use names that are still on the master list. Section 7 is that rule.
+3. **Resolved, updated Nov 14, 2026.** Removing a school removes it from users' `schools` arrays (section 7). Otherwise, renaming or removing a school does not rewrite user documents or fit-test documents. They keep the old name. Reads of those documents stay allowed. An update that does not change `school` or `schools` stays allowed. An update that changes either field must use names that are still on the master list. Section 7 is that rule.
 4. On remove, the master-list document is deleted (section 7). Hiding it and keeping the document is not required, because decision 3 already keeps the old string on user and fit-test documents. No open choice unless Sam would rather hide the row than delete it.
 5. **Resolved by the build.** The fit-test "School / client" dropdown follows the signed-in user: a tester is locked to their `school`, an admin chooses from their `schools` array (one name is pre-selected), and a super admin chooses from the master list. There is no free-text school field and no hardcoded `SCHOOLS_OPTIONS` on that form. `SCHOOLS_OPTIONS` remains only for the separate backfill script. Approved users can still read the master list. `schoolProfiles` are not the source.
 6. **Resolved.** Keep the existing 30-value chunking. Scoped visibility stays `role == tester` and `school in` the admin's `schools`. `listScopedTesters` still splits a longer array into chunks of 30.

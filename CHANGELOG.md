@@ -11,6 +11,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - The app bundle is split by page. The form, results, users, account, verify, and resend pages each load their own chunk the first time they open, behind a small CSS loading indicator; a chunk that fails to download shows a reload message instead of a blank page. Login and the home page stay in the main bundle
 - jspdf and html2canvas load only when a PDF is previewed or downloaded, and EmailJS loads only when an e-card is sent
+- Removing a school from the Schools list also removes it from every user's `schools`, after a confirm that says how many users change and who is left with no schools. Fit-test records, and a tester or faculty single school, keep the name. User cards mark a school that is no longer on the list, drop it on save, and super admins get a one-step cleanup for names left behind by earlier removals
+- Adding, saving, and deleting a school, saving or deleting a user, and Update Account show a spinner with Adding… / Saving… / Deleting… text, disable the buttons while the write runs, and ignore a second click
 - The loading and verify animations use the svg-only Lottie build (`LottieSvg`), which keeps expressions, and the loading animation's engine loads on demand
 
 ## [1.2.0] - 2026-11-13
