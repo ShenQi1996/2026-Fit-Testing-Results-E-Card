@@ -113,28 +113,55 @@ const nameList = (users, max = 5) => {
   return `${labels.slice(0, max).join(', ')} and ${labels.length - max} more`;
 };
 
+const hasHave = (count) => (count === 1 ? 'has' : 'have');
+
 /** Confirm text for removing a school, from previewMasterSchoolRemoval. */
 export const schoolRemovalConfirmText = (name, preview) => {
   const lines = [`Remove ${name} from the school list?`];
   const affected = preview?.users || [];
+  const unset = preview?.unsetUsers || [];
   const emptied = preview?.leftWithoutSchools || [];
-  const single = preview?.singleSchoolUsers || [];
+  const faculty = preview?.facultyNeedingSchool || [];
   if (affected.length > 0) {
-    lines.push(`${peopleLabel(affected.length)} will have ${name} removed from their schools: ${nameList(affected)}.`);
+    lines.push(`${peopleLabel(affected.length)} will have ${name} removed: ${nameList(affected)}.`);
   } else {
-    lines.push(`No user has ${name} in their schools.`);
+    lines.push(`No user has ${name}.`);
+  }
+  if (unset.length > 0) {
+    lines.push(`${peopleLabel(unset.length)} with ${name} as their school will be set to Leave unset (${nameList(unset)}). They cannot save fit tests or send e-cards until you pick a school for them.`);
   }
   if (emptied.length > 0) {
-    lines.push(`${peopleLabel(emptied.length)} will have no schools left (${nameList(emptied)}). Their role and status do not change, but they will not see any school's users or fit tests until you assign a school.`);
+    lines.push(`${peopleLabel(emptied.length)} will have no schools left (${nameList(emptied)}). They will not see any school's users or fit tests until you assign a school.`);
   }
-  if (single.length > 0) {
-    lines.push(`${peopleLabel(single.length)} use ${name} as their one school (${nameList(single)}). That is not changed. Pick a new school on their user card.`);
+  if (faculty.length > 0) {
+    lines.push(`${peopleLabel(faculty.length)} on faculty ${faculty.length === 1 ? 'keeps' : 'keep'} ${name} because faculty must have one school (${nameList(faculty)}). Pick a new school on their user card.`);
+  }
+  if (affected.length > 0) {
+    lines.push('Role and status do not change.');
   }
   if (preview?.skippedSelf) {
     lines.push('Your own account keeps the name because nobody can change their own school tags.');
   }
   lines.push('Fit-test records keep this school name.');
   return lines.join('\n\n');
+};
+
+/** Success text after removing a school or cleaning up old names. */
+const cleanupResultParts = (result) => {
+  const parts = [];
+  const unset = result?.unsetUsers || [];
+  const emptied = result?.leftWithoutSchools || [];
+  const faculty = result?.facultyNeedingSchool || [];
+  if (unset.length) {
+    parts.push(`Set ${peopleLabel(unset.length)} to Leave unset: ${nameList(unset)}.`);
+  }
+  if (emptied.length) {
+    parts.push(`${peopleLabel(emptied.length)} now ${hasHave(emptied.length)} no schools: ${nameList(emptied)}.`);
+  }
+  if (faculty.length) {
+    parts.push(`${peopleLabel(faculty.length)} on faculty still ${hasHave(faculty.length)} a removed school and ${faculty.length === 1 ? 'needs' : 'need'} a new one: ${nameList(faculty)}.`);
+  }
+  return parts;
 };
 
 const NO_SCHOOLS_CREATE_MESSAGE = 'You have no schools assigned, so you cannot add this user. Ask a super admin to assign a school.';
@@ -688,14 +715,19 @@ const UsersManagement = () => {
 
   const applyUserSchoolCleanups = (cleanups) => {
     if (!Array.isArray(cleanups) || cleanups.length === 0) return;
-    const byId = new Map(cleanups.map((item) => [item.id, item.schools]));
+    const byId = new Map(cleanups.map((item) => [item.id, item]));
+    const patch = (record, plan) => ({
+      ...record,
+      schools: [...(plan.schools || [])],
+      ...(plan.clearSchool ? { school: plan.school } : {}),
+    });
     setUsers((prev) => prev.map((item) => (
-      byId.has(item.id) ? { ...item, schools: [...byId.get(item.id)] } : item
+      byId.has(item.id) ? patch(item, byId.get(item.id)) : item
     )));
     setEditDrafts((prev) => {
       const next = { ...prev };
-      byId.forEach((schools, id) => {
-        if (next[id]) next[id] = { ...next[id], schools: [...schools] };
+      byId.forEach((plan, id) => {
+        if (next[id]) next[id] = patch(next[id], plan);
       });
       return next;
     });
@@ -759,13 +791,8 @@ const UsersManagement = () => {
       const updatedCount = result?.users?.length || 0;
       const parts = [
         `Removed ${name} from the school list and from ${peopleLabel(updatedCount)}. Fit-test records keep the name.`,
+        ...cleanupResultParts(result),
       ];
-      if (result?.leftWithoutSchools?.length) {
-        parts.push(`${peopleLabel(result.leftWithoutSchools.length)} now ${result.leftWithoutSchools.length === 1 ? 'has' : 'have'} no schools: ${nameList(result.leftWithoutSchools)}. Assign a school on their user card.`);
-      }
-      if (result?.singleSchoolUsers?.length) {
-        parts.push(`${peopleLabel(result.singleSchoolUsers.length)} still ${result.singleSchoolUsers.length === 1 ? 'has' : 'have'} ${name} as their one school: ${nameList(result.singleSchoolUsers)}.`);
-      }
       setSuccess(parts.join(' '));
     } catch (err) {
       setSchoolListError(err.message || 'Failed to remove school.');
@@ -788,8 +815,10 @@ const UsersManagement = () => {
     try {
       const result = await removeStaleSchoolsFromUsers(user.uid, users);
       applyUserSchoolCleanups(result?.users);
-      const emptied = result?.leftWithoutSchools || [];
-      setSuccess(`Removed old school names from ${peopleLabel(result?.users?.length || 0)}.${emptied.length ? ` ${nameList(emptied)} now ${emptied.length === 1 ? 'has' : 'have'} no schools.` : ''}`);
+      setSuccess([
+        `Removed old school names from ${peopleLabel(result?.users?.length || 0)}.`,
+        ...cleanupResultParts(result),
+      ].join(' '));
     } catch (err) {
       setSchoolListError(err.message || 'Failed to remove old school names.');
     }
@@ -853,7 +882,7 @@ const UsersManagement = () => {
             <h3 className="section-title">Schools</h3>
             <p className="section-description">
               Master list of school names. Program administrator name and contact are optional.
-              Sending an e-card copies them from the selected school. Removing a school also removes it from every user who has it. Fit-test records keep the name. Renaming a school does not change users or fit-test records.
+              Sending an e-card copies them from the selected school. Removing a school also removes it from every user who has it, and sets users whose one school it was to Leave unset (faculty keep theirs). Fit-test records keep the name. Renaming a school does not change users or fit-test records.
             </p>
             {schoolListError && <div className="users-error" role="alert">{schoolListError}</div>}
             {staleSchoolUsers.length > 0 && (

@@ -184,7 +184,11 @@ describe('removing a school from users', () => {
         userSnap('faculty-legacy', { role: 'faculty', school: SCHOOL_B, schools: [SCHOOL_A] }),
         userSnap('super-1', { role: 'superadmin', schools: [SCHOOL_A, SCHOOL_B] }),
       ],
-      singleUsers: [userSnap('tester-a', { role: 'tester', name: 'Tess', school: SCHOOL_A })],
+      singleUsers: [
+        userSnap('tester-a', { role: 'tester', name: 'Tess', school: SCHOOL_A, status: 'approved' }),
+        userSnap('faculty-a', { role: 'faculty', name: 'Fay', school: SCHOOL_A }),
+        userSnap('admin-legacy', { role: 'admin', school: SCHOOL_A, schools: [SCHOOL_B] }),
+      ],
     });
 
     const result = await masterSchools.removeMasterSchool('super-1', SCHOOL_A);
@@ -205,12 +209,19 @@ describe('removing a school from users', () => {
     // Nobody can change their own school tags, so the actor is skipped.
     expect(updates['super-1']).toBeUndefined();
     expect(result.skippedSelf).toBe(true);
-    // Role, status and the single tester school are never written.
+    // A single school that was the deleted name is set to Leave unset ('').
+    expect(updates['tester-a']).toEqual({ school: '', updatedAt: expect.anything() });
+    expect(updates['admin-legacy']).toEqual({ school: '', updatedAt: expect.anything() });
+    expect(masterSchools.UNSET_SCHOOL).toBe('');
+    // Faculty must keep one school, so they are left alone and reported.
+    expect(updates['faculty-a']).toBeUndefined();
+    expect(result.facultyNeedingSchool.map((item) => item.id)).toEqual(['faculty-a']);
+    // Role and status are never written.
     Object.values(updates).forEach((payload) => {
-      expect(Object.keys(payload).sort()).toEqual(['schools', 'updatedAt']);
+      expect(payload).not.toHaveProperty('role');
+      expect(payload).not.toHaveProperty('status');
     });
-    expect(updates['tester-a']).toBeUndefined();
-    expect(result.singleSchoolUsers.map((item) => item.id)).toEqual(['tester-a']);
+    expect(result.unsetUsers.map((item) => item.id).sort()).toEqual(['admin-legacy', 'tester-a']);
     expect(result.leftWithoutSchools.map((item) => item.id)).toEqual(['admin-only']);
     expect(result.users.find((item) => item.id === 'admin-stale').schools).toEqual([SCHOOL_B]);
 
@@ -301,7 +312,8 @@ describe('removing a school from users', () => {
 
     expect(preview.users.map((item) => item.id)).toEqual(['admin-two', 'admin-only']);
     expect(preview.leftWithoutSchools.map((item) => item.id)).toEqual(['admin-only']);
-    expect(preview.singleSchoolUsers.map((item) => item.id)).toEqual(['faculty-a']);
+    expect(preview.facultyNeedingSchool.map((item) => item.id)).toEqual(['faculty-a']);
+    expect(preview.unsetUsers).toEqual([]);
     expect(writeBatch).not.toHaveBeenCalled();
   });
 
@@ -316,12 +328,14 @@ describe('removing a school from users', () => {
     ];
 
     expect(masterSchools.findUsersWithRemovedSchools(users, [SCHOOL_B], 'super-1').map((item) => item.id))
-      .toEqual(['admin-stale', 'admin-orphan']);
+      .toEqual(['admin-stale', 'admin-orphan', 'tester-1']);
 
     const result = await masterSchools.removeStaleSchoolsFromUsers('super-1', users);
 
     const updates = updatesById();
-    expect(Object.keys(updates).sort()).toEqual(['admin-orphan', 'admin-stale']);
+    expect(Object.keys(updates).sort()).toEqual(['admin-orphan', 'admin-stale', 'tester-1']);
+    expect(updates['tester-1']).toEqual({ school: '', updatedAt: expect.anything() });
+    expect(result.unsetUsers.map((item) => item.id)).toEqual(['tester-1']);
     expect(updates['admin-stale'].schools).toEqual({ kind: 'arrayRemove', values: ['1test2 school'] });
     expect(updates['admin-orphan'].schools).toEqual({ kind: 'deleteField' });
     expect(result.leftWithoutSchools.map((item) => item.id)).toEqual(['admin-orphan']);

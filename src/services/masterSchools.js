@@ -220,32 +220,69 @@ const userSummary = (id, data) => ({
 });
 
 /**
- * The update that drops every school name not on the master list from one
- * user's `schools`. firestore.rules only accepts a changed `schools` list
- * when it is non-empty and every name is listed, so stale names go together
- * and an emptied list is deleted instead of written as [].
- * Faculty keep one `school` string and never a `schools` list.
- * Returns null when nothing needs to change.
+ * "Leave unset" in the user card school selector is the empty string: the
+ * option is `<option value="">Leave unset</option>` and saving it writes
+ * `school: ''`. Reads treat a missing `school` the same way.
+ */
+export const UNSET_SCHOOL = '';
+
+const singleSchoolOf = (data) => (typeof data?.school === 'string' ? data.school.trim() : '');
+
+/**
+ * The update for one user after schools leave the master list.
+ * - `schools`: every name not on the master list is dropped. firestore.rules
+ *   only accept a changed list that is non-empty and fully listed, so stale
+ *   names go together and an emptied list is deleted instead of written as [].
+ *   Faculty never keep a `schools` list.
+ * - `school`: a single school that is not on the master list is set to
+ *   "Leave unset" (UNSET_SCHOOL). Faculty are skipped: rules require faculty to
+ *   keep one non-empty school and the selector has no unset option for them.
+ * Role and status are never part of the update. Returns null when nothing changes.
  */
 export const planUserSchoolCleanup = (id, data, masterNames) => {
   const listed = new Set(masterNames);
+  const isFaculty = data?.role === 'faculty';
   const current = rawSchoolsOf(data);
   const stale = current.filter((name) => !listed.has(name));
-  const isFaculty = data?.role === 'faculty';
-  if (!isFaculty && stale.length === 0) return null;
-  if (isFaculty && !Array.isArray(data?.schools)) return null;
+  const listChanges = isFaculty ? Array.isArray(data?.schools) : stale.length > 0;
+  const single = singleSchoolOf(data);
+  const singleStale = single !== '' && !listed.has(single);
+  const clearSchool = singleStale && !isFaculty;
+  if (!listChanges && !clearSchool) return null;
   const remaining = isFaculty ? [] : current.filter((name) => listed.has(name));
   return {
     ...userSummary(id, data),
-    removed: isFaculty ? current : stale,
-    schools: remaining,
-    leftWithoutSchools: !isFaculty && remaining.length === 0,
+    removed: listChanges ? (isFaculty ? current : stale) : [],
+    listChanges,
+    schools: listChanges ? remaining : current,
+    clearSchool,
+    school: clearSchool ? UNSET_SCHOOL : (typeof data?.school === 'string' ? data.school : ''),
+    previousSchool: single,
+    leftWithoutSchools: listChanges && !isFaculty && current.length > 0 && remaining.length === 0,
   };
 };
 
-const cleanupPayload = (plan) => ({
-  schools: plan.schools.length === 0 ? deleteField() : arrayRemove(...plan.removed),
-  updatedAt: Timestamp.now(),
+const cleanupPayload = (plan) => {
+  const payload = { updatedAt: Timestamp.now() };
+  if (plan.listChanges) {
+    payload.schools = plan.schools.length === 0 ? deleteField() : arrayRemove(...plan.removed);
+  }
+  if (plan.clearSchool) payload.school = UNSET_SCHOOL;
+  return payload;
+};
+
+/** Faculty whose one school is off the master list. They are not changed. */
+const facultyWithStaleSchool = (id, data, masterNames) => {
+  if (data?.role !== 'faculty') return null;
+  const single = singleSchoolOf(data);
+  return single !== '' && !masterNames.includes(single) ? userSummary(id, data) : null;
+};
+
+const summarizePlans = (plans, facultyNeedingSchool = []) => ({
+  users: plans,
+  unsetUsers: plans.filter((plan) => plan.clearSchool),
+  leftWithoutSchools: plans.filter((plan) => plan.leftWithoutSchools),
+  facultyNeedingSchool,
 });
 
 /** Commits user cleanups in batches of 500, then `finalWrites` in the last batch. */
@@ -284,33 +321,33 @@ const usersWithSchool = async (schoolName) => {
     getDocs(query(collection(db, USERS_COLLECTION), where('schools', 'array-contains', schoolName))),
     getDocs(query(collection(db, USERS_COLLECTION), where('school', '==', schoolName))),
   ]);
-  const listDocs = [];
-  listSnap.forEach((docSnap) => listDocs.push(docSnap));
-  const singleUsers = [];
-  singleSnap.forEach((docSnap) => singleUsers.push(userSummary(docSnap.id, docSnap.data())));
-  return { listDocs, singleUsers };
+  const byId = new Map();
+  listSnap.forEach((docSnap) => byId.set(docSnap.id, docSnap));
+  singleSnap.forEach((docSnap) => byId.set(docSnap.id, docSnap));
+  return [...byId.values()];
 };
 
 const planSchoolRemoval = async (userId, schoolName, existing) => {
   const nextNames = namesOf(existing.filter((record) => record.name !== schoolName));
-  const { listDocs, singleUsers } = await usersWithSchool(schoolName);
+  const docs = await usersWithSchool(schoolName);
   const plans = [];
+  const facultyNeedingSchool = [];
   let skippedSelf = false;
-  listDocs.forEach((docSnap) => {
-    const plan = planUserSchoolCleanup(docSnap.id, docSnap.data(), nextNames);
-    if (!plan) return;
+  docs.forEach((docSnap) => {
+    const data = docSnap.data();
+    const plan = planUserSchoolCleanup(docSnap.id, data, nextNames);
+    const faculty = facultyWithStaleSchool(docSnap.id, data, nextNames);
     // Rules never let anyone change the school tags on their own document.
     if (docSnap.id === userId) {
-      skippedSelf = true;
+      if (plan) skippedSelf = true;
       return;
     }
-    plans.push(plan);
+    if (faculty) facultyNeedingSchool.push(faculty);
+    if (plan) plans.push(plan);
   });
   return {
     school: schoolName,
-    users: plans,
-    leftWithoutSchools: plans.filter((plan) => plan.leftWithoutSchools),
-    singleSchoolUsers: singleUsers,
+    ...summarizePlans(plans, facultyNeedingSchool),
     skippedSelf,
   };
 };
@@ -330,11 +367,11 @@ export const previewMasterSchoolRemoval = async (userId, name) => {
 };
 
 /**
- * Removes the school from the master list and from every user's `schools`.
- * Fit tests keep the name because they are historical records. A tester or
- * faculty `school` string is not changed: clearing it would block a tester from
- * saving fit tests and rules require faculty to keep one school, so those
- * users are returned for the super admin to reassign. Role and status never change.
+ * Removes the school from the master list and from every user: it leaves
+ * each `schools` list, and a single `school` that was this name is set to
+ * "Leave unset". Fit tests keep the name because they are historical records.
+ * Faculty keep their `school` (rules require one) and are returned for the
+ * super admin to reassign. Role and status never change.
  */
 export const removeMasterSchool = async (userId, name) => {
   await assertSuperAdminWriter(userId);
@@ -354,25 +391,27 @@ export const removeMasterSchool = async (userId, name) => {
 };
 
 /**
- * Users (from a list the super admin already loaded) whose `schools` holds a
- * name that is no longer on the master list.
+ * Users (from a list the super admin already loaded) with a `schools` entry or
+ * a single `school` that is no longer on the master list.
  */
 export const findUsersWithRemovedSchools = (users, masterNames, actorId) => (
   (Array.isArray(users) ? users : [])
     .filter((item) => item?.id && item.id !== actorId)
     .map((item) => planUserSchoolCleanup(item.id, item, masterNames))
     .filter(Boolean)
-    .filter((plan) => plan.removed.length > 0)
+    .filter((plan) => plan.removed.length > 0 || plan.clearSchool)
 );
 
 /** Drops names that are no longer on the master list from those users. */
 export const removeStaleSchoolsFromUsers = async (userId, users) => {
   await assertSuperAdminWriter(userId);
   const existing = await readFreshMasterRecords();
-  const plans = findUsersWithRemovedSchools(users, namesOf(existing), userId);
+  const names = namesOf(existing);
+  const plans = findUsersWithRemovedSchools(users, names, userId);
   await commitUserCleanups(plans);
-  return {
-    users: plans,
-    leftWithoutSchools: plans.filter((plan) => plan.leftWithoutSchools),
-  };
+  const facultyNeedingSchool = (Array.isArray(users) ? users : [])
+    .filter((item) => item?.id && item.id !== userId)
+    .map((item) => facultyWithStaleSchool(item.id, item, names))
+    .filter(Boolean);
+  return summarizePlans(plans, facultyNeedingSchool);
 };

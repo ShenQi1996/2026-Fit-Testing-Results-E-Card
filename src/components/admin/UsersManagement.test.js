@@ -1233,52 +1233,50 @@ describe('removing a school updates users', () => {
     const renderer = await renderPage(superAdminUser);
     const copy = schoolsSection(renderer).findByProps({ className: 'section-description' })
       .children.join('');
-    expect(copy).toContain('Removing a school also removes it from every user who has it.');
+    expect(copy).toContain('Removing a school also removes it from every user who has it, and sets users whose one school it was to Leave unset');
     expect(copy).toContain('Fit-test records keep the name.');
     expect(copy).not.toContain('Renaming or removing a school does not change existing user');
   });
 
   test('confirm names the affected users and the ones left with no schools', () => {
     const text = schoolRemovalConfirmText(HELENE, {
-      users: [{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Helen Admin' }],
+      users: [{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Helen Admin' }, { id: 't', name: 'Tess' }],
+      unsetUsers: [{ id: 't', name: 'Tess' }],
       leftWithoutSchools: [{ id: 'b', name: 'Helen Admin' }],
-      singleSchoolUsers: [{ id: 't', name: 'Tess' }],
+      facultyNeedingSchool: [{ id: 'f', name: 'Fay' }],
       skippedSelf: true,
     });
     expect(text).toContain(`Remove ${HELENE} from the school list?`);
-    expect(text).toContain(`2 users will have ${HELENE} removed from their schools: Ada, Helen Admin.`);
-    expect(text).toContain('1 user will have no schools left (Helen Admin). Their role and status do not change');
-    expect(text).toContain(`1 user use ${HELENE} as their one school (Tess). That is not changed.`);
+    expect(text).toContain(`3 users will have ${HELENE} removed: Ada, Helen Admin, Tess.`);
+    expect(text).toContain(`1 user with ${HELENE} as their school will be set to Leave unset (Tess).`);
+    expect(text).toContain('1 user will have no schools left (Helen Admin).');
+    expect(text).toContain(`1 user on faculty keeps ${HELENE} because faculty must have one school (Fay).`);
+    expect(text).toContain('Role and status do not change.');
     expect(text).toContain('Your own account keeps the name');
     expect(text).toContain('Fit-test records keep this school name.');
   });
 
   test('confirming removes the school from user cards without a reload', async () => {
-    previewMasterSchoolRemoval.mockResolvedValue({
+    const outcome = {
       users: [
-        { id: 'admin-2', name: 'Ada', schools: [SECOND] },
-        { id: 'admin-helene', name: 'Helen Admin', schools: [] },
+        { id: 'admin-2', name: 'Ada', schools: [SECOND], listChanges: true },
+        { id: 'admin-helene', name: 'Helen Admin', schools: [], listChanges: true },
+        { id: 'tester-1', name: 'Tess', schools: [], clearSchool: true, school: '' },
       ],
+      unsetUsers: [{ id: 'tester-1', name: 'Tess' }],
       leftWithoutSchools: [{ id: 'admin-helene', name: 'Helen Admin', schools: [] }],
-      singleSchoolUsers: [{ id: 'tester-1', name: 'Tess' }],
+      facultyNeedingSchool: [{ id: 'faculty-9', name: 'Fay' }],
       skippedSelf: true,
-    });
-    removeMasterSchool.mockResolvedValue({
-      names: [SECOND],
-      users: [
-        { id: 'admin-2', name: 'Ada', schools: [SECOND] },
-        { id: 'admin-helene', name: 'Helen Admin', schools: [] },
-      ],
-      leftWithoutSchools: [{ id: 'admin-helene', name: 'Helen Admin', schools: [] }],
-      singleSchoolUsers: [{ id: 'tester-1', name: 'Tess' }],
-      skippedSelf: true,
-    });
+    };
+    previewMasterSchoolRemoval.mockResolvedValue(outcome);
+    removeMasterSchool.mockResolvedValue({ ...outcome, names: [SECOND] });
     listMasterSchoolRecords
       .mockResolvedValueOnce(recordsFor([HELENE, SECOND]))
       .mockResolvedValue(recordsFor([SECOND]));
     const confirm = jest.fn(() => true);
     global.window = { confirm };
     const renderer = await renderPage(superAdminUser);
+    expect(cardFor(renderer, 'tester-1').findByProps({ 'aria-label': 'School' }).props.value).toBe(HELENE);
 
     await act(async () => {
       sectionButton(renderer, `Remove ${HELENE}`).props.onClick();
@@ -1288,14 +1286,20 @@ describe('removing a school updates users', () => {
     });
 
     expect(previewMasterSchoolRemoval).toHaveBeenCalledWith('super-1', HELENE);
-    expect(confirm.mock.calls[0][0]).toContain(`2 users will have ${HELENE} removed`);
+    expect(confirm.mock.calls[0][0]).toContain(`3 users will have ${HELENE} removed`);
+    expect(confirm.mock.calls[0][0]).toContain('will be set to Leave unset (Tess)');
     expect(removeMasterSchool).toHaveBeenCalledWith('super-1', HELENE);
     expect(checkboxNames(schoolGroup(cardFor(renderer, 'admin-2')))).toEqual([SECOND]);
     expect(checkboxFor(schoolGroup(cardFor(renderer, 'admin-2')), SECOND).props.checked).toBe(true);
+    // The tester's selector now sits on the Leave unset option.
+    const testerSelect = cardFor(renderer, 'tester-1').findByProps({ 'aria-label': 'School' });
+    expect(testerSelect.props.value).toBe('');
+    expect(testerSelect.findAllByType('option')[0].children).toEqual(['Leave unset']);
     const text = allText(renderer);
-    expect(text).toContain(`Removed ${HELENE} from the school list and from 2 users. Fit-test records keep the name.`);
+    expect(text).toContain(`Removed ${HELENE} from the school list and from 3 users. Fit-test records keep the name.`);
+    expect(text).toContain('Set 1 user to Leave unset: Tess.');
     expect(text).toContain('1 user now has no schools: Helen Admin.');
-    expect(text).toContain(`1 user still has ${HELENE} as their one school: Tess.`);
+    expect(text).toContain('1 user on faculty still has a removed school and needs a new one: Fay.');
   });
 
   test('cancelling the confirm writes nothing', async () => {

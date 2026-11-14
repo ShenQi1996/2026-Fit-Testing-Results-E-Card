@@ -866,7 +866,8 @@ test('school tags must be current master-list names', async () => {
   const superDb = testEnv.authenticatedContext('super-1').firestore();
   const adminDb = testEnv.authenticatedContext('admin-1').firestore();
 
-  await assertFails(updateDoc(doc(superDb, 'users/tester-1'), { school: '' }));
+  // '' is "Leave unset" in the user card selector, so a super admin may clear it.
+  await assertSucceeds(updateDoc(doc(superDb, 'users/tester-1'), { school: '' }));
   await assertFails(updateDoc(doc(superDb, 'users/tester-1'), { school: 'Helene College of Nursin' }));
   await assertSucceeds(updateDoc(doc(superDb, 'users/tester-1'), { school: SECOND }));
   await assertFails(updateDoc(doc(superDb, 'users/admin-1'), { schools: [] }));
@@ -3292,6 +3293,7 @@ describe('removing a school removes it from users', () => {
     ['users/admin-stale', scopedAdmin([HELENE, STALE, SECOND], 'stale@example.com')],
     ['users/admin-second', scopedAdmin([SECOND], 'second@example.com')],
     ['users/tester-h', testerAt(HELENE, { status: 'approved' })],
+    ['users/tester-second', testerAt(SECOND, { status: 'approved', email: 't2@example.com' })],
     ['users/faculty-h', approved('faculty', 'faculty@example.com', { school: HELENE })],
     ['fitTests/fit-1', { userId: 'tester-h', creatorSchool: HELENE, schoolsList: HELENE }],
   ]);
@@ -3302,8 +3304,9 @@ describe('removing a school removes it from users', () => {
 
     const preview = await masterSchools.previewMasterSchoolRemoval('super-1', HELENE);
     expect(preview.users.map((item) => item.id).sort())
-      .toEqual(['admin-only', 'admin-stale', 'admin-two', 'super-2']);
-    expect(preview.singleSchoolUsers.map((item) => item.id).sort()).toEqual(['faculty-h', 'tester-h']);
+      .toEqual(['admin-only', 'admin-stale', 'admin-two', 'super-2', 'tester-h']);
+    expect(preview.unsetUsers.map((item) => item.id)).toEqual(['tester-h']);
+    expect(preview.facultyNeedingSchool.map((item) => item.id)).toEqual(['faculty-h']);
 
     const result = await masterSchools.removeMasterSchool('super-1', HELENE);
     expect(result.names).toEqual([SECOND]);
@@ -3320,8 +3323,12 @@ describe('removing a school removes it from users', () => {
     expect(after['admin-only'].role).toBe('admin');
     expect(after['admin-only'].status).toBe('approved');
     expect(after['admin-second'].schools).toEqual([SECOND]);
-    // Single-school users and fit tests are untouched.
-    expect(after['tester-h'].school).toBe(HELENE);
+    // The tester is set to Leave unset (''); role and status stay.
+    expect(after['tester-h'].school).toBe('');
+    expect(after['tester-h'].role).toBe('tester');
+    expect(after['tester-h'].status).toBe('approved');
+    expect(after['tester-second'].school).toBe(SECOND);
+    // Faculty must keep one school, so they are not changed. Fit tests are untouched.
     expect(after['faculty-h'].school).toBe(HELENE);
     expect(after.fitTest.schoolsList).toBe(HELENE);
     expect(after.fitTest.creatorSchool).toBe(HELENE);
@@ -3356,6 +3363,55 @@ describe('removing a school removes it from users', () => {
     await assertFails(updateDoc(doc(superDb, 'users/admin-stale'), { schools: [STALE, SECOND] }));
     // Nobody can change their own school tags.
     await assertFails(updateDoc(doc(superDb, 'users/super-1'), { schools: deleteField() }));
+  });
+
+  test('only a super admin can set another non-faculty user to Leave unset', async () => {
+    await seedCascade();
+    const superDb = testEnv.authenticatedContext('super-1').firestore();
+    const adminDb = testEnv.authenticatedContext('admin-two').firestore();
+    const testerDb = testEnv.authenticatedContext('tester-h').firestore();
+
+    // Scoped admin and the tester themselves cannot clear a school.
+    await assertFails(updateDoc(doc(adminDb, 'users/tester-h'), { school: '' }));
+    await assertFails(updateDoc(doc(testerDb, 'users/tester-h'), { school: '' }));
+    // Faculty must keep one non-empty school.
+    await assertFails(updateDoc(doc(superDb, 'users/faculty-h'), { school: '' }));
+    // A non-empty name still has to be on the master list.
+    await assertFails(updateDoc(doc(superDb, 'users/tester-h'), { school: 'Not A School' }));
+    await assertFails(updateDoc(doc(superDb, 'users/tester-h'), { school: ' ' }));
+    // Nobody can clear their own school.
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'users/super-1'), { school: HELENE });
+    });
+    await assertFails(updateDoc(doc(superDb, 'users/super-1'), { school: '' }));
+    // Super admin sets a tester and an admin's legacy single school to ''.
+    await assertSucceeds(updateDoc(doc(superDb, 'users/tester-h'), { school: '' }));
+    await assertSucceeds(updateDoc(doc(superDb, 'users/admin-two'), { school: '' }));
+    // And can assign a listed school again afterwards.
+    await assertSucceeds(updateDoc(doc(superDb, 'users/tester-h'), { school: SECOND }));
+    // A new profile still cannot be created with school ''.
+    await assertFails(setDoc(doc(superDb, 'users/new-tester'), {
+      role: 'tester', status: 'pending', email: 'n@example.com', school: '',
+    }));
+  });
+
+  test('a tester left unset cannot save a fit test and drops out of scoped admin lists', async () => {
+    await seedCascade();
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'users/tester-h'), { school: '' });
+    });
+    const testerDb = testEnv.authenticatedContext('tester-h').firestore();
+    const adminDb = testEnv.authenticatedContext('admin-second').firestore();
+
+    // Their own profile is still readable, so sign-in works.
+    await assertSucceeds(getDoc(doc(testerDb, 'users/tester-h')));
+    await assertFails(setDoc(doc(testerDb, 'fitTests/new-fit'), {
+      userId: 'tester-h',
+      creatorRole: 'tester',
+      creatorSchool: HELENE,
+      schoolsList: '',
+    }));
+    await assertFails(getDoc(doc(adminDb, 'users/tester-h')));
   });
 
   test('old names already on users can be cleaned up', async () => {

@@ -230,13 +230,17 @@ service cloud.firestore {
     }
 
     // Unchanged names skip the master list, including names removed after they were stored.
+    // A changed school may also be '' ("Leave unset" in the user card selector).
+    // Only a super admin reaches this (schoolTagsOkOnUpdate), and faculty still
+    // need one non-empty school (facultyAccountShapeOk).
     function updateSchoolMembershipOk() {
       return (!schoolChanged() && !schoolsChanged())
         ? true
         : (
           (schoolChanged()
             ? (request.resource.data.keys().hasAny(['school'])
-                ? schoolStringListed(request.resource.data.school)
+                ? (request.resource.data.school == ''
+                  || schoolStringListed(request.resource.data.school))
                 : true)
             : true)
           && (schoolsChanged()
