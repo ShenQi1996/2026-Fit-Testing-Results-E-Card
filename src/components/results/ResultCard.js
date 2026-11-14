@@ -69,7 +69,7 @@ const ResultCardView = ({ test, expanded, onToggleExpand }) => (
           <h4 className="result-section-title">Respirator Details</h4>
           <ResultRow label="Respirator MFG:" value={test.respiratorMfg || 'N/A'} />
           <ResultRow label="Model:" value={test.model || 'N/A'} />
-          <ResultRow label="Style:" value={test.style || 'N/A'} />
+          <ResultRow label="Style:" value={test.style || '—'} />
           <ResultRow label="Testing Agent:" value={test.testingAgent || 'N/A'} />
           <ResultRow label="Mask Size:" value={test.maskSize || 'N/A'} />
         </div>

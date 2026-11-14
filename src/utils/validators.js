@@ -1,4 +1,5 @@
 // Validation utility functions
+import { isRespiratorStyle } from '../constants/fitTestOptions';
 
 /**
  * Validate email address format
@@ -73,7 +74,7 @@ export const validateFitTestForm = (formData, hasStrokes = false, hasTesterStrok
     fieldErrors.model = 'Please enter the respirator model.';
   }
 
-  if (!formData.style?.trim()) {
+  if (!isRespiratorStyle(formData.style)) {
     fieldErrors.style = 'Please select the respirator style.';
   }
 

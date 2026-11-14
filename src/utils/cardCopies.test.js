@@ -38,6 +38,13 @@ test('only legacy Quantitative records display a fit factor', () => {
   expect(legacyFitFactorDisplay(null)).toBe('');
 });
 
+test('card copies carry the respirator style and tolerate a legacy record without one', () => {
+  expect(toVerifyCardData({ ...legacy, style: 'Cup (molded)' }).style).toBe('Cup (molded)');
+  expect(toLookupCardData({ ...legacy, style: 'Cup (molded)' }).style).toBe('Cup (molded)');
+  expect(() => toVerifyCardData(legacy)).not.toThrow();
+  expect(() => toLookupCardData(legacy)).not.toThrow();
+});
+
 test('card copies drop deleteField sentinels instead of copying them into set()', () => {
   const edited = {
     clientName: 'Ada',

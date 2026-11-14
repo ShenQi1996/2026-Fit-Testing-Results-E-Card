@@ -51,3 +51,18 @@ test('a legacy Quantitative e-card prints its stored fit factor', () => {
   expect(escaped).toContain('&lt;b&gt;99&lt;/b&gt;');
   expect(escaped).not.toContain('<b>99</b>');
 });
+
+test('the emailed e-card prints the respirator style, HTML-escaped', () => {
+  const html = generateFitTestCard({ clientName: 'Ada', style: 'Cup (molded)' });
+  expect(html).toContain('Style:');
+  expect(html).toContain('Cup (molded)');
+
+  const hostile = generateFitTestCard({ clientName: 'Ada', style: '<img src=x onerror=alert(1)>' });
+  expect(hostile).not.toContain('<img src=x');
+  expect(hostile).toContain('&lt;img src=x onerror=alert(1)&gt;');
+});
+
+test('a legacy e-card with no style has no Style row', () => {
+  const html = generateFitTestCard({ clientName: 'Ada' });
+  expect(html).not.toContain('Style:');
+});
