@@ -11,8 +11,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- Medical restriction notes are stored apart from fit test records, in `fitTestMedicalNotes`, which only the record owner and in-scope admins can read. A fit test create cannot include the note, and notes already on older records are left as they are (#41)
-- School program administrator name and contact are stored on schools and user profiles. Selecting a school copies them onto the fit test record, and the send form no longer asks for them (#33)
+- Medical restriction notes are stored apart from fit test records, in `fitTestMedicalNotes`, which only the record owner and in-scope admins can read. A fit test create cannot include the note. Older records that still carry notes on the fit test keep them until an in-scope admin edits the record; that edit moves the notes into `fitTestMedicalNotes` and removes them from the fit test in the same batch (#41)
+- School program administrator name and contact are stored on schools and user profiles. Selecting a school copies them onto the fit test record, field by field: the school's value is used when set, and a blank school field falls back to the signed-in user's profile value. The send form no longer asks for them (#33)
 - Respirator style dropdown with exactly Cup (molded), Flat-fold, and Duckbill, required on the add and edit forms. Records with no style, or an earlier style value, still display and verify as stored; editing one requires choosing a style before saving
 - MIT license (`LICENSE`, copyright 2026 Secure Fit LLC)
 - Security policy (`SECURITY.md`): private reports to SecureFit2024@gmail.com, latest `main` supported, reply aimed within 7 days
@@ -20,7 +20,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Contributing guide (`CONTRIBUTING.md`)
 - Code owners (`.github/CODEOWNERS`)
 - GitHub issue templates and pull request template
-- GitHub Actions CI workflow that runs `npm ci` and `npm run build` on push and pull request to `main`
+- GitHub Actions CI workflow on push and pull request to `main` and `staging` (and manual runs), with three jobs: build (`npm ci`, lint, `npm run build`, `npm test`), rules (`npm run test:rules` on the Firestore emulator), and config builds (a staging-config build with a dummy project, plus a no-env build that must keep the production Firebase config)
 
 ### Changed
 
