@@ -54,7 +54,7 @@ import {
   isSuperAdmin,
 } from '../utils/roles';
 import { normalizeSchoolList } from '../utils/schoolScope';
-import { toLookupCardData, toVerifyCardData } from '../utils/cardCopies';
+import { isDeleteFieldSentinel, toLookupCardData, toVerifyCardData } from '../utils/cardCopies';
 
 const FIT_TESTS_COLLECTION = 'fitTests';
 const FIT_TEST_DELETION_LOGS_COLLECTION = 'fitTestDeletionLogs';
@@ -852,6 +852,11 @@ export const ensureFitTestVerification = async (record, userId) => {
   const verificationToken = resolveVerificationToken(record);
   const lookupKey = await resolveLookupKey(record);
   const nextRecord = { ...record, verificationToken, ...(lookupKey ? { lookupKey } : {}) };
+  // A record from local state may still hold a deleteField() sentinel from an
+  // edit. The card copies below are written with setDoc, so drop it here.
+  Object.keys(nextRecord).forEach((field) => {
+    if (isDeleteFieldSentinel(nextRecord[field])) delete nextRecord[field];
+  });
   const parentPatch = {};
   if (record.verificationToken !== verificationToken) parentPatch.verificationToken = verificationToken;
   if (lookupKey && record.lookupKey !== lookupKey) parentPatch.lookupKey = lookupKey;
@@ -909,11 +914,7 @@ const sameStoredValue = (left, right) => {
 
 const editHistoryValue = (value) => (value === undefined ? null : value);
 
-const isDeleteSentinel = (value) => (
-  value != null
-  && typeof value === 'object'
-  && (value.kind === 'deleteField' || value._methodName === 'deleteField')
-);
+const isDeleteSentinel = isDeleteFieldSentinel;
 
 const latestRemainingFitTest = async (lookupKey, removedFitTestId) => {
   if (!lookupKey) return null;
@@ -1280,11 +1281,12 @@ export const deleteFitTest = async (fitTestId, userId, reason) => {
       }
     }
 
-    const noteRef = doc(db, FIT_TEST_MEDICAL_NOTES_COLLECTION, fitTestId);
-    const noteSnap = await getDoc(noteRef);
-    if (noteSnap.exists()) {
-      batch.delete(noteRef);
-    }
+    // Delete the note without reading it first. Most records, including
+    // legacy ones, have no note doc, and the note read rule uses resource.data,
+    // which fails on a missing doc and surfaced as permission-denied. A batch
+    // delete of a missing doc is a no-op, and the note delete rule checks only
+    // the parent's soft-delete stamp, so this works with or without a note.
+    batch.delete(doc(db, FIT_TEST_MEDICAL_NOTES_COLLECTION, fitTestId));
 
     await batch.commit();
     notifyFitTestActivity();
