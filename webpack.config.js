@@ -147,9 +147,11 @@ const buildConfig = () => ({
         rules: [
             {
                 test: /\.(js|jsx)$/i,
+                exclude: /node_modules/,
                 loader: 'babel-loader',
                 options: {
                     presets: ['@babel/preset-env', '@babel/preset-react'],
+                    cacheDirectory: true,
                 }
             },
             {
@@ -170,5 +172,14 @@ module.exports = (env, argv) => {
     return {
         ...buildConfig(),
         mode: mode === 'none' ? 'none' : mode,
+        // Development source maps only. Production stays without source maps,
+        // matching webpack's default when devtool is unset.
+        devtool: mode === 'development' ? 'eval-cheap-module-source-map' : false,
+        cache: {
+            type: 'filesystem',
+            buildDependencies: {
+                config: [__filename],
+            },
+        },
     };
 };
