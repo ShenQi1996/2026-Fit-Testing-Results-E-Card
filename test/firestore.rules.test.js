@@ -3365,6 +3365,50 @@ describe('removing a school removes it from users', () => {
     await assertFails(updateDoc(doc(superDb, 'users/super-1'), { schools: deleteField() }));
   });
 
+  test('a main school moves to the first remaining school in the same write the rules accept', async () => {
+    await seed([
+      ['users/super-1', approved('superadmin', 'sam@example.com')],
+      ['users/admin-multi', scopedAdmin([HELENE, SECOND], 'multi@example.com')],
+      ['users/admin-only', scopedAdmin([HELENE], 'only@example.com')],
+      ['users/tester-list', testerAt(HELENE, { status: 'approved', schools: [SECOND] })],
+      ['users/faculty-h', approved('faculty', 'faculty@example.com', { school: HELENE })],
+    ]);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await updateDoc(doc(db, 'users/admin-multi'), { school: HELENE });
+      await updateDoc(doc(db, 'users/admin-only'), { school: HELENE });
+    });
+    mockAppDb = testEnv.authenticatedContext('super-1').firestore();
+
+    const result = await masterSchools.removeMasterSchool('super-1', HELENE);
+
+    const after = await readAll();
+    expect(after['admin-multi'].schools).toEqual([SECOND]);
+    expect(after['admin-multi'].school).toBe(SECOND);
+    expect(after['admin-only']).not.toHaveProperty('schools');
+    expect(after['admin-only'].school).toBe('');
+    expect(after['tester-list'].school).toBe(SECOND);
+    expect(after['tester-list'].role).toBe('tester');
+    expect(after['faculty-h'].school).toBe(HELENE);
+    expect(result.switchedUsers.map((item) => item.id).sort()).toEqual(['admin-multi', 'tester-list']);
+    expect(result.unsetUsers.map((item) => item.id)).toEqual(['admin-only']);
+  });
+
+  test('a super admin may switch school and schools together only to listed names', async () => {
+    await seedCascade();
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'users/admin-two'), { school: HELENE });
+    });
+    const superDb = testEnv.authenticatedContext('super-1').firestore();
+    const adminDb = testEnv.authenticatedContext('admin-only').firestore();
+
+    await assertFails(updateDoc(doc(superDb, 'users/admin-two'), {
+      schools: [SECOND], school: 'Not A School',
+    }));
+    await assertFails(updateDoc(doc(adminDb, 'users/admin-two'), { schools: [SECOND], school: SECOND }));
+    await assertSucceeds(updateDoc(doc(superDb, 'users/admin-two'), { schools: [SECOND], school: SECOND }));
+  });
+
   test('only a super admin can set another non-faculty user to Leave unset', async () => {
     await seedCascade();
     const superDb = testEnv.authenticatedContext('super-1').firestore();

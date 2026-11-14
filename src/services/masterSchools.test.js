@@ -211,7 +211,8 @@ describe('removing a school from users', () => {
     expect(result.skippedSelf).toBe(true);
     // A single school that was the deleted name is set to Leave unset ('').
     expect(updates['tester-a']).toEqual({ school: '', updatedAt: expect.anything() });
-    expect(updates['admin-legacy']).toEqual({ school: '', updatedAt: expect.anything() });
+    // Other schools left: the main school moves to the first one instead.
+    expect(updates['admin-legacy']).toEqual({ school: SCHOOL_B, updatedAt: expect.anything() });
     expect(masterSchools.UNSET_SCHOOL).toBe('');
     // Faculty must keep one school, so they are left alone and reported.
     expect(updates['faculty-a']).toBeUndefined();
@@ -221,7 +222,8 @@ describe('removing a school from users', () => {
       expect(payload).not.toHaveProperty('role');
       expect(payload).not.toHaveProperty('status');
     });
-    expect(result.unsetUsers.map((item) => item.id).sort()).toEqual(['admin-legacy', 'tester-a']);
+    expect(result.unsetUsers.map((item) => item.id)).toEqual(['tester-a']);
+    expect(result.switchedUsers.map((item) => [item.id, item.school])).toEqual([['admin-legacy', SCHOOL_B]]);
     expect(result.leftWithoutSchools.map((item) => item.id)).toEqual(['admin-only']);
     expect(result.users.find((item) => item.id === 'admin-stale').schools).toEqual([SCHOOL_B]);
 
@@ -236,6 +238,53 @@ describe('removing a school from users', () => {
       .map(([q]) => q.args.find((arg) => arg?.kind === 'where'))
       .find((filter) => filter?.field === 'schools');
     expect(listQuery).toEqual({ kind: 'where', field: 'schools', op: 'array-contains', value: SCHOOL_A });
+  });
+
+  test('a main school moves to the first remaining school in array order, or unset when none remain', async () => {
+    const SCHOOL_C = 'Gamma School';
+    mockFirestore({
+      directory: [SCHOOL_A, SCHOOL_B, SCHOOL_C],
+      listUsers: [
+        // Deleted name first in the list, then C, then B: C is next.
+        userSnap('multi', { role: 'admin', school: SCHOOL_A, schools: [SCHOOL_A, SCHOOL_C, SCHOOL_B] }),
+        // Main school deleted, list holds only the deleted name.
+        userSnap('only-a', { role: 'admin', school: SCHOOL_A, schools: [SCHOOL_A] }),
+        // Main school deleted, list holds a stale name and B.
+        userSnap('stale-first', { role: 'superadmin', school: SCHOOL_A, schools: ['Old Gone', SCHOOL_A, SCHOOL_B] }),
+        // Main school is another listed school: it stays.
+        userSnap('keeps-main', { role: 'admin', school: SCHOOL_C, schools: [SCHOOL_A, SCHOOL_C] }),
+        userSnap('faculty-multi', { role: 'faculty', school: SCHOOL_A, schools: [SCHOOL_A, SCHOOL_B] }),
+      ],
+      singleUsers: [
+        userSnap('tester-with-list', { role: 'tester', school: SCHOOL_A, schools: [SCHOOL_B] }),
+      ],
+    });
+
+    const result = await masterSchools.removeMasterSchool('super-1', SCHOOL_A);
+    const updates = updatesById();
+
+    expect(updates.multi).toEqual({
+      schools: { kind: 'arrayRemove', values: [SCHOOL_A] },
+      school: SCHOOL_C,
+      updatedAt: expect.anything(),
+    });
+    expect(updates['only-a']).toEqual({
+      schools: { kind: 'deleteField' },
+      school: '',
+      updatedAt: expect.anything(),
+    });
+    expect(updates['stale-first'].school).toBe(SCHOOL_B);
+    expect(updates['keeps-main']).not.toHaveProperty('school');
+    expect(updates['tester-with-list']).toEqual({ school: SCHOOL_B, updatedAt: expect.anything() });
+    // Faculty keep their school; only the legacy list goes.
+    expect(updates['faculty-multi']).toEqual({ schools: { kind: 'deleteField' }, updatedAt: expect.anything() });
+    expect(result.switchedUsers.map((item) => [item.id, item.school]).sort()).toEqual([
+      ['multi', SCHOOL_C],
+      ['stale-first', SCHOOL_B],
+      ['tester-with-list', SCHOOL_B],
+    ]);
+    expect(result.unsetUsers.map((item) => item.id)).toEqual(['only-a']);
+    expect(result.facultyNeedingSchool.map((item) => item.id)).toEqual(['faculty-multi']);
   });
 
   test('splits more than 500 user updates across batches and deletes the school last', async () => {

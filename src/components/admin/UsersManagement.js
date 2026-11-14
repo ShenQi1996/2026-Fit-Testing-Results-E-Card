@@ -115,11 +115,18 @@ const nameList = (users, max = 5) => {
 
 const hasHave = (count) => (count === 1 ? 'has' : 'have');
 
+const switchList = (users, max = 5) => {
+  const labels = users.map((item) => `${item.name || item.email || item.id} → ${item.school}`);
+  if (labels.length <= max) return labels.join(', ');
+  return `${labels.slice(0, max).join(', ')} and ${labels.length - max} more`;
+};
+
 /** Confirm text for removing a school, from previewMasterSchoolRemoval. */
 export const schoolRemovalConfirmText = (name, preview) => {
   const lines = [`Remove ${name} from the school list?`];
   const affected = preview?.users || [];
   const unset = preview?.unsetUsers || [];
+  const switched = preview?.switchedUsers || [];
   const emptied = preview?.leftWithoutSchools || [];
   const faculty = preview?.facultyNeedingSchool || [];
   if (affected.length > 0) {
@@ -127,8 +134,11 @@ export const schoolRemovalConfirmText = (name, preview) => {
   } else {
     lines.push(`No user has ${name}.`);
   }
+  if (switched.length > 0) {
+    lines.push(`${peopleLabel(switched.length)} with ${name} as their main school will switch to their next school: ${switchList(switched)}.`);
+  }
   if (unset.length > 0) {
-    lines.push(`${peopleLabel(unset.length)} with ${name} as their school will be set to Leave unset (${nameList(unset)}). They cannot save fit tests or send e-cards until you pick a school for them.`);
+    lines.push(`${peopleLabel(unset.length)} with ${name} as their school and no other school will be set to Leave unset (${nameList(unset)}). They can still save drafts, but cannot save fit tests or send e-cards until you pick a school for them.`);
   }
   if (emptied.length > 0) {
     lines.push(`${peopleLabel(emptied.length)} will have no schools left (${nameList(emptied)}). They will not see any school's users or fit tests until you assign a school.`);
@@ -150,8 +160,12 @@ export const schoolRemovalConfirmText = (name, preview) => {
 const cleanupResultParts = (result) => {
   const parts = [];
   const unset = result?.unsetUsers || [];
+  const switched = result?.switchedUsers || [];
   const emptied = result?.leftWithoutSchools || [];
   const faculty = result?.facultyNeedingSchool || [];
+  if (switched.length) {
+    parts.push(`Switched the main school for ${peopleLabel(switched.length)}: ${switchList(switched)}.`);
+  }
   if (unset.length) {
     parts.push(`Set ${peopleLabel(unset.length)} to Leave unset: ${nameList(unset)}.`);
   }
@@ -719,7 +733,7 @@ const UsersManagement = () => {
     const patch = (record, plan) => ({
       ...record,
       schools: [...(plan.schools || [])],
-      ...(plan.clearSchool ? { school: plan.school } : {}),
+      ...(plan.schoolChanges ? { school: plan.school } : {}),
     });
     setUsers((prev) => prev.map((item) => (
       byId.has(item.id) ? patch(item, byId.get(item.id)) : item
@@ -882,7 +896,7 @@ const UsersManagement = () => {
             <h3 className="section-title">Schools</h3>
             <p className="section-description">
               Master list of school names. Program administrator name and contact are optional.
-              Sending an e-card copies them from the selected school. Removing a school also removes it from every user who has it, and sets users whose one school it was to Leave unset (faculty keep theirs). Fit-test records keep the name. Renaming a school does not change users or fit-test records.
+              Sending an e-card copies them from the selected school. Removing a school also removes it from every user who has it. A user whose main school it was moves to their next school, or to Leave unset when they have none (faculty keep theirs). Fit-test records keep the name. Renaming a school does not change users or fit-test records.
             </p>
             {schoolListError && <div className="users-error" role="alert">{schoolListError}</div>}
             {staleSchoolUsers.length > 0 && (
@@ -1021,7 +1035,7 @@ const UsersManagement = () => {
               type="button"
               className="solution-add-button"
               onClick={handleAddSchool}
-              disabled={schoolBusy !== null}
+              disabled={schoolBusy !== null || !newSchoolName.trim()}
               aria-busy={schoolBusyAction('add') || undefined}
             >
               {busyContent(schoolBusyAction('add'), 'Adding…', '+ Add School')}

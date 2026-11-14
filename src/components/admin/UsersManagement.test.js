@@ -1233,7 +1233,7 @@ describe('removing a school updates users', () => {
     const renderer = await renderPage(superAdminUser);
     const copy = schoolsSection(renderer).findByProps({ className: 'section-description' })
       .children.join('');
-    expect(copy).toContain('Removing a school also removes it from every user who has it, and sets users whose one school it was to Leave unset');
+    expect(copy).toContain('Removing a school also removes it from every user who has it. A user whose main school it was moves to their next school, or to Leave unset when they have none');
     expect(copy).toContain('Fit-test records keep the name.');
     expect(copy).not.toContain('Renaming or removing a school does not change existing user');
   });
@@ -1242,13 +1242,15 @@ describe('removing a school updates users', () => {
     const text = schoolRemovalConfirmText(HELENE, {
       users: [{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Helen Admin' }, { id: 't', name: 'Tess' }],
       unsetUsers: [{ id: 't', name: 'Tess' }],
+      switchedUsers: [{ id: 'a', name: 'Ada', school: SECOND }],
       leftWithoutSchools: [{ id: 'b', name: 'Helen Admin' }],
       facultyNeedingSchool: [{ id: 'f', name: 'Fay' }],
       skippedSelf: true,
     });
     expect(text).toContain(`Remove ${HELENE} from the school list?`);
     expect(text).toContain(`3 users will have ${HELENE} removed: Ada, Helen Admin, Tess.`);
-    expect(text).toContain(`1 user with ${HELENE} as their school will be set to Leave unset (Tess).`);
+    expect(text).toContain(`1 user with ${HELENE} as their main school will switch to their next school: Ada → ${SECOND}.`);
+    expect(text).toContain(`1 user with ${HELENE} as their school and no other school will be set to Leave unset (Tess). They can still save drafts`);
     expect(text).toContain('1 user will have no schools left (Helen Admin).');
     expect(text).toContain(`1 user on faculty keeps ${HELENE} because faculty must have one school (Fay).`);
     expect(text).toContain('Role and status do not change.');
@@ -1259,11 +1261,16 @@ describe('removing a school updates users', () => {
   test('confirming removes the school from user cards without a reload', async () => {
     const outcome = {
       users: [
-        { id: 'admin-2', name: 'Ada', schools: [SECOND], listChanges: true },
+        {
+          id: 'admin-2', name: 'Ada', schools: [SECOND], listChanges: true, schoolChanges: true, switchedSchool: true, school: SECOND,
+        },
         { id: 'admin-helene', name: 'Helen Admin', schools: [], listChanges: true },
-        { id: 'tester-1', name: 'Tess', schools: [], clearSchool: true, school: '' },
+        {
+          id: 'tester-1', name: 'Tess', schools: [], schoolChanges: true, clearSchool: true, school: '',
+        },
       ],
       unsetUsers: [{ id: 'tester-1', name: 'Tess' }],
+      switchedUsers: [{ id: 'admin-2', name: 'Ada', school: SECOND }],
       leftWithoutSchools: [{ id: 'admin-helene', name: 'Helen Admin', schools: [] }],
       facultyNeedingSchool: [{ id: 'faculty-9', name: 'Fay' }],
       skippedSelf: true,
@@ -1297,6 +1304,7 @@ describe('removing a school updates users', () => {
     expect(testerSelect.findAllByType('option')[0].children).toEqual(['Leave unset']);
     const text = allText(renderer);
     expect(text).toContain(`Removed ${HELENE} from the school list and from 3 users. Fit-test records keep the name.`);
+    expect(text).toContain(`Switched the main school for 1 user: Ada → ${SECOND}.`);
     expect(text).toContain('Set 1 user to Leave unset: Tess.');
     expect(text).toContain('1 user now has no schools: Helen Admin.');
     expect(text).toContain('1 user on faculty still has a removed school and needs a new one: Fay.');
@@ -1446,8 +1454,16 @@ describe('removing a school updates users', () => {
         await Promise.resolve();
       });
       expect(addButton().children).toEqual(['+ Add School']);
-      expect(addButton().props.disabled).toBe(false);
+      // The name field is cleared, so Add stays off until a new name is typed.
+      // A late extra click cannot replace the success line with "Enter a school name."
+      expect(addButton().props.disabled).toBe(true);
       expect(allText(renderer)).toContain('Added school North Campus.');
+      await act(async () => {
+        renderer.root.findByProps({ 'aria-label': 'New school name' }).props.onChange({
+          target: { value: 'South Campus' },
+        });
+      });
+      expect(addButton().props.disabled).toBe(false);
     });
 
     test('a failed add shows the error and re-enables the button', async () => {
@@ -1455,6 +1471,12 @@ describe('removing a school updates users', () => {
       const renderer = await renderPage(superAdminUser);
       const addButton = () => schoolsSection(renderer).findAllByType('button')
         .find((button) => button.props.className === 'solution-add-button');
+      expect(addButton().props.disabled).toBe(true);
+      await act(async () => {
+        renderer.root.findByProps({ 'aria-label': 'New school name' }).props.onChange({
+          target: { value: HELENE },
+        });
+      });
       await act(async () => {
         addButton().props.onClick();
       });

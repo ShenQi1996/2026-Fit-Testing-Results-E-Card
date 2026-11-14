@@ -234,9 +234,11 @@ const singleSchoolOf = (data) => (typeof data?.school === 'string' ? data.school
  *   only accept a changed list that is non-empty and fully listed, so stale
  *   names go together and an emptied list is deleted instead of written as [].
  *   Faculty never keep a `schools` list.
- * - `school`: a single school that is not on the master list is set to
- *   "Leave unset" (UNSET_SCHOOL). Faculty are skipped: rules require faculty to
- *   keep one non-empty school and the selector has no unset option for them.
+ * - `school`: a single school that is not on the master list moves to the
+ *   first school left in the user's `schools` list (array order). With no
+ *   schools left it is set to "Leave unset" (UNSET_SCHOOL). Faculty are skipped:
+ *   rules require faculty to keep one non-empty school and the selector has no
+ *   unset option for them.
  * Role and status are never part of the update. Returns null when nothing changes.
  */
 export const planUserSchoolCleanup = (id, data, masterNames) => {
@@ -247,16 +249,19 @@ export const planUserSchoolCleanup = (id, data, masterNames) => {
   const listChanges = isFaculty ? Array.isArray(data?.schools) : stale.length > 0;
   const single = singleSchoolOf(data);
   const singleStale = single !== '' && !listed.has(single);
-  const clearSchool = singleStale && !isFaculty;
-  if (!listChanges && !clearSchool) return null;
+  const schoolChanges = singleStale && !isFaculty;
+  if (!listChanges && !schoolChanges) return null;
   const remaining = isFaculty ? [] : current.filter((name) => listed.has(name));
+  const nextSchool = schoolChanges ? (remaining[0] || UNSET_SCHOOL) : null;
   return {
     ...userSummary(id, data),
     removed: listChanges ? (isFaculty ? current : stale) : [],
     listChanges,
     schools: listChanges ? remaining : current,
-    clearSchool,
-    school: clearSchool ? UNSET_SCHOOL : (typeof data?.school === 'string' ? data.school : ''),
+    schoolChanges,
+    clearSchool: schoolChanges && nextSchool === UNSET_SCHOOL,
+    switchedSchool: schoolChanges && nextSchool !== UNSET_SCHOOL,
+    school: schoolChanges ? nextSchool : (typeof data?.school === 'string' ? data.school : ''),
     previousSchool: single,
     leftWithoutSchools: listChanges && !isFaculty && current.length > 0 && remaining.length === 0,
   };
@@ -267,7 +272,7 @@ const cleanupPayload = (plan) => {
   if (plan.listChanges) {
     payload.schools = plan.schools.length === 0 ? deleteField() : arrayRemove(...plan.removed);
   }
-  if (plan.clearSchool) payload.school = UNSET_SCHOOL;
+  if (plan.schoolChanges) payload.school = plan.school;
   return payload;
 };
 
@@ -281,6 +286,7 @@ const facultyWithStaleSchool = (id, data, masterNames) => {
 const summarizePlans = (plans, facultyNeedingSchool = []) => ({
   users: plans,
   unsetUsers: plans.filter((plan) => plan.clearSchool),
+  switchedUsers: plans.filter((plan) => plan.switchedSchool),
   leftWithoutSchools: plans.filter((plan) => plan.leftWithoutSchools),
   facultyNeedingSchool,
 });
@@ -368,8 +374,8 @@ export const previewMasterSchoolRemoval = async (userId, name) => {
 
 /**
  * Removes the school from the master list and from every user: it leaves
- * each `schools` list, and a single `school` that was this name is set to
- * "Leave unset". Fit tests keep the name because they are historical records.
+ * each `schools` list, and a single `school` that was this name moves to the
+ * user's first remaining school, or "Leave unset" when none remain. Fit tests keep the name because they are historical records.
  * Faculty keep their `school` (rules require one) and are returned for the
  * super admin to reassign. Role and status never change.
  */
@@ -399,7 +405,7 @@ export const findUsersWithRemovedSchools = (users, masterNames, actorId) => (
     .filter((item) => item?.id && item.id !== actorId)
     .map((item) => planUserSchoolCleanup(item.id, item, masterNames))
     .filter(Boolean)
-    .filter((plan) => plan.removed.length > 0 || plan.clearSchool)
+    .filter((plan) => plan.removed.length > 0 || plan.schoolChanges)
 );
 
 /** Drops names that are no longer on the master list from those users. */
