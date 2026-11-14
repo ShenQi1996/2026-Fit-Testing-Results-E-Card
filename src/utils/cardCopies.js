@@ -43,11 +43,26 @@ export const VERIFY_CARD_FIELDS = [
   'programAdministratorContact',
 ];
 
+// A Firestore deleteField() sentinel (for example fitFactor after a
+// Qualitative edit) is only valid in an update. These copies are written with
+// set(), so a sentinel is treated as an absent field and never copied.
+export const isDeleteFieldSentinel = (value) => (
+  value != null
+  && typeof value === 'object'
+  && (value.kind === 'deleteField' || value._methodName === 'deleteField')
+);
+
+const cardValue = (value) => (isDeleteFieldSentinel(value) ? '' : (value || ''));
+
 // Only legacy Quantitative records have a fit factor. The rules require each
 // card copy to carry the parent's fitFactor unchanged, so copy it as stored
 // when present and leave it off otherwise (new qualitative tests never have one).
 const withStoredFitFactor = (data, record) => {
-  if (record.fitFactor !== undefined && record.fitFactor !== null) {
+  if (
+    record.fitFactor !== undefined
+    && record.fitFactor !== null
+    && !isDeleteFieldSentinel(record.fitFactor)
+  ) {
     data.fitFactor = record.fitFactor;
   }
   return data;
@@ -56,7 +71,7 @@ const withStoredFitFactor = (data, record) => {
 export const toLookupCardData = (record = {}) => {
   const data = {};
   LOOKUP_CARD_FIELDS.forEach((field) => {
-    data[field] = record[field] || '';
+    data[field] = cardValue(record[field]);
   });
   return withStoredFitFactor(data, record);
 };
@@ -64,7 +79,7 @@ export const toLookupCardData = (record = {}) => {
 export const toVerifyCardData = (record = {}) => {
   const data = {};
   VERIFY_CARD_FIELDS.forEach((field) => {
-    data[field] = record[field] || '';
+    data[field] = cardValue(record[field]);
   });
   return withStoredFitFactor(data, record);
 };
