@@ -7,7 +7,6 @@ import {
   USER_STATUSES,
   getAllUsers,
   getFitTestCountsByUser,
-  getPendingUsers,
   updateManagedUser,
   deleteManagedUser,
   updateUserApprovalStatus,
@@ -293,8 +292,6 @@ const UsersManagement = () => {
   const [createForm, setCreateForm] = useState(EMPTY_CREATE_FORM);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [rosterView, setRosterView] = useState('all');
-  const [pendingUsers, setPendingUsers] = useState([]);
-  const [pendingLoading, setPendingLoading] = useState(false);
   const [pendingError, setPendingError] = useState('');
   const [pendingSuccess, setPendingSuccess] = useState('');
   const [approvingId, setApprovingId] = useState(null);
@@ -384,26 +381,6 @@ const UsersManagement = () => {
     [user, users],
   );
 
-  const loadPendingUsers = useCallback(async ({ quiet = false } = {}) => {
-    if (!user?.uid || !isAdmin) return;
-
-    if (!quiet) setPendingLoading(true);
-    setPendingError('');
-    try {
-      const nextUsers = await getPendingUsers(user.uid);
-      setPendingUsers(nextUsers);
-    } catch (err) {
-      console.error(err);
-      setPendingError(err.message || 'Failed to load pending users.');
-    } finally {
-      if (!quiet) setPendingLoading(false);
-    }
-  }, [user?.uid, isAdmin]);
-
-  useEffect(() => {
-    loadPendingUsers();
-  }, [loadPendingUsers]);
-
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
     return visibleUsers.filter((item) => {
@@ -419,10 +396,15 @@ const UsersManagement = () => {
   }, [visibleUsers, search, statusFilter, roleFilter]);
 
   const visiblePendingUsers = useMemo(() => (
-    filterUsersForActor(user, pendingUsers).filter((pendingUser) => (
-      canModifyManagedUser(user?.role, pendingUser.role || 'tester')
-    ))
-  ), [pendingUsers, user]);
+    filterUsersForActor(user, users)
+      .filter((pendingUser) => pendingUser.status === 'pending')
+      .filter((pendingUser) => canModifyManagedUser(user?.role, pendingUser.role || 'tester'))
+      .sort((a, b) => {
+        const dateA = a.requestedAt ? new Date(a.requestedAt).getTime() : 0;
+        const dateB = b.requestedAt ? new Date(b.requestedAt).getTime() : 0;
+        return dateA - dateB;
+      })
+  ), [users, user]);
 
   const handleDraftChange = (userId, field, value) => {
     const fixed = field === 'schools'
@@ -608,7 +590,6 @@ const UsersManagement = () => {
           ? 'User approved successfully.'
           : 'User rejected successfully.'
       );
-      await loadPendingUsers({ quiet: true });
     } catch (err) {
       setPendingError(err.message || 'Failed to update approval status.');
     } finally {
@@ -871,11 +852,10 @@ const UsersManagement = () => {
               className="users-secondary-button"
               onClick={() => {
                 loadUsers();
-                loadPendingUsers();
               }}
-              disabled={loading || pendingLoading || creating}
+              disabled={loading || creating}
             >
-              {loading || pendingLoading ? 'Refreshing...' : 'Refresh'}
+              {loading ? 'Refreshing...' : 'Refresh'}
             </button>
             <button
               type="button"
@@ -1270,7 +1250,7 @@ const UsersManagement = () => {
         {rosterView === 'pending' ? (
           <PendingApprovals
             users={visiblePendingUsers}
-            loading={pendingLoading}
+            loading={loading}
             error={pendingError}
             success={pendingSuccess}
             approvingId={approvingId}

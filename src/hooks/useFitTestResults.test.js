@@ -6,8 +6,10 @@ import {
   ensureFitTestVerification,
   getFacultyFitTests,
   getUserFitTests,
+  getUserFitTestsPage,
   updateFitTest,
 } from '../services/firebaseDb';
+import { clearFitTestListStore } from '../services/fitTestListStore';
 import { previewFitTestPdf } from '../utils/pdfUtils';
 import { useFitTestResults } from './useFitTestResults';
 
@@ -15,13 +17,22 @@ jest.mock('../context/AuthContext', () => ({
   useAuth: jest.fn(),
 }));
 
-jest.mock('../services/firebaseDb', () => ({
-  getUserFitTests: jest.fn(),
-  getFacultyFitTests: jest.fn(),
-  updateFitTest: jest.fn(),
-  deleteFitTest: jest.fn(),
-  ensureFitTestVerification: jest.fn(),
-}));
+jest.mock('../services/firebaseDb', () => {
+  const getUserFitTests = jest.fn();
+  return {
+    TESTER_RESULTS_PAGE_SIZE: 25,
+    getUserFitTests,
+    getUserFitTestsPage: jest.fn(async (userId, options) => ({
+      records: (await getUserFitTests(userId, options)) || [],
+      hasMore: false,
+      cursor: null,
+    })),
+    getFacultyFitTests: jest.fn(),
+    updateFitTest: jest.fn(),
+    deleteFitTest: jest.fn(),
+    ensureFitTestVerification: jest.fn(),
+  };
+});
 
 jest.mock('../services/emailService', () => ({
   sendFitTestCard: jest.fn(),
@@ -73,6 +84,7 @@ const renderProbe = async (apiRef) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  clearFitTestListStore();
   useAuth.mockReturnValue({ user: { uid: 'admin-1', role: 'admin' } });
   getUserFitTests.mockResolvedValue([record]);
   updateFitTest.mockResolvedValue(undefined);
@@ -92,8 +104,10 @@ test('an issue-date or result edit is ignored and the list is not reloaded', asy
   const apiRef = { current: null };
   await renderProbe(apiRef);
 
-  expect(getUserFitTests).toHaveBeenCalledTimes(1);
-  expect(getUserFitTests).toHaveBeenCalledWith('admin-1');
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(1);
+  expect(getUserFitTestsPage).toHaveBeenCalledWith('admin-1', expect.objectContaining({
+    limit: 25,
+  }));
 
   await act(async () => {
     apiRef.current.handleEditClick({ ...record, result: 'Pass' });
@@ -118,7 +132,7 @@ test('an issue-date or result edit is ignored and the list is not reloaded', asy
   expect(updates.issueDate).toBeUndefined();
   expect(updates.result).toBeUndefined();
   expect(updates.clientName).toBe('Ada King');
-  expect(getUserFitTests).toHaveBeenCalledTimes(1);
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(1);
   expect(apiRef.current.fitTests.map((test) => test.issueDate)).toEqual(['10/01/2026']);
 });
 
@@ -137,7 +151,7 @@ test('an edit that keeps the issue date does not reload the results list', async
   });
 
   expect(updateFitTest).toHaveBeenCalledTimes(1);
-  expect(getUserFitTests).toHaveBeenCalledTimes(1);
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(1);
   expect(apiRef.current.fitTests.map((test) => test.clientName)).toEqual(['Ada King']);
 });
 
@@ -287,8 +301,8 @@ test('faculty load results by school instead of user id', async () => {
   expect(getFacultyFitTests).toHaveBeenCalledWith(expect.objectContaining({
     role: 'faculty',
     school: 'Helene College of Nursing',
-  }));
-  expect(getUserFitTests).not.toHaveBeenCalled();
+  }), {});
+  expect(getUserFitTestsPage).not.toHaveBeenCalled();
   expect(apiRef.current.fitTests.map((test) => test.id)).toEqual(['ft-1']);
 });
 
@@ -305,7 +319,7 @@ test('faculty outside the access window do not load results', async () => {
   await renderProbe(apiRef);
 
   expect(getFacultyFitTests).not.toHaveBeenCalled();
-  expect(getUserFitTests).not.toHaveBeenCalled();
+  expect(getUserFitTestsPage).not.toHaveBeenCalled();
   expect(apiRef.current.fitTests).toEqual([]);
   expect(apiRef.current.loading).toBe(false);
 });

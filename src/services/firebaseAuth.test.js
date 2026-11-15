@@ -91,6 +91,29 @@ describe('signIn user profile', () => {
     }));
     expect(updatePayload).not.toHaveProperty('status');
     expect(updatePayload).not.toHaveProperty('role');
+    expect(getDoc).toHaveBeenCalledTimes(1);
+  });
+
+  test('signIn does not rewrite a profile when email and name are unchanged', async () => {
+    getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({
+        email: 'tester@example.com',
+        name: 'Test Tester',
+        role: 'admin',
+        status: 'approved',
+      }),
+    });
+
+    await expect(signIn('tester@example.com', 'secret')).resolves.toMatchObject({
+      uid: 'uid-1',
+      email: 'tester@example.com',
+      role: 'admin',
+      status: 'approved',
+    });
+
+    expect(updateDoc).not.toHaveBeenCalled();
+    expect(getDoc).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -13,6 +13,8 @@ import {
   where,
   orderBy,
   limit,
+  startAfter,
+  getCountFromServer,
   Timestamp,
   deleteField,
   serverTimestamp,
@@ -260,6 +262,9 @@ const FIRESTORE_IN_LIMIT = 30;
 
 // Faculty results page. Schools with more live tests than this see the newest page.
 export const FACULTY_RESULTS_LIMIT = 100;
+
+// Tester results page. Further pages are loaded with "Load more".
+export const TESTER_RESULTS_PAGE_SIZE = 25;
 
 export const CREATOR_ROLE_FIELD = 'creatorRole';
 export const CREATOR_SCHOOL_FIELD = 'creatorSchool';
@@ -520,36 +525,67 @@ const mapFitTestDoc = (docSnap) => {
  * @param {string} userId - User ID
  * @returns {Promise<Array>} Array of fit test records
  */
-export const getUserFitTests = async (userId, options = {}) => {
+const fetchMedicalNotesByUser = async (userId) => {
+  // A notes failure must not hide the fit tests. Inline fields are already
+  // stripped, including for faculty once that role reads this list, so a
+  // failed notes read does not fall back to the legacy copy.
+  try {
+    const notesSnap = await getDocs(query(
+      collection(db, FIT_TEST_MEDICAL_NOTES_COLLECTION),
+      where('userId', '==', userId),
+    ));
+    return new Map(
+      notesSnap.docs.map((noteSnap) => [noteSnap.id, noteSnap.data() || {}])
+    );
+  } catch (noteError) {
+    console.error('Error fetching medical notes:', noteError);
+    return new Map();
+  }
+};
+
+const mapLiveFitTests = (docs, notesById, now) => docs
+  .filter((docSnap) => !isSoftDeletedFitTest(docSnap.data() || {}))
+  .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now))
+  .map((docSnap) => applyMedicalNote(mapFitTestDoc(docSnap), notesById.get(docSnap.id)));
+
+const userFitTestsQuery = (userId, options = {}) => {
+  const constraints = [
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc'),
+  ];
+  const pageLimit = Number.isInteger(options.limit) && options.limit > 0
+    ? options.limit
+    : null;
+  if (pageLimit) constraints.push(limit(pageLimit));
+  if (options.cursor) constraints.push(startAfter(options.cursor));
+  return query(collection(db, FIT_TESTS_COLLECTION), ...constraints);
+};
+
+/**
+ * One page of a tester's (or admin's own) fit tests. Soft-deleted and
+ * past-retention records are filtered on the client so this does not depend
+ * on the optional userId + deletedAt + createdAt index, which may not exist
+ * on staging yet and would drop legacy records that have no deletedAt field.
+ * @param {string} userId
+ * @param {{ now?: Date, limit?: number, cursor?: object }} [options]
+ * @returns {Promise<{records: Array, hasMore: boolean, cursor: object|null}>}
+ */
+export const getUserFitTestsPage = async (userId, options = {}) => {
   try {
     const now = options.now instanceof Date ? options.now : new Date();
-    const q = query(
-      collection(db, FIT_TESTS_COLLECTION),
-      where('userId', '==', userId),
-      orderBy('createdAt', 'desc')
-    );
-    
-    const querySnapshot = await getDocs(q);
-    // A notes failure must not hide the fit tests. Inline fields are already
-    // stripped, including for faculty once that role reads this list, so a
-    // failed notes read does not fall back to the legacy copy.
-    let notesById = new Map();
-    try {
-      const notesSnap = await getDocs(query(
-        collection(db, FIT_TEST_MEDICAL_NOTES_COLLECTION),
-        where('userId', '==', userId),
-      ));
-      notesById = new Map(
-        notesSnap.docs.map((noteSnap) => [noteSnap.id, noteSnap.data() || {}])
-      );
-    } catch (noteError) {
-      console.error('Error fetching medical notes:', noteError);
-    }
-
-    return querySnapshot.docs
-      .filter((docSnap) => !isSoftDeletedFitTest(docSnap.data() || {}))
-      .filter((docSnap) => !isFitTestPastRetention(docSnap.data() || {}, now))
-      .map((docSnap) => applyMedicalNote(mapFitTestDoc(docSnap), notesById.get(docSnap.id)));
+    const pageLimit = Number.isInteger(options.limit) && options.limit > 0
+      ? options.limit
+      : TESTER_RESULTS_PAGE_SIZE;
+    const listQuery = userFitTestsQuery(userId, { ...options, limit: pageLimit });
+    const [querySnapshot, notesById] = await Promise.all([
+      getDocs(listQuery),
+      fetchMedicalNotesByUser(userId),
+    ]);
+    return {
+      records: mapLiveFitTests(querySnapshot.docs, notesById, now),
+      hasMore: querySnapshot.docs.length === pageLimit,
+      cursor: querySnapshot.docs[querySnapshot.docs.length - 1] || null,
+    };
   } catch (error) {
     console.error('Error fetching fit tests:', error);
 
@@ -560,7 +596,37 @@ export const getUserFitTests = async (userId, options = {}) => {
       );
       throw indexRequiredError(error);
     }
-    
+
+    throw new Error('Failed to fetch fit test records. Please try again.');
+  }
+};
+
+export const getUserFitTests = async (userId, options = {}) => {
+  try {
+    const now = options.now instanceof Date ? options.now : new Date();
+    if (Number.isInteger(options.limit) && options.limit > 0 || options.cursor) {
+      const page = await getUserFitTestsPage(userId, options);
+      return page.records;
+    }
+    const [querySnapshot, notesById] = await Promise.all([
+      getDocs(userFitTestsQuery(userId)),
+      fetchMedicalNotesByUser(userId),
+    ]);
+    return mapLiveFitTests(querySnapshot.docs, notesById, now);
+  } catch (error) {
+    if (error?.message === 'FIREBASE_INDEX_REQUIRED' || error?.message === 'Failed to fetch fit test records. Please try again.') {
+      throw error;
+    }
+    console.error('Error fetching fit tests:', error);
+
+    if (isIndexError(error)) {
+      console.error(
+        'Firestore fitTests query needs a composite index on userId and createdAt. Deploy firestore.indexes.json.',
+        error,
+      );
+      throw indexRequiredError(error);
+    }
+
     throw new Error('Failed to fetch fit test records. Please try again.');
   }
 };
@@ -631,16 +697,15 @@ export const getFacultyFitTests = async (schools, options = {}) => {
     ? options.limit
     : FACULTY_RESULTS_LIMIT;
   try {
-    const snapshots = [];
-    for (const chunk of chunkValues(scopedSchools, FIRESTORE_IN_LIMIT)) {
-      snapshots.push(await getDocs(query(
+    const snapshots = await Promise.all(
+      chunkValues(scopedSchools, FIRESTORE_IN_LIMIT).map((chunk) => getDocs(query(
         collection(db, FIT_TESTS_COLLECTION),
         facultySchoolConstraint(chunk),
         where('deletedAt', '==', null),
         orderBy('createdAt', 'desc'),
         limit(pageLimit),
-      )));
-    }
+      )))
+    );
     const byId = new Map();
     snapshots.forEach((snapshot) => {
       snapshot.docs.forEach((docSnap) => byId.set(docSnap.id, docSnap));
@@ -684,18 +749,28 @@ export const countFacultyFitTests = async (schools, options = {}) => {
  * @param {string[]} [userIds]
  * @returns {Promise<Record<string, number>>}
  */
-export const getFitTestCountsByUser = async (adminUserId, userIds = [], options = {}) => {
+export const getFitTestCountsByUser = async (adminUserId, userIds = [], _options = {}) => {
   try {
     await assertAdmin(adminUserId);
 
     const ids = [...new Set(
       (Array.isArray(userIds) ? userIds : []).filter((id) => typeof id === 'string' && id)
     )];
+    // Aggregate counts are one billed read per query instead of downloading
+    // every fit test document. They cannot apply the client-side retention
+    // filter, and they include legacy records that have no deletedAt, so the
+    // Users page number can be slightly higher than the Results list.
     const counts = {};
     const batchSize = 10;
     for (let index = 0; index < ids.length; index += batchSize) {
       const batch = ids.slice(index, index + batchSize);
-      const batchCounts = await Promise.all(batch.map((id) => countFitTestsForUser(id, options)));
+      const batchCounts = await Promise.all(batch.map(async (id) => {
+        const snapshot = await getCountFromServer(query(
+          collection(db, FIT_TESTS_COLLECTION),
+          where('userId', '==', id),
+        ));
+        return snapshot.data().count;
+      }));
       batch.forEach((id, batchIndex) => {
         if (batchCounts[batchIndex] > 0) counts[id] = batchCounts[batchIndex];
       });
@@ -1333,6 +1408,33 @@ export const getUserRole = async (userId) => {
  * @param {object} userInfo - { uid, email, name, provider }
  * @returns {Promise<{isNewUser: boolean}>}
  */
+const accessProfileFromData = (data = {}) => ({
+  role: data.role || 'tester',
+  status: normalizeUserStatus(data.status),
+  school: typeof data.school === 'string' ? data.school : '',
+  schools: normalizeSchoolList(data.schools),
+  startDate: toIso(data.startDate),
+  endDate: toIso(data.endDate),
+  ...readProgramAdmin(data),
+});
+
+// Session cache for the signed-in profile. Authorization still lives in the
+// rules; this only skips repeat client reads during the same session.
+const userProfileCache = new Map();
+
+export const clearUserProfileCache = (userId) => {
+  if (userId) {
+    userProfileCache.delete(userId);
+    return;
+  }
+  userProfileCache.clear();
+};
+
+const rememberAccessProfile = (userId, profile) => {
+  if (userId && profile) userProfileCache.set(userId, profile);
+  return profile;
+};
+
 export const ensureUserProfile = async (userInfo) => {
   try {
     if (!userInfo?.uid) {
@@ -1343,7 +1445,7 @@ export const ensureUserProfile = async (userInfo) => {
     const userDocSnap = await getDoc(userDocRef);
 
     if (!userDocSnap.exists()) {
-      await setDoc(userDocRef, {
+      const created = {
         email: userInfo.email || '',
         name: userInfo.name || '',
         role: 'tester',
@@ -1352,22 +1454,37 @@ export const ensureUserProfile = async (userInfo) => {
         requestedAt: Timestamp.now(),
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-      });
-      return { isNewUser: true };
+      };
+      await setDoc(userDocRef, created);
+      const profile = rememberAccessProfile(userInfo.uid, accessProfileFromData(created));
+      return { isNewUser: true, profile };
     }
+
+    const existing = userDocSnap.data() || {};
+    const email = userInfo.email || existing.email || '';
+    const name = userInfo.name || existing.name || '';
+    const updates = {};
+    if (email !== (existing.email || '')) updates.email = email;
+    if (name !== (existing.name || '')) updates.name = name;
 
     // Backfill is best-effort. A rules denial must not block sign-in.
-    try {
-      await updateDoc(userDocRef, {
-        email: userInfo.email || userDocSnap.data().email || '',
-        name: userInfo.name || userDocSnap.data().name || '',
-        updatedAt: Timestamp.now(),
-      });
-    } catch (backfillError) {
-      console.error('Error backfilling user profile:', backfillError);
+    // Skip the write when email and name are already current.
+    if (Object.keys(updates).length > 0) {
+      try {
+        await updateDoc(userDocRef, {
+          ...updates,
+          updatedAt: Timestamp.now(),
+        });
+      } catch (backfillError) {
+        console.error('Error backfilling user profile:', backfillError);
+      }
     }
 
-    return { isNewUser: false };
+    const profile = rememberAccessProfile(
+      userInfo.uid,
+      accessProfileFromData({ ...existing, ...updates }),
+    );
+    return { isNewUser: false, profile };
   } catch (error) {
     console.error('Error ensuring user profile:', error);
     throw new Error('Failed to initialize user profile. Please try again.');
@@ -1398,28 +1515,23 @@ export const updateOwnProgramAdministrator = async (userId, fields = {}) => {
     ...program,
     updatedAt: Timestamp.now(),
   });
+  clearUserProfileCache(userId);
   return program;
 };
 
-export const getUserAccessProfile = async (userId) => {
+export const getUserAccessProfile = async (userId, options = {}) => {
   try {
     if (!userId) return emptyAccessProfile();
+    if (!options.force && userProfileCache.has(userId)) {
+      return userProfileCache.get(userId);
+    }
 
     const userDocRef = doc(db, USERS_COLLECTION, userId);
     const userDocSnap = await getDoc(userDocRef);
 
     if (!userDocSnap.exists()) return emptyAccessProfile();
 
-    const data = userDocSnap.data() || {};
-    return {
-      role: data.role || 'tester',
-      status: normalizeUserStatus(data.status),
-      school: typeof data.school === 'string' ? data.school : '',
-      schools: normalizeSchoolList(data.schools),
-      startDate: toIso(data.startDate),
-      endDate: toIso(data.endDate),
-      ...readProgramAdmin(data),
-    };
+    return rememberAccessProfile(userId, accessProfileFromData(userDocSnap.data() || {}));
   } catch (error) {
     console.error('Error getting user access profile:', error);
     return emptyAccessProfile();
@@ -1639,6 +1751,8 @@ export const updateManagedUser = async (adminUserId, targetUserId, updates = {})
 
     await updateDoc(targetRef, payload);
     const refreshed = await getDoc(targetRef);
+    const data = refreshed.exists() ? (refreshed.data() || {}) : payload;
+    rememberAccessProfile(targetUserId, accessProfileFromData(data));
     return serializeUserDoc(refreshed);
   } catch (error) {
     console.error('Error updating managed user:', error);
@@ -1679,6 +1793,7 @@ export const deleteManagedUser = async (adminUserId, targetUserId) => {
     );
 
     await deleteDoc(targetRef);
+    clearUserProfileCache(targetUserId);
   } catch (error) {
     console.error('Error deleting managed user:', error);
     if (error.code === 'PERMISSION_DENIED') throw error;
@@ -1856,6 +1971,7 @@ export const setUserRole = async (actorUserId, targetUserId, role) => {
         updatedAt: Timestamp.now(),
       });
     }
+    clearUserProfileCache(targetUserId);
   } catch (error) {
     console.error('Error setting user role:', error);
     if (error.code === 'PERMISSION_DENIED') throw error;

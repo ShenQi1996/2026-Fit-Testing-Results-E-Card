@@ -194,9 +194,10 @@ const cardText = (card) => card.findAllByType('p').map((node) => node.children.j
 
 const renderPage = async (user, pendingUsers = USERS.filter((item) => item.status === 'pending'), users = USERS) => {
   useAuth.mockReturnValue({ user });
-  getAllUsers.mockResolvedValue(users);
+  const byId = new Map(users.map((item) => [item.id, item]));
+  pendingUsers.forEach((item) => byId.set(item.id, item));
+  getAllUsers.mockResolvedValue([...byId.values()]);
   getFitTestCountsByUser.mockResolvedValue({});
-  getPendingUsers.mockResolvedValue(pendingUsers);
   let renderer;
   await act(async () => {
     renderer = TestRenderer.create(<UsersManagement />);
@@ -411,7 +412,8 @@ test('pending approval tab lists users an admin can approve and hides other admi
   const admin = await renderPage(heleneAdmin, PENDING_USERS);
   await openPendingTab(admin);
 
-  expect(getPendingUsers).toHaveBeenCalledWith('admin-1');
+  expect(getAllUsers).toHaveBeenCalledWith('admin-1');
+  expect(getPendingUsers).not.toHaveBeenCalled();
   expect(pendingCards(admin).map(cardText).join('\n')).toContain('tess@example.com');
   expect(pendingCards(admin).map(cardText).join('\n')).not.toContain('pat@example.com');
   expect(admin.root.findByProps({ className: 'users-filters' }).props.hidden).toBe(true);
@@ -445,9 +447,6 @@ test('approve and reject on the pending tab call updateUserApprovalStatus', asyn
   await openPendingTab(renderer);
 
   const tessCard = pendingCards(renderer).find((card) => cardText(card).includes('tess@example.com'));
-  getPendingUsers.mockResolvedValueOnce(
-    PENDING_USERS.filter((item) => item.id !== 'tester-1')
-  );
   const approve = tessCard.findAllByType('button').find((button) => button.children.includes('Approve'));
   await act(async () => {
     approve.props.onClick();

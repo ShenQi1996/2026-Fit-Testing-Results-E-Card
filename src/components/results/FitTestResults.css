@@ -1072,3 +1072,30 @@
   }
 }
 
+
+.results-load-more {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0 8px;
+}
+
+.load-more-button {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--navy, #0B2D4A);
+  background: #fff;
+  color: var(--navy, #0B2D4A);
+  cursor: pointer;
+}
+
+.load-more-button:hover:not(:disabled) {
+  background: rgba(11, 45, 74, 0.06);
+}
+
+.load-more-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}

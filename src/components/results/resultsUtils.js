@@ -7,6 +7,8 @@ export const hasConsentOrSignature = (test) => Boolean(
   test.printedName ||
   test.signatureDataUrl ||
   test.testerSignatureDataUrl ||
+  test.hasSignatureData ||
+  test.hasTesterSignatureData ||
   test.studentClearanceConfirmed !== undefined ||
   test.consentToFitTest !== undefined ||
   test.privacyPolicyAcknowledged !== undefined ||
