@@ -94,19 +94,21 @@ test('counts match the results list for 2 live records plus a 4-year-old issue d
   expect(where).not.toHaveBeenCalledWith('createdAt', '<', expect.anything());
 });
 
-test('admin user counts use an aggregate query instead of downloading each list', async () => {
+test('admin user counts match the results list filters, including a real zero', async () => {
   getDoc.mockResolvedValue(userDoc('admin'));
-  getCountFromServer.mockImplementation(async (q) => {
+  getDocs.mockImplementation(async (q) => {
     const userConstraint = (q?.args || []).find((arg) => arg?.kind === 'where' && arg.field === 'userId');
-    if (userConstraint?.value === 'tester-1') return { data: () => ({ count: 3 }) };
-    return { data: () => ({ count: 0 }) };
+    if (userConstraint?.value === 'tester-2') return { docs: [] };
+    return { docs: reproDocs };
   });
 
-  await expect(getFitTestCountsByUser('admin-1', ['tester-1', 'tester-2', 'tester-1'])).resolves.toEqual({
-    'tester-1': 3,
+  await expect(getFitTestCountsByUser('admin-1', ['tester-1', 'tester-2', 'tester-1'], { now: NOW })).resolves.toEqual({
+    'tester-1': 2,
+    'tester-2': 0,
   });
-  expect(getCountFromServer).toHaveBeenCalled();
-  expect(getDocs).not.toHaveBeenCalled();
+  expect(getCountFromServer).not.toHaveBeenCalled();
+  expect(getDocs).toHaveBeenCalled();
+  expect(where).not.toHaveBeenCalledWith('deletedAt', '==', null);
 });
 
 test('getUserFitTests does not write lookup or verification documents', async () => {

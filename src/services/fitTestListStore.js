@@ -8,6 +8,10 @@ import { isAccessWindowOpen, isFaculty } from '../utils/roles';
 
 export { TESTER_RESULTS_PAGE_SIZE };
 
+// Stop filling a visible page after this many raw query batches so a long
+// stretch of hidden (deleted or past-retention) records cannot loop forever.
+export const TESTER_RESULTS_FILL_MAX_BATCHES = 8;
+
 const SIGNATURE_FIELDS = ['signatureDataUrl', 'testerSignatureDataUrl'];
 
 const emptySnapshot = () => ({
@@ -28,6 +32,9 @@ let inflight = null;
 let rememberedUser = null;
 const signaturesById = new Map();
 const listeners = new Set();
+// Visible records already fetched past the current page, used so a fill
+// batch that overshoots 25 is not dropped (no gaps on Load more).
+let leftoverRecords = [];
 
 const listKeyFor = (user) => {
   if (!user?.uid) return '';
@@ -100,6 +107,64 @@ export const clearFitTestListStore = () => {
   inflight = null;
   rememberedUser = null;
   signaturesById.clear();
+  leftoverRecords = [];
+};
+
+export const visibleFitTestCountForUser = (userId) => {
+  if (!userId || snapshot.key !== `tester:${userId}` || !snapshot.loaded) return null;
+  if (snapshot.hasMore || leftoverRecords.length > 0) return null;
+  return snapshot.count;
+};
+
+const collectVisiblePage = async (userId, {
+  now,
+  cursor,
+  target = TESTER_RESULTS_PAGE_SIZE,
+  existingIds = [],
+  maxBatches = TESTER_RESULTS_FILL_MAX_BATCHES,
+} = {}) => {
+  const collected = [];
+  const seen = new Set(existingIds);
+  let nextCursor = cursor;
+  let hasMore = true;
+  let batches = 0;
+
+  const takeFromLeftover = () => {
+    const kept = [];
+    leftoverRecords.forEach((record) => {
+      if (!record?.id || seen.has(record.id)) return;
+      seen.add(record.id);
+      if (collected.length < target) collected.push(record);
+      else kept.push(record);
+    });
+    leftoverRecords = kept;
+  };
+
+  takeFromLeftover();
+
+  while (collected.length < target && hasMore && batches < maxBatches) {
+    const page = await getUserFitTestsPage(userId, {
+      now,
+      limit: TESTER_RESULTS_PAGE_SIZE,
+      cursor: nextCursor,
+    });
+    batches += 1;
+    hasMore = Boolean(page.hasMore);
+    nextCursor = page.cursor || nextCursor || null;
+    (page.records || []).forEach((record) => {
+      if (!record?.id || seen.has(record.id)) return;
+      seen.add(record.id);
+      if (collected.length < target) collected.push(record);
+      else leftoverRecords.push(record);
+    });
+    if (!page.hasMore && !page.cursor) break;
+  }
+
+  return {
+    records: collected,
+    hasMore: leftoverRecords.length > 0 || hasMore,
+    cursor: nextCursor,
+  };
 };
 
 const loadErrorState = (error) => {
@@ -129,6 +194,7 @@ const fetchList = async (user, { force = false, more = false, now } = {}) => {
   if (isFaculty(user) && !isAccessWindowOpen(user, now instanceof Date ? now : new Date())) {
     rememberedUser = user;
     signaturesById.clear();
+    leftoverRecords = [];
     setSnapshot({
       ...emptySnapshot(),
       key,
@@ -171,6 +237,7 @@ const fetchList = async (user, { force = false, more = false, now } = {}) => {
       if (isFaculty(user)) {
         const records = await getFacultyFitTests(user, now instanceof Date ? { now } : {});
         signaturesById.clear();
+        leftoverRecords = [];
         setSnapshot({
           key,
           records: stashRecords(records),
@@ -185,12 +252,16 @@ const fetchList = async (user, { force = false, more = false, now } = {}) => {
         return snapshot;
       }
 
-      const page = await getUserFitTestsPage(user.uid, {
+      if (!isMore) {
+        signaturesById.clear();
+        leftoverRecords = [];
+      }
+      const page = await collectVisiblePage(user.uid, {
         now,
-        limit: TESTER_RESULTS_PAGE_SIZE,
         cursor: isMore ? snapshot.cursor : undefined,
+        target: TESTER_RESULTS_PAGE_SIZE,
+        existingIds: isMore ? snapshot.records.map((record) => record.id) : [],
       });
-      if (!isMore) signaturesById.clear();
       setSnapshot({
         key,
         records: stashRecords(page.records, { append: isMore }),
@@ -248,6 +319,7 @@ subscribeFitTestActivity(() => {
   if (!rememberedUser?.uid) {
     snapshot = emptySnapshot();
     signaturesById.clear();
+    leftoverRecords = [];
     emit();
     return;
   }

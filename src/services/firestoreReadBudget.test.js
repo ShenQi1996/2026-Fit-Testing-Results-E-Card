@@ -101,10 +101,9 @@ test('records Firestore calls for sign-in, form, Results, and Users after the re
   };
   expect(resultsPage).toEqual({ getDoc: 0, getDocs: 0, getCountFromServer: 0, updateDoc: 0 });
 
-  // Users page: one users collection read + one aggregate count per user, no second pending query.
+  // Users page load lists users only; counts are fetched on demand per user.
   const afterUsersStart = countCalls();
   await getAllUsers('admin-1');
-  await getFitTestCountsByUser('admin-1', ['tester-1', 'tester-2']);
   const usersPage = {
     getDoc: getDoc.mock.calls.length - afterUsersStart.getDoc,
     getDocs: getDocs.mock.calls.length - afterUsersStart.getDocs,
@@ -112,11 +111,21 @@ test('records Firestore calls for sign-in, form, Results, and Users after the re
     updateDoc: updateDoc.mock.calls.length - afterUsersStart.updateDoc,
   };
 
+  const afterCountStart = countCalls();
+  await getFitTestCountsByUser('admin-1', ['tester-1']);
+  const oneUserCount = {
+    getDoc: getDoc.mock.calls.length - afterCountStart.getDoc,
+    getDocs: getDocs.mock.calls.length - afterCountStart.getDocs,
+    getCountFromServer: getCountFromServer.mock.calls.length - afterCountStart.getCountFromServer,
+    updateDoc: updateDoc.mock.calls.length - afterCountStart.updateDoc,
+  };
+
   // Keep the measured after counts in the assertion message for the report.
-  expect({ signIn, formPage, resultsPage, usersPage }).toEqual({
+  expect({ signIn, formPage, resultsPage, usersPage, oneUserCount }).toEqual({
     signIn: { getDoc: 1, getDocs: 0, getCountFromServer: 0, updateDoc: 0 },
     formPage: { getDoc: 1, getDocs: 2, getCountFromServer: 0, updateDoc: 0 },
     resultsPage: { getDoc: 0, getDocs: 0, getCountFromServer: 0, updateDoc: 0 },
-    usersPage: { getDoc: 0, getDocs: 2, getCountFromServer: 2, updateDoc: 0 },
+    usersPage: { getDoc: 0, getDocs: 2, getCountFromServer: 0, updateDoc: 0 },
+    oneUserCount: { getDoc: 0, getDocs: 1, getCountFromServer: 0, updateDoc: 0 },
   });
 });

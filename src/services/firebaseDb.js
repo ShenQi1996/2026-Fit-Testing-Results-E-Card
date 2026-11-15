@@ -14,7 +14,6 @@ import {
   orderBy,
   limit,
   startAfter,
-  getCountFromServer,
   Timestamp,
   deleteField,
   serverTimestamp,
@@ -749,30 +748,24 @@ export const countFacultyFitTests = async (schools, options = {}) => {
  * @param {string[]} [userIds]
  * @returns {Promise<Record<string, number>>}
  */
-export const getFitTestCountsByUser = async (adminUserId, userIds = [], _options = {}) => {
+export const getFitTestCountsByUser = async (adminUserId, userIds = [], options = {}) => {
   try {
     await assertAdmin(adminUserId);
 
     const ids = [...new Set(
       (Array.isArray(userIds) ? userIds : []).filter((id) => typeof id === 'string' && id)
     )];
-    // Aggregate counts are one billed read per query instead of downloading
-    // every fit test document. They cannot apply the client-side retention
-    // filter, and they include legacy records that have no deletedAt, so the
-    // Users page number can be slightly higher than the Results list.
+    // Use the same deleted/retention filters as the Results list. A server
+    // aggregate cannot do that accurately: deletedAt == null drops legacy
+    // records that have no deletedAt, and retention is computed from issueDate.
+    // The Users page therefore counts on demand instead of on load.
     const counts = {};
     const batchSize = 10;
     for (let index = 0; index < ids.length; index += batchSize) {
       const batch = ids.slice(index, index + batchSize);
-      const batchCounts = await Promise.all(batch.map(async (id) => {
-        const snapshot = await getCountFromServer(query(
-          collection(db, FIT_TESTS_COLLECTION),
-          where('userId', '==', id),
-        ));
-        return snapshot.data().count;
-      }));
+      const batchCounts = await Promise.all(batch.map((id) => countFitTestsForUser(id, options)));
       batch.forEach((id, batchIndex) => {
-        if (batchCounts[batchIndex] > 0) counts[id] = batchCounts[batchIndex];
+        counts[id] = batchCounts[batchIndex];
       });
     }
 

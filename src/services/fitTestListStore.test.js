@@ -6,7 +6,9 @@ import {
   loadFitTestList,
   loadMoreFitTests,
   subscribeFitTestList,
+  TESTER_RESULTS_FILL_MAX_BATCHES,
   TESTER_RESULTS_PAGE_SIZE,
+  visibleFitTestCountForUser,
   withSignatures,
 } from './fitTestListStore';
 
@@ -66,21 +68,23 @@ test('sidebar and results share one tester fetch and keep signatures out of the 
 });
 
 test('a later page is loaded only when requested', async () => {
+  const firstPage = Array.from({ length: TESTER_RESULTS_PAGE_SIZE }, (_, i) => record(`ft-${i + 1}`));
   getUserFitTestsPage
     .mockResolvedValueOnce({
-      records: [record('ft-1')],
+      records: firstPage,
       hasMore: true,
       cursor: { id: 'cursor-1' },
     })
     .mockResolvedValueOnce({
-      records: [record('ft-2')],
+      records: [record('ft-26')],
       hasMore: false,
       cursor: { id: 'cursor-2' },
     });
 
   await loadFitTestList(tester);
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(1);
   expect(getFitTestListSnapshot().hasMore).toBe(true);
-  expect(getFitTestListSnapshot().count).toBe(1);
+  expect(getFitTestListSnapshot().count).toBe(TESTER_RESULTS_PAGE_SIZE);
 
   await loadMoreFitTests(tester);
   expect(getUserFitTestsPage).toHaveBeenCalledTimes(2);
@@ -89,8 +93,93 @@ test('a later page is loaded only when requested', async () => {
     limit: TESTER_RESULTS_PAGE_SIZE,
     cursor: { id: 'cursor-1' },
   });
-  expect(getFitTestListSnapshot().records.map((item) => item.id)).toEqual(['ft-1', 'ft-2']);
-  expect(getFitTestListSnapshot().count).toBe(2);
+  expect(getFitTestListSnapshot().records.map((item) => item.id)).toEqual([
+    ...firstPage.map((item) => item.id),
+    'ft-26',
+  ]);
+  expect(getFitTestListSnapshot().count).toBe(26);
+  expect(getFitTestListSnapshot().hasMore).toBe(false);
+});
+
+test('initial load keeps fetching until 25 visible records and holds leftover for load more', async () => {
+  const firstVisible = Array.from({ length: 19 }, (_, i) => record(`live-${i + 1}`));
+  const secondVisible = Array.from({ length: 10 }, (_, i) => record(`live-${i + 20}`));
+  const thirdVisible = Array.from({ length: 8 }, (_, i) => record(`live-${i + 30}`));
+
+  getUserFitTestsPage
+    .mockResolvedValueOnce({
+      records: firstVisible,
+      hasMore: true,
+      cursor: { id: 'cursor-1' },
+    })
+    .mockResolvedValueOnce({
+      records: secondVisible,
+      hasMore: true,
+      cursor: { id: 'cursor-2' },
+    })
+    .mockResolvedValueOnce({
+      records: thirdVisible,
+      hasMore: false,
+      cursor: { id: 'cursor-3' },
+    });
+
+  await loadFitTestList(tester);
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(2);
+  expect(getUserFitTestsPage.mock.calls[1][1].cursor).toEqual({ id: 'cursor-1' });
+  expect(getFitTestListSnapshot().records.map((item) => item.id)).toEqual(
+    Array.from({ length: 25 }, (_, i) => `live-${i + 1}`)
+  );
+  expect(getFitTestListSnapshot().count).toBe(25);
+  expect(getFitTestListSnapshot().hasMore).toBe(true);
+  expect(visibleFitTestCountForUser('tester-1')).toBeNull();
+
+  await loadMoreFitTests(tester);
+  // Leftover 4 from the second batch plus the third batch fill the rest; no refetch of batch 2.
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(3);
+  expect(getUserFitTestsPage.mock.calls[2][1].cursor).toEqual({ id: 'cursor-2' });
+  const ids = getFitTestListSnapshot().records.map((item) => item.id);
+  expect(ids).toEqual(Array.from({ length: 37 }, (_, i) => `live-${i + 1}`));
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(getFitTestListSnapshot().count).toBe(37);
+  expect(getFitTestListSnapshot().hasMore).toBe(false);
+  expect(visibleFitTestCountForUser('tester-1')).toBe(37);
+});
+
+test('fill stops after the max-batch guard and still offers load more', async () => {
+  getUserFitTestsPage.mockImplementation(async (_userId, options = {}) => {
+    const start = options.cursor?.n || 0;
+    return {
+      records: [],
+      hasMore: start < 20,
+      cursor: { id: `cursor-${start + 1}`, n: start + 1 },
+    };
+  });
+
+  await loadFitTestList(tester);
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(TESTER_RESULTS_FILL_MAX_BATCHES);
+  expect(getFitTestListSnapshot().records).toEqual([]);
+  expect(getFitTestListSnapshot().hasMore).toBe(true);
+
+  await loadMoreFitTests(tester);
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(TESTER_RESULTS_FILL_MAX_BATCHES * 2);
+});
+
+test('duplicate ids across batches are skipped', async () => {
+  getUserFitTestsPage
+    .mockResolvedValueOnce({
+      records: [record('ft-1'), record('ft-2')],
+      hasMore: true,
+      cursor: { id: 'cursor-1' },
+    })
+    .mockResolvedValueOnce({
+      records: [record('ft-2'), record('ft-3')],
+      hasMore: false,
+      cursor: { id: 'cursor-2' },
+    });
+
+  await loadFitTestList(tester);
+  expect(getFitTestListSnapshot().records.map((item) => item.id)).toEqual(['ft-1', 'ft-2', 'ft-3']);
+  expect(getFitTestListSnapshot().count).toBe(3);
   expect(getFitTestListSnapshot().hasMore).toBe(false);
 });
 
