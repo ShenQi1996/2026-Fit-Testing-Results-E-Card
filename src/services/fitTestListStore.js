@@ -167,6 +167,60 @@ const collectVisiblePage = async (userId, {
   };
 };
 
+const cursorKey = (cursor) => {
+  if (!cursor) return '';
+  return cursor.id || String(cursor);
+};
+
+// Keep filling visible pages (each still capped at 8 raw batches) until
+// `target` records are collected, or until the end when loadAll is set.
+const collectVisibleUntil = async (userId, {
+  now,
+  cursor,
+  target = TESTER_RESULTS_PAGE_SIZE,
+  existingIds = [],
+  loadAll = false,
+} = {}) => {
+  const collected = [];
+  const seen = new Set(existingIds);
+  let nextCursor = cursor;
+  let hasMore = true;
+
+  while (hasMore && (loadAll || collected.length < target)) {
+    const pageTarget = loadAll
+      ? TESTER_RESULTS_PAGE_SIZE
+      : Math.min(TESTER_RESULTS_PAGE_SIZE, target - collected.length);
+    if (!loadAll && pageTarget <= 0) break;
+
+    const beforeCursor = nextCursor;
+    const beforeCount = collected.length;
+    const page = await collectVisiblePage(userId, {
+      now,
+      cursor: nextCursor,
+      target: pageTarget,
+      existingIds: [...seen],
+    });
+    (page.records || []).forEach((record) => {
+      if (!record?.id || seen.has(record.id)) return;
+      seen.add(record.id);
+      collected.push(record);
+    });
+    hasMore = Boolean(page.hasMore);
+    nextCursor = page.cursor || nextCursor || null;
+
+    if (!hasMore) break;
+    if (collected.length === beforeCount && cursorKey(page.cursor) === cursorKey(beforeCursor)) {
+      break;
+    }
+  }
+
+  return {
+    records: collected,
+    hasMore: leftoverRecords.length > 0 || hasMore,
+    cursor: nextCursor,
+  };
+};
+
 const loadErrorState = (error) => {
   if (error?.message === 'FIREBASE_INDEX_REQUIRED') {
     return {
@@ -206,13 +260,19 @@ const fetchList = async (user, { force = false, more = false, now } = {}) => {
 
   rememberedUser = user;
 
-  if (!force && !more && snapshot.key === key && snapshot.loaded && !snapshot.loading) {
-    return snapshot;
-  }
+  const previousVisibleCount = snapshot.key === key ? snapshot.records.length : 0;
+  const reloadUntilEnd = Boolean(
+    force && snapshot.key === key && snapshot.loaded && !snapshot.hasMore
+  );
 
-  // A second caller for the same key shares the in-flight request.
+  // Join an in-flight reload (including activity invalidation) before
+  // returning the cached snapshot, so callers wait for the restored depth.
   if (inflight && snapshot.key === key && !force) {
     return inflight;
+  }
+
+  if (!force && !more && snapshot.key === key && snapshot.loaded && !snapshot.loading) {
+    return snapshot;
   }
 
   if (more && (snapshot.loading || snapshot.loadingMore || !snapshot.hasMore || snapshot.key !== key)) {
@@ -256,12 +316,23 @@ const fetchList = async (user, { force = false, more = false, now } = {}) => {
         signaturesById.clear();
         leftoverRecords = [];
       }
-      const page = await collectVisiblePage(user.uid, {
-        now,
-        cursor: isMore ? snapshot.cursor : undefined,
-        target: TESTER_RESULTS_PAGE_SIZE,
-        existingIds: isMore ? snapshot.records.map((record) => record.id) : [],
-      });
+      const shouldRestoreDepth = Boolean(
+        force && (reloadUntilEnd || previousVisibleCount > TESTER_RESULTS_PAGE_SIZE)
+      );
+      const page = shouldRestoreDepth
+        ? await collectVisibleUntil(user.uid, {
+          now,
+          cursor: undefined,
+          target: reloadUntilEnd ? TESTER_RESULTS_PAGE_SIZE : previousVisibleCount,
+          existingIds: [],
+          loadAll: reloadUntilEnd,
+        })
+        : await collectVisiblePage(user.uid, {
+          now,
+          cursor: isMore ? snapshot.cursor : undefined,
+          target: TESTER_RESULTS_PAGE_SIZE,
+          existingIds: isMore ? snapshot.records.map((record) => record.id) : [],
+        });
       setSnapshot({
         key,
         records: stashRecords(page.records, { append: isMore }),

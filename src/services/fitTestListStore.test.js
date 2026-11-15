@@ -32,6 +32,18 @@ const record = (id, extra = {}) => ({
   ...extra,
 });
 
+
+const pagesOf = (records) => async (_userId, options = {}) => {
+  const start = options.cursor?.n || 0;
+  const slice = records.slice(start, start + TESTER_RESULTS_PAGE_SIZE);
+  const next = start + slice.length;
+  return {
+    records: slice,
+    hasMore: next < records.length,
+    cursor: slice.length ? { id: slice[slice.length - 1].id, n: next } : options.cursor || null,
+  };
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   clearFitTestListStore();
@@ -215,4 +227,110 @@ test('faculty outside the access window get an empty cached list and do not read
     count: 0,
     loaded: true,
   }));
+});
+
+test('invalidation after a deep load keeps the tester count and loaded depth', async () => {
+  const allVisible = Array.from({ length: 48 }, (_, i) => record(`live-${i + 1}`));
+  getUserFitTestsPage.mockImplementation(pagesOf(allVisible));
+
+  await loadFitTestList(tester);
+  await loadMoreFitTests(tester);
+  expect(getFitTestListSnapshot().count).toBe(48);
+  expect(getFitTestListSnapshot().hasMore).toBe(false);
+  getUserFitTestsPage.mockClear();
+
+  notifyFitTestActivity();
+  await loadFitTestList(tester);
+
+  expect(getUserFitTestsPage).toHaveBeenCalled();
+  expect(getUserFitTestsPage.mock.calls[0][1].cursor).toBeUndefined();
+  expect(getFitTestListSnapshot().records.map((item) => item.id)).toEqual(
+    allVisible.map((item) => item.id)
+  );
+  expect(getFitTestListSnapshot().count).toBe(48);
+  expect(getFitTestListSnapshot().hasMore).toBe(false);
+  expect(visibleFitTestCountForUser('tester-1')).toBe(48);
+  // Two bounded fills (25 + 23), not a single first page.
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(2);
+});
+
+test('invalidation of a fully loaded list picks up a newly saved record', async () => {
+  const original = Array.from({ length: 48 }, (_, i) => record(`live-${i + 1}`));
+  getUserFitTestsPage.mockImplementation(pagesOf(original));
+  await loadFitTestList(tester);
+  await loadMoreFitTests(tester);
+  expect(getFitTestListSnapshot().count).toBe(48);
+
+  const withNew = [record('live-new'), ...original];
+  getUserFitTestsPage.mockImplementation(pagesOf(withNew));
+  notifyFitTestActivity();
+  await loadFitTestList(tester);
+
+  expect(getFitTestListSnapshot().records.map((item) => item.id)).toEqual(
+    withNew.map((item) => item.id)
+  );
+  expect(getFitTestListSnapshot().count).toBe(49);
+  expect(getFitTestListSnapshot().hasMore).toBe(false);
+});
+
+test('invalidation after a partial deep load restores that depth and not just the first page', async () => {
+  const allVisible = Array.from({ length: 60 }, (_, i) => record(`live-${i + 1}`));
+  getUserFitTestsPage.mockImplementation(pagesOf(allVisible));
+
+  await loadFitTestList(tester);
+  await loadMoreFitTests(tester);
+  expect(getFitTestListSnapshot().count).toBe(50);
+  expect(getFitTestListSnapshot().hasMore).toBe(true);
+  getUserFitTestsPage.mockClear();
+
+  notifyFitTestActivity();
+  await loadFitTestList(tester);
+
+  expect(getFitTestListSnapshot().count).toBe(50);
+  expect(getFitTestListSnapshot().records.map((item) => item.id)).toEqual(
+    allVisible.slice(0, 50).map((item) => item.id)
+  );
+  expect(getFitTestListSnapshot().hasMore).toBe(true);
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(2);
+});
+
+test.each([
+  ['admin', { uid: 'admin-1', role: 'admin', schools: ['Helene College of Nursing'] }],
+  ['superadmin', { uid: 'super-1', role: 'superadmin', schools: ['Helene College of Nursing'] }],
+])('invalidation after a deep load keeps the %s count', async (_role, actor) => {
+  const allVisible = Array.from({ length: 48 }, (_, i) => record(`live-${i + 1}`));
+  getUserFitTestsPage.mockImplementation(pagesOf(allVisible));
+
+  await loadFitTestList(actor);
+  await loadMoreFitTests(actor);
+  expect(getFitTestListSnapshot().count).toBe(48);
+  expect(getFitTestListSnapshot().hasMore).toBe(false);
+
+  notifyFitTestActivity();
+  await loadFitTestList(actor);
+
+  expect(getFitTestListSnapshot().count).toBe(48);
+  expect(getFitTestListSnapshot().hasMore).toBe(false);
+  expect(getFitTestListSnapshot().records).toHaveLength(48);
+});
+
+test('faculty invalidation reloads the full school list so the count stays correct', async () => {
+  const schoolList = Array.from({ length: 44 }, (_, i) => record(`fac-${i + 1}`));
+  getFacultyFitTests.mockResolvedValue(schoolList);
+
+  await loadFitTestList(faculty);
+  expect(getFitTestListSnapshot().count).toBe(44);
+  expect(getUserFitTestsPage).not.toHaveBeenCalled();
+
+  const afterDelete = schoolList.slice(1);
+  getFacultyFitTests.mockResolvedValue(afterDelete);
+  notifyFitTestActivity();
+  await loadFitTestList(faculty);
+
+  expect(getFacultyFitTests).toHaveBeenCalledTimes(2);
+  expect(getFitTestListSnapshot().count).toBe(43);
+  expect(getFitTestListSnapshot().records.map((item) => item.id)).toEqual(
+    afterDelete.map((item) => item.id)
+  );
+  expect(getUserFitTestsPage).not.toHaveBeenCalled();
 });
