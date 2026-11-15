@@ -1,6 +1,15 @@
 // Fit Testing Results E-Card Template
+import { canonicalFitTestMethod } from '../constants/fitTestOptions';
 import { calculateExpirationDate } from './dateUtils';
 import { getVerifyUrl } from './verificationToken';
+import { legacyFitFactorDisplay } from './cardCopies';
+
+const escapeHtml = (value) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 export const generateFitTestCard = (formData) => {
   const {
@@ -14,6 +23,8 @@ export const generateFitTestCard = (formData) => {
     testingAgent,
     maskSize,
     model,
+    style,
+    fitTestMethod,
     result,
     fitTester,
     recipientEmail,
@@ -21,6 +32,9 @@ export const generateFitTestCard = (formData) => {
   } = formData;
 
   const displayExpirationDate = expirationDate || calculateExpirationDate(issueDate);
+  const displayMethod = canonicalFitTestMethod(fitTestMethod) || '';
+  // Only legacy Quantitative records carry a fit factor; new tests never print one.
+  const displayFitFactor = escapeHtml(legacyFitFactorDisplay(formData));
 
   // Follow-up booking links by testing location. The QR itself verifies the card.
   const LOCATION_BOOKING_URLS = {
@@ -168,6 +182,22 @@ export const generateFitTestCard = (formData) => {
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Model:</td>
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${model || '[Model]'}</td>
                                 </tr>
+                                ${style ? `
+                                <tr>
+                                  <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Style:</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${escapeHtml(style)}</td>
+                                </tr>
+                                ` : ''}
+                                <tr>
+                                  <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Test Method:</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${displayMethod}</td>
+                                </tr>
+                                ${displayFitFactor ? `
+                                <tr>
+                                  <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Factor:</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${displayFitFactor}</td>
+                                </tr>
+                                ` : ''}
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Result:</td>
                                   <td style="padding: 8px 0; color: ${result === 'Pass' ? '#0F9A8A' : result === 'Fail' ? '#dc3545' : '#0B2D4A'}; text-align: right; font-weight: bold;">${result || '[Result]'}</td>

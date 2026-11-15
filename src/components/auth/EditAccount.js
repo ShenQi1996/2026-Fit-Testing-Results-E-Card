@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   getUserSolutionProfiles,
@@ -13,6 +13,7 @@ import { isAdminOrAbove, isSuperAdmin, USER_ROLE_ADMIN } from '../../utils/roles
 import { normalizeSchoolList } from '../../utils/schoolScope';
 import { accountSchoolLabel } from '../../utils/ecardSchools';
 import SavedProfilesPanel from './SavedProfilesPanel';
+import { busyContent } from '../common/BusyLabel';
 import './EditAccount.css';
 
 const EMPTY_SOLUTION_FORM = {
@@ -38,10 +39,13 @@ const EditAccount = ({ onBack, onManageSchools }) => {
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
+    programAdministratorName: '',
+    programAdministratorContact: '',
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const submittingRef = useRef(false);
   const [masterSchools, setMasterSchools] = useState([]);
 
   const solutionProfiles = useSavedProfiles({
@@ -64,6 +68,8 @@ const EditAccount = ({ onBack, onManageSchools }) => {
         currentPassword: '',
         newPassword: '',
         confirmPassword: '',
+        programAdministratorName: user.programAdministratorName || '',
+        programAdministratorContact: user.programAdministratorContact || '',
       });
     }
   }, [user]);
@@ -102,6 +108,8 @@ const EditAccount = ({ onBack, onManageSchools }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // A second click before React re-renders must not send a second update.
+    if (submittingRef.current) return;
     setError('');
     setSuccess('');
 
@@ -122,6 +130,7 @@ const EditAccount = ({ onBack, onManageSchools }) => {
       }
     }
 
+    submittingRef.current = true;
     setIsLoading(true);
 
     try {
@@ -130,18 +139,21 @@ const EditAccount = ({ onBack, onManageSchools }) => {
         email: formData.email,
         currentPassword: formData.currentPassword || undefined,
         newPassword: formData.newPassword || undefined,
+        programAdministratorName: formData.programAdministratorName,
+        programAdministratorContact: formData.programAdministratorContact,
       });
       setSuccess('Account updated successfully!');
 
-      setFormData({
-        ...formData,
+      setFormData((prev) => ({
+        ...prev,
         currentPassword: '',
         newPassword: '',
         confirmPassword: '',
-      });
+      }));
     } catch (err) {
       setError(err.message || 'Failed to update account. Please try again.');
     } finally {
+      submittingRef.current = false;
       setIsLoading(false);
     }
   };
@@ -189,6 +201,34 @@ const EditAccount = ({ onBack, onManageSchools }) => {
                 value={formData.email}
                 onChange={handleChange}
                 required
+                disabled={isLoading}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="programAdministratorName">Program administrator name</label>
+              <input
+                type="text"
+                id="programAdministratorName"
+                name="programAdministratorName"
+                className="form-input"
+                placeholder="Optional"
+                value={formData.programAdministratorName}
+                onChange={handleChange}
+                disabled={isLoading}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="programAdministratorContact">Program administrator contact</label>
+              <input
+                type="text"
+                id="programAdministratorContact"
+                name="programAdministratorContact"
+                className="form-input"
+                placeholder="Optional email or phone"
+                value={formData.programAdministratorContact}
+                onChange={handleChange}
                 disabled={isLoading}
               />
             </div>
@@ -382,8 +422,9 @@ const EditAccount = ({ onBack, onManageSchools }) => {
             type="submit"
             className="auth-button"
             disabled={isLoading}
+            aria-busy={isLoading || undefined}
           >
-            {isLoading ? 'Updating...' : 'Update Account'}
+            {busyContent(isLoading, 'Saving…', 'Update Account')}
           </button>
         </form>
       </div>

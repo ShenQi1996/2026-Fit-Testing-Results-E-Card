@@ -9,7 +9,7 @@ import {
   RESPIRATOR_MFG_OPTIONS,
   MASK_SIZE_OPTIONS,
   RESULT_OPTIONS,
-  FIT_TEST_METHOD_OPTIONS,
+  RESPIRATOR_STYLE_OPTIONS,
   isCustomOptionValue,
 } from '../../constants/fitTestOptions';
 
@@ -77,13 +77,15 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
 
       <div className="form-row">
         <FormSelect
-          id="fitTestMethod"
-          label="Fit test method"
-          value={formData.fitTestMethod || 'Locked to Qualitative'}
-          onChange={() => {}}
-          options={FIT_TEST_METHOD_OPTIONS}
-          disabled
-          error={fieldErrors?.fitTestMethod}
+          id="style"
+          label="Style"
+          value={formData.style || ''}
+          onChange={(e) => onChange('style', e.target.value)}
+          options={RESPIRATOR_STYLE_OPTIONS}
+          placeholder="Select style"
+          required
+          disabled={isLoading}
+          error={fieldErrors?.style}
         />
       </div>
 
@@ -150,7 +152,9 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           value={formData.model}
           onChange={(e) => onChange('model', e.target.value)}
           placeholder="e.g., 1870+"
+          required
           disabled={isLoading}
+          error={fieldErrors?.model}
         />
       </div>
 

@@ -1,7 +1,6 @@
 /* global process */
 // Email service for sending e-cards via EmailJS
 
-import emailjs from '@emailjs/browser';
 import { generateFitTestCard } from '../utils/fitTestCardTemplate';
 
 // Production EmailJS account. Left compiled in so APP_ENV-unset production sends
@@ -34,6 +33,12 @@ export const assertStagingRecipient = (recipientEmail, appEnv) => {
     throw new Error(STAGING_EMAIL_MESSAGE);
   }
   return email;
+};
+
+// EmailJS loads at send time so pages that never send do not download it.
+const loadEmailJS = async () => {
+  const emailjsModule = await import(/* webpackChunkName: "emailjs" */ '@emailjs/browser');
+  return emailjsModule.default || emailjsModule;
 };
 
 // Check if EmailJS is configured
@@ -76,6 +81,7 @@ export const sendFitTestCard = async (formData) => {
 
   // Send email using EmailJS
   try {
+    const emailjs = await loadEmailJS();
     await emailjs.send(
       EMAILJS_CONFIG.SERVICE_ID,
       EMAILJS_CONFIG.TEMPLATE_ID,

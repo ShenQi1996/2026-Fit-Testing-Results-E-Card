@@ -14,13 +14,21 @@ import {
   getUserSolutionProfiles,
   saveUserSolutionProfile,
 } from '../services/firebaseDb';
-import { listMasterSchools } from '../services/masterSchools';
+import { getMasterSchoolRecord, listMasterSchoolRecords } from '../services/masterSchools';
+import {
+  deleteFitTestDraft,
+  draftToFormFields,
+  listFitTestDrafts,
+  saveFitTestDraft,
+} from '../services/fitTestDraftsDb';
 import { TESTING_AGENT_OPTIONS } from '../constants/fitTestOptions';
-import { isSuperAdmin } from '../utils/roles';
+import { isFaculty, isSuperAdmin } from '../utils/roles';
 import {
   SELECT_SCHOOL_MESSAGE,
   ecardSchoolChoices,
+  schoolsForSignedInUser,
 } from '../utils/ecardSchools';
+import { programAdminForSchool } from '../utils/programAdmin';
 import { createInitialFormData } from '../constants/initialFitTestForm';
 import { createVerificationToken } from '../utils/verificationToken';
 import { useSelectableProfiles } from './useSelectableProfiles';
@@ -67,6 +75,11 @@ export const useFitTestForm = () => {
   const signatureCanvasRef = useRef(null);
   const testerSignatureCanvasRef = useRef(null);
   const printedNameManuallyEdited = useRef(false);
+  const [drafts, setDrafts] = useState([]);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const [activeDraftId, setActiveDraftId] = useState(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const canUseDrafts = Boolean(user?.uid) && !isFaculty(user);
 
   const solutionProfilesState = useSelectableProfiles({
     userId: user?.uid,
@@ -89,7 +102,8 @@ export const useFitTestForm = () => {
   });
 
   const [masterSchools, setMasterSchools] = useState([]);
-  const [masterSchoolsLoading, setMasterSchoolsLoading] = useState(false);
+  const [schoolRecords, setSchoolRecords] = useState([]);
+  const [masterSchoolsLoading, setMasterSchoolsLoading] = useState(true);
   const superAdmin = isSuperAdmin(user?.role);
   const schoolChoice = useMemo(
     () => ecardSchoolChoices(user, masterSchools),
@@ -98,20 +112,29 @@ export const useFitTestForm = () => {
   const allowedSchools = schoolChoice.options;
 
   useEffect(() => {
-    if (!superAdmin) {
+    if (!user?.uid) {
       setMasterSchools([]);
+      setSchoolRecords([]);
       setMasterSchoolsLoading(false);
       return undefined;
     }
     let cancelled = false;
     setMasterSchoolsLoading(true);
-    listMasterSchools()
-      .then((names) => {
-        if (!cancelled) setMasterSchools(names);
+    const loadRecords = superAdmin
+      ? listMasterSchoolRecords()
+      : Promise.all(schoolsForSignedInUser(user, []).map((name) => getMasterSchoolRecord(name)));
+    loadRecords
+      .then((records) => {
+        if (cancelled) return;
+        setSchoolRecords(records);
+        setMasterSchools(superAdmin ? records.map((record) => record.name) : []);
       })
       .catch((error) => {
         console.error('Could not load schools', error);
-        if (!cancelled) setMasterSchools([]);
+        if (!cancelled) {
+          setSchoolRecords([]);
+          setMasterSchools([]);
+        }
       })
       .finally(() => {
         if (!cancelled) setMasterSchoolsLoading(false);
@@ -119,7 +142,7 @@ export const useFitTestForm = () => {
     return () => {
       cancelled = true;
     };
-  }, [superAdmin, user?.uid]);
+  }, [superAdmin, user]);
 
   useEffect(() => {
     setFormData((prev) => {
@@ -133,6 +156,23 @@ export const useFitTestForm = () => {
   }, [allowedSchools]);
 
   useEffect(() => {
+    const chosen = (formData.schoolsList || '').trim();
+    const next = programAdminForSchool(
+      schoolRecords.find((record) => record.name === chosen),
+      user,
+    );
+    setFormData((prev) => {
+      if (
+        prev.programAdministratorName === next.programAdministratorName
+        && prev.programAdministratorContact === next.programAdministratorContact
+      ) {
+        return prev;
+      }
+      return { ...prev, ...next };
+    });
+  }, [formData.schoolsList, schoolRecords, user]);
+
+  useEffect(() => {
     if (user && user.name) {
       setFormData((prev) => ({
         ...prev,
@@ -141,8 +181,54 @@ export const useFitTestForm = () => {
     }
   }, [user]);
 
+  const refreshDrafts = async () => {
+    if (!canUseDrafts) {
+      setDrafts([]);
+      return [];
+    }
+    setDraftsLoading(true);
+    try {
+      const next = await listFitTestDrafts(user.uid);
+      setDrafts(next);
+      return next;
+    } catch (error) {
+      console.error('Could not load drafts', error);
+      return null;
+    } finally {
+      setDraftsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!canUseDrafts) {
+      setDrafts([]);
+      setActiveDraftId(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setDraftsLoading(true);
+    listFitTestDrafts(user.uid)
+      .then((next) => {
+        if (!cancelled) setDrafts(next);
+      })
+      .catch((error) => {
+        console.error('Could not load drafts', error);
+        if (!cancelled) setDrafts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDraftsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseDrafts, user?.uid]);
+
   const handleInputChange = (field, value) => {
-    if (field === 'fitTester' || field === 'fitTestMethod') {
+    if (
+      field === 'fitTester'
+      || field === 'programAdministratorName'
+      || field === 'programAdministratorContact'
+    ) {
       return;
     }
 
@@ -262,7 +348,7 @@ export const useFitTestForm = () => {
 
     const shouldSaveProfile = solutionProfilesState.isAddingNew;
 
-    if (masterSchoolsLoading && superAdmin) {
+    if (masterSchoolsLoading) {
       setStatus({ type: 'error', message: 'Schools are still loading. Please try again.' });
       return;
     }
@@ -359,18 +445,27 @@ export const useFitTestForm = () => {
 
       const showFailureReasonUI =
         formData.facialHairInterfering === true || formData.respiratorDonnedCorrectly === false;
+      const chosenForProgram = (formData.schoolsList || '').trim();
+      const program = programAdminForSchool(
+        schoolRecords.find((record) => record.name === chosenForProgram),
+        user,
+      );
       const cleanedFormData = {
         ...formData,
+        ...program,
         printedName: formData.printedName.trim(),
         testLocation: formData.testLocation?.trim() || '',
         fitTester: user?.name || formData.fitTester || '',
-        fitTestMethod: 'Locked to Qualitative',
+        model: (formData.model || '').trim(),
+        style: formData.style || '',
+        fitTestMethod: 'Qualitative',
         failureReason: showFailureReasonUI ? formData.failureReason : '',
         correctiveActionNote: showFailureReasonUI ? formData.correctiveActionNote : '',
         testerMedicalRestrictionsNote: formData.testerMedicalRestrictionsReceived === true
           ? (formData.testerMedicalRestrictionsNote || '').trim()
           : '',
       };
+      delete cleanedFormData.fitFactor;
 
       const expirationDate = calculateExpirationDate(cleanedFormData.issueDate);
       const formDataWithSignature = {
@@ -392,6 +487,18 @@ export const useFitTestForm = () => {
           });
           setIsLoading(false);
           return;
+        }
+        // The real record now exists, so the draft has done its job. A failed
+        // send before this point keeps the draft.
+        if (activeDraftId) {
+          const sentDraftId = activeDraftId;
+          setActiveDraftId(null);
+          try {
+            await deleteFitTestDraft(sentDraftId);
+          } catch (draftError) {
+            console.error('Could not delete the sent draft', draftError);
+          }
+          setDrafts((prev) => prev.filter((draft) => draft.id !== sentDraftId));
         }
       } else {
         console.warn('User not logged in, skipping database save');
@@ -437,7 +544,7 @@ export const useFitTestForm = () => {
   };
 
   const chosenSchool = (formData.schoolsList || '').trim();
-  const schoolSubmitBlocked = (superAdmin && masterSchoolsLoading)
+  const schoolSubmitBlocked = masterSchoolsLoading
     || Boolean(schoolChoice.blockedMessage)
     || !allowedSchools.includes(chosenSchool);
 
@@ -450,7 +557,87 @@ export const useFitTestForm = () => {
 
   const resetForm = () => {
     applyDefaultSelections(solutionProfilesState.profiles);
+    setActiveDraftId(null);
     setStatus({ type: '', message: '' });
+  };
+
+  // Saves the form as an unsent draft. No validation, no email, no fit test
+  // record, no lookup and no verification card.
+  const handleSaveDraft = async () => {
+    if (!canUseDrafts) {
+      setStatus({ type: 'error', message: 'You must be signed in as staff to save a draft.' });
+      return;
+    }
+    setIsSavingDraft(true);
+    try {
+      const savedId = await saveFitTestDraft(user.uid, formData, activeDraftId);
+      setActiveDraftId(savedId);
+      setStatus({ type: 'warning', message: 'Draft saved. It has not been sent.' });
+      await refreshDrafts();
+    } catch (error) {
+      console.error('Error saving draft:', error);
+      const code = typeof error?.code === 'string' ? ` (${error.code})` : '';
+      setStatus({ type: 'error', message: `Could not save the draft${code}. Please try again.` });
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const solutionOptionForDraft = (fields, profiles) => {
+    const match = profiles.find((profile) => (
+      (profile.solutionType || '') === (fields.solutionType || '')
+      && (profile.solutionOpenDate || '') === (fields.solutionOpenDate || '')
+      && (profile.solutionExpirationDate || '') === (fields.solutionExpirationDate || '')
+    ));
+    if (match) return `${PROFILE_SOLUTION_OPTION_PREFIX}${match.id}`;
+    const isBase = TESTING_AGENT_OPTIONS.some((option) => option.value === fields.solutionType);
+    if (isBase && !fields.solutionOpenDate && !fields.solutionExpirationDate) {
+      return `${BASE_SOLUTION_OPTION_PREFIX}${fields.solutionType}`;
+    }
+    return NEW_SOLUTION_PROFILE_OPTION;
+  };
+
+  // One tap reopens a draft into the form. Signatures are never stored, so
+  // both have to be signed again before sending.
+  const handleOpenDraft = (draftId) => {
+    const draft = drafts.find((item) => item.id === draftId);
+    if (!draft) return;
+    const fields = draftToFormFields(draft);
+    const profiles = solutionProfilesState.profiles;
+    const defaultProfile = profiles.find((profile) => profile.isDefault);
+    const solutionFields = {
+      solutionType: defaultProfile?.solutionType || getDefaultBaseSolutionType(),
+      solutionOpenDate: defaultProfile?.solutionOpenDate || '',
+      solutionExpirationDate: defaultProfile?.solutionExpirationDate || '',
+      ...fields,
+    };
+    applyDefaultSelections(profiles, fields);
+    solutionProfilesState.setSelectedOption(solutionOptionForDraft(solutionFields, profiles));
+    printedNameManuallyEdited.current = Boolean(
+      (fields.printedName || '').trim()
+      && (fields.printedName || '').trim() !== (fields.clientName || '').trim(),
+    );
+    setActiveDraftId(draftId);
+    setStatus({
+      type: 'warning',
+      message: 'Draft opened. It has not been sent. Both signatures must be signed again before sending.',
+    });
+  };
+
+  const handleDeleteDraft = async (draftId) => {
+    if (!draftId) return;
+    try {
+      await deleteFitTestDraft(draftId);
+      setDrafts((prev) => prev.filter((draft) => draft.id !== draftId));
+      if (draftId === activeDraftId) {
+        setActiveDraftId(null);
+      }
+      setStatus({ type: 'success', message: 'Draft deleted.' });
+    } catch (error) {
+      console.error('Error deleting draft:', error);
+      const code = typeof error?.code === 'string' ? ` (${error.code})` : '';
+      setStatus({ type: 'error', message: `Could not delete the draft${code}. Please try again.` });
+    }
   };
 
   return {
@@ -483,5 +670,13 @@ export const useFitTestForm = () => {
     setSignatureCanvasRef,
     setTesterSignatureCanvasRef,
     resetForm,
+    canUseDrafts,
+    drafts,
+    draftsLoading,
+    activeDraftId,
+    isSavingDraft,
+    handleSaveDraft,
+    handleOpenDraft,
+    handleDeleteDraft,
   };
 };

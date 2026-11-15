@@ -4,6 +4,7 @@ import { join } from 'path';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../../context/AuthContext';
 import {
+  deleteManagedUser,
   getAllUsers,
   getFitTestCountsByUser,
   getPendingUsers,
@@ -13,11 +14,13 @@ import {
 import { createManagedAuthUser } from '../../services/firebaseAuth';
 import {
   addMasterSchool,
-  listMasterSchools,
+  listMasterSchoolRecords,
+  previewMasterSchoolRemoval,
   removeMasterSchool,
+  removeStaleSchoolsFromUsers,
   renameMasterSchool,
 } from '../../services/masterSchools';
-import UsersManagement from './UsersManagement';
+import UsersManagement, { schoolRemovalConfirmText } from './UsersManagement';
 import { accessDateInputValue } from '../../utils/roles';
 
 jest.mock('../../context/AuthContext', () => ({
@@ -41,13 +44,33 @@ jest.mock('../../services/firebaseAuth', () => ({
 
 jest.mock('../../services/masterSchools', () => ({
   listMasterSchools: jest.fn(() => Promise.resolve(['Helene College of Nursing'])),
+  listMasterSchoolRecords: jest.fn(() => Promise.resolve([{
+    name: 'Helene College of Nursing',
+    programAdministratorName: '',
+    programAdministratorContact: '',
+  }])),
   addMasterSchool: jest.fn(),
   renameMasterSchool: jest.fn(),
+  updateMasterSchoolProgram: jest.fn(),
   removeMasterSchool: jest.fn(),
+  previewMasterSchoolRemoval: jest.fn(() => Promise.resolve({
+    users: [], leftWithoutSchools: [], singleSchoolUsers: [], skippedSelf: false,
+  })),
+  removeStaleSchoolsFromUsers: jest.fn(),
+  findUsersWithRemovedSchools: jest.requireActual('../../services/masterSchools').findUsersWithRemovedSchools,
 }));
 
 const HELENE = 'Helene College of Nursing';
 const SECOND = 'Example Second School';
+const recordsFor = (names) => names.map((name) => ({
+  name,
+  programAdministratorName: '',
+  programAdministratorContact: '',
+}));
+const EMPTY_PROGRAM = {
+  programAdministratorName: '',
+  programAdministratorContact: '',
+};
 
 const USERS = [
   {
@@ -725,7 +748,7 @@ test('the schools section is only shown to a super admin', async () => {
   await act(async () => {
     await Promise.resolve();
   });
-  expect(addMasterSchool).toHaveBeenCalledWith('super-1', 'North Campus');
+  expect(addMasterSchool).toHaveBeenCalledWith('super-1', 'North Campus', EMPTY_PROGRAM);
 
   await act(async () => {
     renderer.root.findByProps({ 'aria-label': 'Master schools' })
@@ -741,11 +764,11 @@ test('the schools section is only shown to a super admin', async () => {
   await act(async () => {
     renderer.root.findAllByType('button').find((button) => button.props['aria-label'] === 'Save school name').props.onClick();
   });
-  expect(renameMasterSchool).toHaveBeenCalledWith('super-1', HELENE, 'North Campus');
+  expect(renameMasterSchool).toHaveBeenCalledWith('super-1', HELENE, 'North Campus', EMPTY_PROGRAM);
 });
 
 test('a super admin card shows All and saves schools on another super admin', async () => {
-  listMasterSchools.mockResolvedValue([HELENE, SECOND]);
+  listMasterSchoolRecords.mockResolvedValue(recordsFor([HELENE, SECOND]));
   updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
     id,
     role: 'superadmin',
@@ -827,7 +850,7 @@ test('a super admin card shows All and saves schools on another super admin', as
 });
 
 test('a super admin checks schools when creating an admin', async () => {
-  listMasterSchools.mockResolvedValue([HELENE, SECOND]);
+  listMasterSchoolRecords.mockResolvedValue(recordsFor([HELENE, SECOND]));
   createManagedAuthUser.mockResolvedValue({
     id: 'new-admin',
     email: 'new-admin@example.com',
@@ -873,7 +896,7 @@ test('a super admin checks schools when creating an admin', async () => {
 });
 
 test('a super admin edits another admin with school checkboxes', async () => {
-  listMasterSchools.mockResolvedValue([HELENE]);
+  listMasterSchoolRecords.mockResolvedValue(recordsFor([HELENE]));
   updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
     id,
     role: 'admin',
@@ -1174,4 +1197,388 @@ test('a super admin with no schools saves without an empty schools array', async
   const payload = updateManagedUser.mock.calls[0][2];
   expect(payload).not.toHaveProperty('schools');
   expect(payload).not.toHaveProperty('school');
+});
+
+describe('removing a school updates users', () => {
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+
+  beforeEach(() => {
+    listMasterSchoolRecords.mockReset();
+    listMasterSchoolRecords.mockResolvedValue(recordsFor([HELENE]));
+    previewMasterSchoolRemoval.mockReset();
+    previewMasterSchoolRemoval.mockResolvedValue({
+      users: [], leftWithoutSchools: [], singleSchoolUsers: [], skippedSelf: false,
+    });
+    removeMasterSchool.mockReset();
+    addMasterSchool.mockReset();
+    renameMasterSchool.mockReset();
+    updateManagedUser.mockReset();
+    deleteManagedUser.mockReset();
+  });
+
+  const schoolsSection = (renderer) => renderer.root.findByProps({ 'aria-label': 'Master schools' });
+  const sectionButton = (renderer, label) => schoolsSection(renderer).findAllByType('button')
+    .find((button) => button.props['aria-label'] === label);
+  const allText = (renderer) => JSON.stringify(renderer.toJSON());
+
+  test('the copy says users are updated and fit-test records are not', async () => {
+    const renderer = await renderPage(superAdminUser);
+    const copy = schoolsSection(renderer).findByProps({ className: 'section-description' })
+      .children.join('');
+    expect(copy).toContain('Removing a school also removes it from every user who has it. A user whose main school it was moves to their next school, or to Leave unset when they have none');
+    expect(copy).toContain('Fit-test records keep the name.');
+    expect(copy).not.toContain('Renaming or removing a school does not change existing user');
+  });
+
+  test('confirm names the affected users and the ones left with no schools', () => {
+    const text = schoolRemovalConfirmText(HELENE, {
+      users: [{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Helen Admin' }, { id: 't', name: 'Tess' }],
+      unsetUsers: [{ id: 't', name: 'Tess' }],
+      switchedUsers: [{ id: 'a', name: 'Ada', school: SECOND }],
+      leftWithoutSchools: [{ id: 'b', name: 'Helen Admin' }],
+      facultyNeedingSchool: [{ id: 'f', name: 'Fay' }],
+      skippedSelf: true,
+    });
+    expect(text).toContain(`Remove ${HELENE} from the school list?`);
+    expect(text).toContain(`3 users will have ${HELENE} removed: Ada, Helen Admin, Tess.`);
+    expect(text).toContain(`1 user with ${HELENE} as their main school will switch to their next school: Ada → ${SECOND}.`);
+    expect(text).toContain(`1 user with ${HELENE} as their school and no other school will be set to Leave unset (Tess). They can still save drafts`);
+    expect(text).toContain('1 user will have no schools left (Helen Admin).');
+    expect(text).toContain(`1 user on faculty keeps ${HELENE} because faculty must have one school (Fay).`);
+    expect(text).toContain('Role and status do not change.');
+    expect(text).toContain('Your own account keeps the name');
+    expect(text).toContain('Fit-test records keep this school name.');
+  });
+
+  test('confirming removes the school from user cards without a reload', async () => {
+    const outcome = {
+      users: [
+        {
+          id: 'admin-2', name: 'Ada', schools: [SECOND], listChanges: true, schoolChanges: true, switchedSchool: true, school: SECOND,
+        },
+        { id: 'admin-helene', name: 'Helen Admin', schools: [], listChanges: true },
+        {
+          id: 'tester-1', name: 'Tess', schools: [], schoolChanges: true, clearSchool: true, school: '',
+        },
+      ],
+      unsetUsers: [{ id: 'tester-1', name: 'Tess' }],
+      switchedUsers: [{ id: 'admin-2', name: 'Ada', school: SECOND }],
+      leftWithoutSchools: [{ id: 'admin-helene', name: 'Helen Admin', schools: [] }],
+      facultyNeedingSchool: [{ id: 'faculty-9', name: 'Fay' }],
+      skippedSelf: true,
+    };
+    previewMasterSchoolRemoval.mockResolvedValue(outcome);
+    removeMasterSchool.mockResolvedValue({ ...outcome, names: [SECOND] });
+    listMasterSchoolRecords
+      .mockResolvedValueOnce(recordsFor([HELENE, SECOND]))
+      .mockResolvedValue(recordsFor([SECOND]));
+    const confirm = jest.fn(() => true);
+    global.window = { confirm };
+    const renderer = await renderPage(superAdminUser);
+    expect(cardFor(renderer, 'tester-1').findByProps({ 'aria-label': 'School' }).props.value).toBe(HELENE);
+
+    await act(async () => {
+      sectionButton(renderer, `Remove ${HELENE}`).props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(previewMasterSchoolRemoval).toHaveBeenCalledWith('super-1', HELENE);
+    expect(confirm.mock.calls[0][0]).toContain(`3 users will have ${HELENE} removed`);
+    expect(confirm.mock.calls[0][0]).toContain('will be set to Leave unset (Tess)');
+    expect(removeMasterSchool).toHaveBeenCalledWith('super-1', HELENE);
+    expect(checkboxNames(schoolGroup(cardFor(renderer, 'admin-2')))).toEqual([SECOND]);
+    expect(checkboxFor(schoolGroup(cardFor(renderer, 'admin-2')), SECOND).props.checked).toBe(true);
+    // The tester's selector now sits on the Leave unset option.
+    const testerSelect = cardFor(renderer, 'tester-1').findByProps({ 'aria-label': 'School' });
+    expect(testerSelect.props.value).toBe('');
+    expect(testerSelect.findAllByType('option')[0].children).toEqual(['Leave unset']);
+    const text = allText(renderer);
+    expect(text).toContain(`Removed ${HELENE} from the school list and from 3 users. Fit-test records keep the name.`);
+    expect(text).toContain(`Switched the main school for 1 user: Ada → ${SECOND}.`);
+    expect(text).toContain('Set 1 user to Leave unset: Tess.');
+    expect(text).toContain('1 user now has no schools: Helen Admin.');
+    expect(text).toContain('1 user on faculty still has a removed school and needs a new one: Fay.');
+  });
+
+  test('cancelling the confirm writes nothing', async () => {
+    global.window = { confirm: jest.fn(() => false) };
+    const renderer = await renderPage(superAdminUser);
+    await act(async () => {
+      sectionButton(renderer, `Remove ${HELENE}`).props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(previewMasterSchoolRemoval).toHaveBeenCalled();
+    expect(removeMasterSchool).not.toHaveBeenCalled();
+    // The busy state clears so the buttons work again.
+    expect(sectionButton(renderer, `Remove ${HELENE}`).props.disabled).toBe(false);
+  });
+
+  test('a removal error shows and re-enables the buttons', async () => {
+    global.window = { confirm: jest.fn(() => true) };
+    removeMasterSchool.mockRejectedValue(new Error('Missing or insufficient permissions.'));
+    const renderer = await renderPage(superAdminUser);
+    await act(async () => {
+      sectionButton(renderer, `Remove ${HELENE}`).props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(allText(renderer)).toContain('Missing or insufficient permissions.');
+    expect(sectionButton(renderer, `Remove ${HELENE}`).props.disabled).toBe(false);
+  });
+
+  test('a school no longer on the list is marked on the user card and dropped on save', async () => {
+    updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
+      id, role: 'admin', status: 'approved', ...draft,
+    }));
+    const stale = {
+      id: 'admin-stale',
+      name: 'Stale Admin',
+      email: 'stale@example.com',
+      role: 'admin',
+      status: 'approved',
+      schools: ['1test2 school', HELENE],
+    };
+    const renderer = await renderPage(superAdminUser, [], [stale]);
+    const group = schoolGroup(cardFor(renderer, 'admin-stale'));
+    expect(checkboxNames(group)).toEqual([HELENE, '1test2 school']);
+    const staleLabel = group.findAllByType('label').find((label) => (
+      label.findByType('span').children.join('') === '1test2 school'
+    ));
+    expect(staleLabel.props.className).toContain('school-removed');
+    expect(staleLabel.findByType('em').children.join('')).toBe('Removed from list');
+
+    await act(async () => {
+      saveButton(cardFor(renderer, 'admin-stale')).props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(updateManagedUser.mock.calls[0][2].schools).toEqual([HELENE]);
+  });
+
+  test('a user whose only school was removed can still save a status change', async () => {
+    updateManagedUser.mockImplementation(async (_actorId, id, draft) => ({
+      id, role: 'admin', ...draft,
+    }));
+    const orphan = {
+      id: 'admin-orphan',
+      name: 'Orphan Admin',
+      email: 'orphan@example.com',
+      role: 'admin',
+      status: 'approved',
+      schools: ['1test2 school'],
+    };
+    const renderer = await renderPage(superAdminUser, [], [orphan]);
+    await act(async () => {
+      saveButton(cardFor(renderer, 'admin-orphan')).props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Sent unchanged so the service skips the schools write.
+    expect(updateManagedUser.mock.calls[0][2].schools).toEqual(['1test2 school']);
+  });
+
+  test('old school names already on users can be removed in one step', async () => {
+    global.window = { confirm: jest.fn(() => true) };
+    removeStaleSchoolsFromUsers.mockResolvedValue({
+      users: [{ id: 'admin-stale', name: 'Stale Admin', schools: [HELENE] }],
+      leftWithoutSchools: [],
+    });
+    const stale = {
+      id: 'admin-stale',
+      name: 'Stale Admin',
+      email: 'stale@example.com',
+      role: 'admin',
+      status: 'approved',
+      schools: ['1test2 school', HELENE],
+    };
+    const renderer = await renderPage(superAdminUser, [], [stale]);
+    expect(allText(renderer)).toContain('1 user still has a school that is no longer on this list.');
+    const cleanup = schoolsSection(renderer).findAllByType('button')
+      .find((button) => button.children.includes('Remove old school names'));
+    await act(async () => {
+      cleanup.props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(removeStaleSchoolsFromUsers).toHaveBeenCalledWith('super-1', [stale]);
+    expect(checkboxNames(schoolGroup(cardFor(renderer, 'admin-stale')))).toEqual([HELENE]);
+    expect(allText(renderer)).not.toContain('no longer on this list');
+  });
+
+  describe('saving indicators', () => {
+    test('Add School shows Adding…, disables the form and ignores a second click', async () => {
+      const pending = deferred();
+      addMasterSchool.mockReturnValue(pending.promise);
+      const renderer = await renderPage(superAdminUser);
+      await act(async () => {
+        renderer.root.findByProps({ 'aria-label': 'New school name' }).props.onChange({
+          target: { value: 'North Campus' },
+        });
+      });
+      const addButton = () => schoolsSection(renderer).findAllByType('button')
+        .find((button) => button.props.className === 'solution-add-button');
+      await act(async () => {
+        addButton().props.onClick();
+        addButton().props.onClick();
+      });
+
+      expect(addButton().props.disabled).toBe(true);
+      expect(addButton().props['aria-busy']).toBe(true);
+      expect(addButton().children).toContain('Adding…');
+      expect(addButton().findAllByProps({ className: 'button-spinner' })).toHaveLength(1);
+      expect(renderer.root.findByProps({ 'aria-label': 'New school name' }).props.disabled).toBe(true);
+      expect(sectionButton(renderer, `Remove ${HELENE}`).props.disabled).toBe(true);
+      expect(addMasterSchool).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        pending.resolve([HELENE, 'North Campus']);
+        await pending.promise;
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(addButton().children).toEqual(['+ Add School']);
+      // The name field is cleared, so Add stays off until a new name is typed.
+      // A late extra click cannot replace the success line with "Enter a school name."
+      expect(addButton().props.disabled).toBe(true);
+      expect(allText(renderer)).toContain('Added school North Campus.');
+      await act(async () => {
+        renderer.root.findByProps({ 'aria-label': 'New school name' }).props.onChange({
+          target: { value: 'South Campus' },
+        });
+      });
+      expect(addButton().props.disabled).toBe(false);
+    });
+
+    test('a failed add shows the error and re-enables the button', async () => {
+      addMasterSchool.mockRejectedValue(new Error('That school is already on the list.'));
+      const renderer = await renderPage(superAdminUser);
+      const addButton = () => schoolsSection(renderer).findAllByType('button')
+        .find((button) => button.props.className === 'solution-add-button');
+      expect(addButton().props.disabled).toBe(true);
+      await act(async () => {
+        renderer.root.findByProps({ 'aria-label': 'New school name' }).props.onChange({
+          target: { value: HELENE },
+        });
+      });
+      await act(async () => {
+        addButton().props.onClick();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(allText(renderer)).toContain('That school is already on the list.');
+      expect(addButton().props.disabled).toBe(false);
+    });
+
+    test('school Save shows Saving… while the rename runs', async () => {
+      const pending = deferred();
+      renameMasterSchool.mockReturnValue(pending.promise);
+      const renderer = await renderPage(superAdminUser);
+      await act(async () => {
+        sectionButton(renderer, `Edit ${HELENE}`).props.onClick();
+      });
+      await act(async () => {
+        renderer.root.findByProps({ 'aria-label': 'Edit school name' }).props.onChange({
+          target: { value: 'North Campus' },
+        });
+      });
+      await act(async () => {
+        sectionButton(renderer, 'Save school name').props.onClick();
+        sectionButton(renderer, 'Save school name').props.onClick();
+      });
+      const save = sectionButton(renderer, 'Save school name');
+      expect(save.props.disabled).toBe(true);
+      expect(save.children).toContain('Saving…');
+      expect(renameMasterSchool).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        pending.resolve(['North Campus']);
+        await pending.promise;
+      });
+    });
+
+    test('school delete shows Deleting… on that row', async () => {
+      const pending = deferred();
+      global.window = { confirm: jest.fn(() => true) };
+      removeMasterSchool.mockReturnValue(pending.promise);
+      const renderer = await renderPage(superAdminUser);
+      await act(async () => {
+        sectionButton(renderer, `Remove ${HELENE}`).props.onClick();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const remove = sectionButton(renderer, `Remove ${HELENE}`);
+      expect(remove.props.disabled).toBe(true);
+      expect(remove.children).toContain('Deleting…');
+      await act(async () => {
+        pending.resolve({ names: [], users: [] });
+        await pending.promise;
+      });
+    });
+
+    test('user Save shows Saving… with a spinner and saves once on a double click', async () => {
+      const pending = deferred();
+      updateManagedUser.mockReturnValue(pending.promise);
+      const renderer = await renderPage(superAdminUser);
+      const button = () => cardFor(renderer, 'admin-helene').findAllByType('button')
+        .find((node) => node.props.className === 'users-primary-button');
+      await act(async () => {
+        button().props.onClick();
+        button().props.onClick();
+      });
+      expect(button().props.disabled).toBe(true);
+      expect(button().props['aria-busy']).toBe(true);
+      expect(button().children).toContain('Saving…');
+      expect(button().findAllByProps({ className: 'button-spinner' })).toHaveLength(1);
+      expect(updateManagedUser).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        pending.resolve({ ...USERS[2] });
+        await pending.promise;
+      });
+      expect(button().children).toEqual(['Save']);
+      expect(allText(renderer)).toContain('Saved updates for helen-admin@example.com.');
+    });
+
+    test('user Delete shows Deleting… and deletes once', async () => {
+      const pending = deferred();
+      global.window = { confirm: jest.fn(() => true) };
+      deleteManagedUser.mockReturnValue(pending.promise);
+      const renderer = await renderPage(superAdminUser);
+      const button = () => cardFor(renderer, 'admin-helene').findAllByType('button')
+        .find((node) => node.props.className === 'users-danger-button');
+      await act(async () => {
+        button().props.onClick();
+      });
+      await act(async () => {
+        button().props.onClick();
+      });
+      expect(button().props.disabled).toBe(true);
+      expect(button().children).toContain('Deleting…');
+      expect(deleteManagedUser).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        pending.resolve();
+        await pending.promise;
+      });
+      expect(cardFor(renderer, 'admin-helene')).toBeUndefined();
+      expect(allText(renderer)).toContain('Deleted profile for helen-admin@example.com.');
+    });
+  });
 });

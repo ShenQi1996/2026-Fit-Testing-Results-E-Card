@@ -1,4 +1,5 @@
 import { parseDateString } from '../../utils/dateUtils';
+import { legacyFitFactorDisplay } from '../../utils/cardCopies';
 
 export const FILTER_ALL = '__all__';
 
@@ -170,7 +171,13 @@ export const getEcardFormDataFromTest = (test) => ({
   testingAgent: test.testingAgent || '',
   maskSize: test.maskSize || '',
   model: test.model || '',
+  style: test.style || '',
+  fitTestMethod: test.fitTestMethod || '',
   result: test.result || '',
   fitTester: test.fitTester || '',
   verificationToken: test.verificationToken || '',
+  programAdministratorName: test.programAdministratorName || '',
+  programAdministratorContact: test.programAdministratorContact || '',
+  // Legacy Quantitative records keep their stored fit factor on the card and PDF.
+  ...(legacyFitFactorDisplay(test) ? { fitFactor: legacyFitFactorDisplay(test) } : {}),
 });

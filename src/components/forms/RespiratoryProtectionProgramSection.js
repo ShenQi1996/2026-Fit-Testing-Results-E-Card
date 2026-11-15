@@ -1,6 +1,5 @@
 import React from 'react';
 import FormSection from '../common/FormSection';
-import FormInput from '../common/FormInput';
 import FormSelect from '../common/FormSelect';
 import FormCheckbox from '../common/FormCheckbox';
 
@@ -56,29 +55,6 @@ const RespiratoryProtectionProgramSection = ({
           required
         />
       )}
-
-      <div className="form-row">
-        <FormInput
-          id="programAdministratorName"
-          label="Program administrator name"
-          type="text"
-          value={formData.programAdministratorName || ''}
-          onChange={(e) => onChange('programAdministratorName', e.target.value)}
-          placeholder="Enter program administrator name"
-          disabled={isLoading}
-          error={fieldErrors?.programAdministratorName}
-        />
-        <FormInput
-          id="programAdministratorContact"
-          label="Program administrator contact"
-          type="text"
-          value={formData.programAdministratorContact || ''}
-          onChange={(e) => onChange('programAdministratorContact', e.target.value)}
-          placeholder="Enter email or phone number"
-          disabled={isLoading}
-          error={fieldErrors?.programAdministratorContact}
-        />
-      </div>
     </FormSection>
   );
 };
