@@ -21,6 +21,8 @@ exports.Timestamp = {
   fromDate: (date) => ({ toDate: () => date, kind: 'timestamp', date }),
 };
 exports.deleteField = () => ({ kind: 'deleteField' });
+exports.arrayRemove = (...values) => ({ kind: 'arrayRemove', values });
+exports.arrayUnion = (...values) => ({ kind: 'arrayUnion', values });
 exports.serverTimestamp = () => ({ kind: 'serverTimestamp' });
 exports.writeBatch = jest.fn(() => ({
   delete: jest.fn(),

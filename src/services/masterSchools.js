@@ -1,8 +1,12 @@
 import {
+  arrayRemove,
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
+  query,
+  where,
   writeBatch,
   Timestamp,
 } from 'firebase/firestore';
@@ -12,6 +16,9 @@ import { isSuperAdmin } from '../utils/roles';
 import { readProgramAdmin } from '../utils/programAdmin';
 
 const SCHOOLS_COLLECTION = 'schools';
+const USERS_COLLECTION = 'users';
+// Firestore caps a batched write at 500 operations.
+export const SCHOOL_CASCADE_BATCH_LIMIT = 500;
 const DIRECTORY_COLLECTION = 'schoolDirectory';
 const DIRECTORY_ID = 'names';
 
@@ -200,17 +207,217 @@ export const updateMasterSchoolProgram = async (userId, name, program) => {
   return namesOf(next);
 };
 
-export const removeMasterSchool = async (userId, name) => {
+const rawSchoolsOf = (data) => (
+  Array.isArray(data?.schools) ? data.schools.filter((item) => typeof item === 'string') : []
+);
+
+const userSummary = (id, data) => ({
+  id,
+  name: typeof data?.name === 'string' ? data.name : '',
+  email: typeof data?.email === 'string' ? data.email : '',
+  role: typeof data?.role === 'string' ? data.role : 'tester',
+  status: typeof data?.status === 'string' ? data.status : '',
+});
+
+/**
+ * "Leave unset" in the user card school selector is the empty string: the
+ * option is `<option value="">Leave unset</option>` and saving it writes
+ * `school: ''`. Reads treat a missing `school` the same way.
+ */
+export const UNSET_SCHOOL = '';
+
+const singleSchoolOf = (data) => (typeof data?.school === 'string' ? data.school.trim() : '');
+
+/**
+ * The update for one user after schools leave the master list.
+ * - `schools`: every name not on the master list is dropped. firestore.rules
+ *   only accept a changed list that is non-empty and fully listed, so stale
+ *   names go together and an emptied list is deleted instead of written as [].
+ *   Faculty never keep a `schools` list.
+ * - `school`: a single school that is not on the master list moves to the
+ *   first school left in the user's `schools` list (array order). With no
+ *   schools left it is set to "Leave unset" (UNSET_SCHOOL). Faculty are skipped:
+ *   rules require faculty to keep one non-empty school and the selector has no
+ *   unset option for them.
+ * Role and status are never part of the update. Returns null when nothing changes.
+ */
+export const planUserSchoolCleanup = (id, data, masterNames) => {
+  const listed = new Set(masterNames);
+  const isFaculty = data?.role === 'faculty';
+  const current = rawSchoolsOf(data);
+  const stale = current.filter((name) => !listed.has(name));
+  const listChanges = isFaculty ? Array.isArray(data?.schools) : stale.length > 0;
+  const single = singleSchoolOf(data);
+  const singleStale = single !== '' && !listed.has(single);
+  const schoolChanges = singleStale && !isFaculty;
+  if (!listChanges && !schoolChanges) return null;
+  const remaining = isFaculty ? [] : current.filter((name) => listed.has(name));
+  const nextSchool = schoolChanges ? (remaining[0] || UNSET_SCHOOL) : null;
+  return {
+    ...userSummary(id, data),
+    removed: listChanges ? (isFaculty ? current : stale) : [],
+    listChanges,
+    schools: listChanges ? remaining : current,
+    schoolChanges,
+    clearSchool: schoolChanges && nextSchool === UNSET_SCHOOL,
+    switchedSchool: schoolChanges && nextSchool !== UNSET_SCHOOL,
+    school: schoolChanges ? nextSchool : (typeof data?.school === 'string' ? data.school : ''),
+    previousSchool: single,
+    leftWithoutSchools: listChanges && !isFaculty && current.length > 0 && remaining.length === 0,
+  };
+};
+
+const cleanupPayload = (plan) => {
+  const payload = { updatedAt: Timestamp.now() };
+  if (plan.listChanges) {
+    payload.schools = plan.schools.length === 0 ? deleteField() : arrayRemove(...plan.removed);
+  }
+  if (plan.schoolChanges) payload.school = plan.school;
+  return payload;
+};
+
+/** Faculty whose one school is off the master list. They are not changed. */
+const facultyWithStaleSchool = (id, data, masterNames) => {
+  if (data?.role !== 'faculty') return null;
+  const single = singleSchoolOf(data);
+  return single !== '' && !masterNames.includes(single) ? userSummary(id, data) : null;
+};
+
+const summarizePlans = (plans, facultyNeedingSchool = []) => ({
+  users: plans,
+  unsetUsers: plans.filter((plan) => plan.clearSchool),
+  switchedUsers: plans.filter((plan) => plan.switchedSchool),
+  leftWithoutSchools: plans.filter((plan) => plan.leftWithoutSchools),
+  facultyNeedingSchool,
+});
+
+/** Commits user cleanups in batches of 500, then `finalWrites` in the last batch. */
+const commitUserCleanups = async (plans, finalWrites = null, finalWriteCount = 0) => {
+  const chunks = [];
+  for (let i = 0; i < plans.length; i += SCHOOL_CASCADE_BATCH_LIMIT) {
+    chunks.push(plans.slice(i, i + SCHOOL_CASCADE_BATCH_LIMIT));
+  }
+  const last = chunks[chunks.length - 1];
+  const finalFits = finalWrites
+    && last
+    && last.length + finalWriteCount <= SCHOOL_CASCADE_BATCH_LIMIT;
+  for (let i = 0; i < chunks.length; i += 1) {
+    const batch = writeBatch(db);
+    chunks[i].forEach((plan) => {
+      batch.update(doc(db, USERS_COLLECTION, plan.id), cleanupPayload(plan));
+    });
+    if (finalFits && i === chunks.length - 1) finalWrites(batch);
+    await batch.commit();
+  }
+  if (finalWrites && !finalFits) {
+    const batch = writeBatch(db);
+    finalWrites(batch);
+    await batch.commit();
+  }
+};
+
+/** The master list straight from Firestore, not the session cache. */
+const readFreshMasterRecords = async () => {
+  sessionRecords = null;
+  return listMasterSchoolRecords();
+};
+
+const usersWithSchool = async (schoolName) => {
+  const [listSnap, singleSnap] = await Promise.all([
+    getDocs(query(collection(db, USERS_COLLECTION), where('schools', 'array-contains', schoolName))),
+    getDocs(query(collection(db, USERS_COLLECTION), where('school', '==', schoolName))),
+  ]);
+  const byId = new Map();
+  listSnap.forEach((docSnap) => byId.set(docSnap.id, docSnap));
+  singleSnap.forEach((docSnap) => byId.set(docSnap.id, docSnap));
+  return [...byId.values()];
+};
+
+const planSchoolRemoval = async (userId, schoolName, existing) => {
+  const nextNames = namesOf(existing.filter((record) => record.name !== schoolName));
+  const docs = await usersWithSchool(schoolName);
+  const plans = [];
+  const facultyNeedingSchool = [];
+  let skippedSelf = false;
+  docs.forEach((docSnap) => {
+    const data = docSnap.data();
+    const plan = planUserSchoolCleanup(docSnap.id, data, nextNames);
+    const faculty = facultyWithStaleSchool(docSnap.id, data, nextNames);
+    // Rules never let anyone change the school tags on their own document.
+    if (docSnap.id === userId) {
+      if (plan) skippedSelf = true;
+      return;
+    }
+    if (faculty) facultyNeedingSchool.push(faculty);
+    if (plan) plans.push(plan);
+  });
+  return {
+    school: schoolName,
+    ...summarizePlans(plans, facultyNeedingSchool),
+    skippedSelf,
+  };
+};
+
+/**
+ * Who a school removal would touch, for the confirm dialog. Two queries:
+ * users whose `schools` contains the name, and users whose single `school` is it.
+ */
+export const previewMasterSchoolRemoval = async (userId, name) => {
   await assertSuperAdminWriter(userId);
   const schoolName = cleanSchoolName(name);
-  const existing = await listMasterSchoolRecords();
+  const existing = await readFreshMasterRecords();
   if (!existing.some((record) => record.name === schoolName)) {
     throw new Error('That school is not on the list.');
   }
-  const next = rememberRecords(existing.filter((record) => record.name !== schoolName));
-  const batch = writeBatch(db);
-  batch.delete(doc(db, SCHOOLS_COLLECTION, schoolName));
-  writeDirectory(batch, next);
-  await batch.commit();
-  return namesOf(next);
+  return planSchoolRemoval(userId, schoolName, existing);
+};
+
+/**
+ * Removes the school from the master list and from every user: it leaves
+ * each `schools` list, and a single `school` that was this name moves to the
+ * user's first remaining school, or "Leave unset" when none remain. Fit tests keep the name because they are historical records.
+ * Faculty keep their `school` (rules require one) and are returned for the
+ * super admin to reassign. Role and status never change.
+ */
+export const removeMasterSchool = async (userId, name) => {
+  await assertSuperAdminWriter(userId);
+  const schoolName = cleanSchoolName(name);
+  const existing = await readFreshMasterRecords();
+  if (!existing.some((record) => record.name === schoolName)) {
+    throw new Error('That school is not on the list.');
+  }
+  const plan = await planSchoolRemoval(userId, schoolName, existing);
+  const nextRecords = existing.filter((record) => record.name !== schoolName);
+  await commitUserCleanups(plan.users, (batch) => {
+    batch.delete(doc(db, SCHOOLS_COLLECTION, schoolName));
+    writeDirectory(batch, nextRecords);
+  }, 2);
+  const next = rememberRecords(nextRecords);
+  return { ...plan, names: namesOf(next) };
+};
+
+/**
+ * Users (from a list the super admin already loaded) with a `schools` entry or
+ * a single `school` that is no longer on the master list.
+ */
+export const findUsersWithRemovedSchools = (users, masterNames, actorId) => (
+  (Array.isArray(users) ? users : [])
+    .filter((item) => item?.id && item.id !== actorId)
+    .map((item) => planUserSchoolCleanup(item.id, item, masterNames))
+    .filter(Boolean)
+    .filter((plan) => plan.removed.length > 0 || plan.schoolChanges)
+);
+
+/** Drops names that are no longer on the master list from those users. */
+export const removeStaleSchoolsFromUsers = async (userId, users) => {
+  await assertSuperAdminWriter(userId);
+  const existing = await readFreshMasterRecords();
+  const names = namesOf(existing);
+  const plans = findUsersWithRemovedSchools(users, names, userId);
+  await commitUserCleanups(plans);
+  const facultyNeedingSchool = (Array.isArray(users) ? users : [])
+    .filter((item) => item?.id && item.id !== userId)
+    .map((item) => facultyWithStaleSchool(item.id, item, names))
+    .filter(Boolean);
+  return summarizePlans(plans, facultyNeedingSchool);
 };
