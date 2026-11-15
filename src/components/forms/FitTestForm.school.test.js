@@ -13,7 +13,9 @@ jest.mock('./SignaturePad', () => {
 
 jest.mock('../../utils/pdfUtils', () => ({
   downloadFitTestPdf: jest.fn(),
-  previewFitTestPdf: jest.fn(),
+  previewFitTestPdf: jest.fn(() => Promise.resolve({ mode: 'preview' })),
+  prefetchPdfLibraries: jest.fn(),
+  schedulePdfPrefetch: jest.fn(() => () => {}),
 }));
 
 jest.mock('../../context/AuthContext', () => ({
