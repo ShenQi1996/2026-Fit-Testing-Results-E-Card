@@ -63,6 +63,9 @@ test('account settings does not render pending approvals', async () => {
   const text = treeText(renderer);
 
   expect(text).toContain('Edit Account');
+  expect(text).toContain('Program administrator name');
+  expect(renderer.root.findByProps({ id: 'programAdministratorName' }).props.required).toBeUndefined();
+  expect(renderer.root.findByProps({ id: 'programAdministratorContact' }).props.required).toBeUndefined();
   expect(text).toContain('Update Account');
   expect(text).toContain('You have admin privileges');
   expect(text).not.toContain('Pending User Approvals');
@@ -139,4 +142,38 @@ test('account schools replaces saved school profiles and does not write them', a
     manage.props.onClick();
   });
   expect(onManageSchools).toHaveBeenCalled();
+});
+
+test('Update Account shows Saving… with a spinner and submits once on a double click', async () => {
+  let finish;
+  const updateUser = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  useAuth.mockReturnValue({
+    user: { uid: 'tester-1', role: 'tester', name: 'Tess', email: 'tess@example.com' },
+    updateUser,
+  });
+  let renderer;
+  await act(async () => {
+    renderer = TestRenderer.create(<EditAccount onBack={() => {}} />);
+  });
+  const form = renderer.root.findByProps({ className: 'edit-account-form' });
+  const submit = () => renderer.root.findAll(
+    (node) => node.type === 'button' && node.props.type === 'submit' && node.props.className === 'auth-button',
+  )[0];
+
+  await act(async () => {
+    form.props.onSubmit({ preventDefault() {} });
+    form.props.onSubmit({ preventDefault() {} });
+  });
+
+  expect(updateUser).toHaveBeenCalledTimes(1);
+  expect(submit().props.disabled).toBe(true);
+  expect(submit().props['aria-busy']).toBe(true);
+  expect(submit().children).toContain('Saving…');
+  expect(submit().findAllByProps({ className: 'button-spinner' })).toHaveLength(1);
+
+  await act(async () => {
+    finish();
+  });
+  expect(submit().children).toEqual(['Update Account']);
+  expect(treeText(renderer)).toContain('Account updated successfully!');
 });

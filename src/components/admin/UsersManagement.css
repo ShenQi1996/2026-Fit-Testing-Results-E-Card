@@ -275,6 +275,42 @@
   min-width: 0;
 }
 
+.users-schools-section .school-add-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.users-schools-section .school-add-fields .users-search {
+  height: 44px;
+  min-height: 44px;
+  margin-bottom: 0;
+}
+
+.users-schools-section .solution-profile-item.school-edit-open {
+  height: auto;
+  min-height: 44px;
+  align-items: flex-start;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.users-schools-section .school-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.users-schools-section .school-edit-fields .users-search {
+  width: 100%;
+  height: 36px;
+  min-height: 36px;
+  margin-bottom: 0;
+}
+
 @media (max-width: 768px) {
   .users-schools-section .solution-profile-item {
     flex-direction: row;
@@ -507,4 +543,53 @@
   .users-management-header-actions button {
     flex: 1;
   }
+}
+
+/* A school name a user still has after it left the master list. */
+.users-form-grid .school-checkbox.school-removed {
+  border-style: dashed;
+  border-color: #c2410c;
+}
+
+.school-removed-tag {
+  font-size: 12px;
+  font-style: normal;
+  color: #c2410c;
+  margin-left: 4px;
+}
+
+.users-stale-schools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #7c2d12;
+}
+
+.solution-profile-actions button:disabled,
+.solution-add-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.solution-profile-actions button[aria-busy='true'],
+.solution-add-button[aria-busy='true'] {
+  cursor: progress;
+  opacity: 0.85;
+}
+
+.dark-mode .users-stale-schools {
+  background: rgba(194, 65, 12, 0.18);
+  border-color: rgba(253, 186, 116, 0.5);
+  color: #fed7aa;
+}
+
+.dark-mode .school-removed-tag {
+  color: #fdba74;
 }

@@ -1,6 +1,11 @@
 module.exports = {
   testEnvironment: "node",
-  testMatch: ["<rootDir>/test/firestore.rules.test.js"],
+  // Both rules suites share one emulator and clear it in beforeEach; run them serially.
+  maxWorkers: 1,
+  testMatch: [
+    "<rootDir>/test/firestore.rules.test.js",
+    "<rootDir>/test/backfillDeletedAt.emulator.test.js",
+  ],
   transform: {
     "\\.js$": [
       "babel-jest",

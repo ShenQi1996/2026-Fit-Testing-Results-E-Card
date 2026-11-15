@@ -44,6 +44,8 @@ describe('user status access', () => {
       schools: [],
       startDate: null,
       endDate: null,
+      programAdministratorName: '',
+      programAdministratorContact: '',
     });
 
     await expect(finalizeSignIn({
@@ -65,6 +67,8 @@ describe('user status access', () => {
       schools: [],
       startDate: null,
       endDate: null,
+      programAdministratorName: '',
+      programAdministratorContact: '',
     });
 
     await expect(finalizeSignIn({

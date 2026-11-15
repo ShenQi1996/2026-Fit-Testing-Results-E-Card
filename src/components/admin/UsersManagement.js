@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback, useEffect, useMemo, useRef, useState,
+} from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   USER_ROLES,
@@ -13,10 +15,15 @@ import {
 import { createManagedAuthUser } from '../../services/firebaseAuth';
 import {
   addMasterSchool,
-  listMasterSchools,
+  findUsersWithRemovedSchools,
+  listMasterSchoolRecords,
+  previewMasterSchoolRemoval,
   removeMasterSchool,
+  removeStaleSchoolsFromUsers,
   renameMasterSchool,
+  updateMasterSchoolProgram,
 } from '../../services/masterSchools';
+import { busyContent } from '../common/BusyLabel';
 import {
   USER_ROLE_ADMIN,
   USER_ROLE_FACULTY,
@@ -32,6 +39,7 @@ import {
   rolesCreatableBy,
 } from '../../utils/roles';
 import { filterUsersForActor, normalizeSchoolList } from '../../utils/schoolScope';
+import { readProgramAdmin } from '../../utils/programAdmin';
 import './UsersManagement.css';
 
 const EMPTY_CREATE_FORM = {
@@ -42,6 +50,8 @@ const EMPTY_CREATE_FORM = {
   status: 'pending',
   school: '',
   schools: [],
+  programAdministratorName: '',
+  programAdministratorContact: '',
 };
 
 const toggleSchoolName = (selected, school, checked) => {
@@ -56,6 +66,7 @@ const SchoolCheckboxGroup = ({
   onChange,
   disabled,
   error,
+  removedSchools = [],
 }) => (
   <fieldset
     className={`school-checkboxes${error ? ' field-invalid' : ''}`}
@@ -67,14 +78,20 @@ const SchoolCheckboxGroup = ({
     <div className="school-checkbox-list">
       {schools.map((school) => {
         const checked = selected.includes(school);
+        const removed = removedSchools.includes(school);
         return (
-          <label key={school} className={`school-checkbox${checked ? ' checked' : ''}`}>
+          <label
+            key={school}
+            className={`school-checkbox${checked ? ' checked' : ''}${removed ? ' school-removed' : ''}`}
+            title={removed ? 'No longer on the school list. It is dropped when you save.' : undefined}
+          >
             <input
               type="checkbox"
               checked={checked}
               onChange={(event) => onChange(toggleSchoolName(selected, school, event.target.checked))}
             />
             <span>{school}</span>
+            {removed && <em className="school-removed-tag">Removed from list</em>}
           </label>
         );
       })}
@@ -86,6 +103,79 @@ const SchoolCheckboxGroup = ({
 const withAssignedNames = (masterNames, assignedNames) => {
   const extras = normalizeSchoolList(assignedNames).filter((name) => !masterNames.includes(name));
   return [...masterNames, ...extras];
+};
+
+const peopleLabel = (count) => (count === 1 ? '1 user' : `${count} users`);
+
+const nameList = (users, max = 5) => {
+  const labels = users.map((item) => item.name || item.email || item.id);
+  if (labels.length <= max) return labels.join(', ');
+  return `${labels.slice(0, max).join(', ')} and ${labels.length - max} more`;
+};
+
+const hasHave = (count) => (count === 1 ? 'has' : 'have');
+
+const switchList = (users, max = 5) => {
+  const labels = users.map((item) => `${item.name || item.email || item.id} → ${item.school}`);
+  if (labels.length <= max) return labels.join(', ');
+  return `${labels.slice(0, max).join(', ')} and ${labels.length - max} more`;
+};
+
+/** Confirm text for removing a school, from previewMasterSchoolRemoval. */
+export const schoolRemovalConfirmText = (name, preview) => {
+  const lines = [`Remove ${name} from the school list?`];
+  const affected = preview?.users || [];
+  const unset = preview?.unsetUsers || [];
+  const switched = preview?.switchedUsers || [];
+  const emptied = preview?.leftWithoutSchools || [];
+  const faculty = preview?.facultyNeedingSchool || [];
+  if (affected.length > 0) {
+    lines.push(`${peopleLabel(affected.length)} will have ${name} removed: ${nameList(affected)}.`);
+  } else {
+    lines.push(`No user has ${name}.`);
+  }
+  if (switched.length > 0) {
+    lines.push(`${peopleLabel(switched.length)} with ${name} as their main school will switch to their next school: ${switchList(switched)}.`);
+  }
+  if (unset.length > 0) {
+    lines.push(`${peopleLabel(unset.length)} with ${name} as their school and no other school will be set to Leave unset (${nameList(unset)}). They can still save drafts, but cannot save fit tests or send e-cards until you pick a school for them.`);
+  }
+  if (emptied.length > 0) {
+    lines.push(`${peopleLabel(emptied.length)} will have no schools left (${nameList(emptied)}). They will not see any school's users or fit tests until you assign a school.`);
+  }
+  if (faculty.length > 0) {
+    lines.push(`${peopleLabel(faculty.length)} on faculty ${faculty.length === 1 ? 'keeps' : 'keep'} ${name} because faculty must have one school (${nameList(faculty)}). Pick a new school on their user card.`);
+  }
+  if (affected.length > 0) {
+    lines.push('Role and status do not change.');
+  }
+  if (preview?.skippedSelf) {
+    lines.push('Your own account keeps the name because nobody can change their own school tags.');
+  }
+  lines.push('Fit-test records keep this school name.');
+  return lines.join('\n\n');
+};
+
+/** Success text after removing a school or cleaning up old names. */
+const cleanupResultParts = (result) => {
+  const parts = [];
+  const unset = result?.unsetUsers || [];
+  const switched = result?.switchedUsers || [];
+  const emptied = result?.leftWithoutSchools || [];
+  const faculty = result?.facultyNeedingSchool || [];
+  if (switched.length) {
+    parts.push(`Switched the main school for ${peopleLabel(switched.length)}: ${switchList(switched)}.`);
+  }
+  if (unset.length) {
+    parts.push(`Set ${peopleLabel(unset.length)} to Leave unset: ${nameList(unset)}.`);
+  }
+  if (emptied.length) {
+    parts.push(`${peopleLabel(emptied.length)} now ${hasHave(emptied.length)} no schools: ${nameList(emptied)}.`);
+  }
+  if (faculty.length) {
+    parts.push(`${peopleLabel(faculty.length)} on faculty still ${hasHave(faculty.length)} a removed school and ${faculty.length === 1 ? 'needs' : 'need'} a new one: ${nameList(faculty)}.`);
+  }
+  return parts;
 };
 
 const NO_SCHOOLS_CREATE_MESSAGE = 'You have no schools assigned, so you cannot add this user. Ask a super admin to assign a school.';
@@ -209,9 +299,17 @@ const UsersManagement = () => {
   const [pendingSuccess, setPendingSuccess] = useState('');
   const [approvingId, setApprovingId] = useState(null);
   const [masterSchools, setMasterSchools] = useState([]);
+  const [masterSchoolRecords, setMasterSchoolRecords] = useState([]);
   const [newSchoolName, setNewSchoolName] = useState('');
+  const [newProgramName, setNewProgramName] = useState('');
+  const [newProgramContact, setNewProgramContact] = useState('');
   const [editingSchool, setEditingSchool] = useState(null);
   const [schoolListError, setSchoolListError] = useState('');
+  const [schoolsLoaded, setSchoolsLoaded] = useState(false);
+  // { action: 'add' | 'save' | 'delete' | 'cleanup', name } while a school write runs.
+  const [schoolBusy, setSchoolBusy] = useState(null);
+  const schoolBusyRef = useRef(false);
+  const userBusyRef = useRef(new Set());
   const [editFieldErrors, setEditFieldErrors] = useState({});
   const [createFieldErrors, setCreateFieldErrors] = useState({});
 
@@ -245,6 +343,7 @@ const UsersManagement = () => {
           schools: Array.isArray(item.schools) ? [...item.schools] : [],
           startDate: accessDateInputValue(item.startDate),
           endDate: accessDateInputValue(item.endDate),
+          ...readProgramAdmin(item),
         };
       });
       setEditDrafts(drafts);
@@ -266,8 +365,10 @@ const UsersManagement = () => {
       return;
     }
     try {
-      const names = await listMasterSchools();
-      setMasterSchools(names);
+      const records = await listMasterSchoolRecords();
+      setMasterSchoolRecords(records);
+      setMasterSchools(records.map((record) => record.name));
+      setSchoolsLoaded(true);
       setSchoolListError('');
     } catch (err) {
       setSchoolListError(err.message || 'Failed to load schools.');
@@ -346,10 +447,19 @@ const UsersManagement = () => {
 
   const handleSave = async (targetUserId) => {
     if (!user?.uid) return;
+    if (userBusyRef.current.has(targetUserId)) return;
     const draft = editDrafts[targetUserId] || {};
     const target = users.find((item) => item.id === targetUserId);
     const tagRole = draft.role || target?.role || 'tester';
-    const selectedSchools = normalizeSchoolList(draft.schools);
+    // Names taken off the master list are dropped on save when a listed school
+    // remains. Rules reject a changed schools list that still holds one. When
+    // only removed names are left the list is sent unchanged, so a role or
+    // status change still saves; assigning a school is a separate step.
+    const draftSchools = normalizeSchoolList(draft.schools);
+    const listedSchools = superAdmin && schoolsLoaded
+      ? draftSchools.filter((name) => masterSchools.includes(name))
+      : draftSchools;
+    const selectedSchools = listedSchools.length > 0 ? listedSchools : draftSchools;
     const fieldErrors = {};
     if (superAdmin) {
       if (isBlank(draft.name)) fieldErrors.name = FIELD_REQUIRED_MESSAGES.name;
@@ -383,6 +493,7 @@ const UsersManagement = () => {
       delete next[targetUserId];
       return next;
     });
+    userBusyRef.current.add(targetUserId);
     setSavingId(targetUserId);
     setError('');
     setSuccess('');
@@ -414,6 +525,8 @@ const UsersManagement = () => {
           updates.endDate = draft.endDate || '';
         }
       }
+      updates.programAdministratorName = draft.programAdministratorName || '';
+      updates.programAdministratorContact = draft.programAdministratorContact || '';
       const updated = await updateManagedUser(user.uid, targetUserId, updates);
       setUsers((prev) => prev.map((item) => (item.id === targetUserId ? updated : item)));
       setEditDrafts((prev) => ({
@@ -427,24 +540,28 @@ const UsersManagement = () => {
           schools: Array.isArray(updated.schools) ? [...updated.schools] : [],
           startDate: accessDateInputValue(updated.startDate),
           endDate: accessDateInputValue(updated.endDate),
+          ...readProgramAdmin(updated),
         },
       }));
       setSuccess(`Saved updates for ${updated.email || updated.name || 'user'}.`);
     } catch (err) {
       setError(err.message || 'Failed to save user.');
     } finally {
+      userBusyRef.current.delete(targetUserId);
       setSavingId(null);
     }
   };
 
   const handleDelete = async (targetUser) => {
-    if (!user?.uid) return;
+    if (!user?.uid || userBusyRef.current.has(targetUser.id)) return;
     const label = targetUser.email || targetUser.name || targetUser.id;
     const confirmed = window.confirm(
       `Delete the Firestore profile for ${label}?\n\nTheir Firebase Auth login is not deleted. Signing in again creates a new pending profile.`
     );
     if (!confirmed) return;
+    if (userBusyRef.current.has(targetUser.id)) return;
 
+    userBusyRef.current.add(targetUser.id);
     setDeletingId(targetUser.id);
     setError('');
     setSuccess('');
@@ -460,6 +577,7 @@ const UsersManagement = () => {
     } catch (err) {
       setError(err.message || 'Failed to delete user.');
     } finally {
+      userBusyRef.current.delete(targetUser.id);
       setDeletingId(null);
     }
   };
@@ -567,6 +685,8 @@ const UsersManagement = () => {
       if (role === USER_ROLE_ADMIN) {
         payload.schools = normalizeSchoolList(createForm.schools);
       }
+      payload.programAdministratorName = createForm.programAdministratorName || '';
+      payload.programAdministratorContact = createForm.programAdministratorContact || '';
       const created = await createManagedAuthUser(user.uid, payload);
       setUsers((prev) => [created, ...prev]);
       setEditDrafts((prev) => ({
@@ -580,6 +700,7 @@ const UsersManagement = () => {
           schools: Array.isArray(created.schools) ? [...created.schools] : [],
           startDate: accessDateInputValue(created.startDate),
           endDate: accessDateInputValue(created.endDate),
+          ...readProgramAdmin(created),
         },
       }));
       setCreateForm(EMPTY_CREATE_FORM);
@@ -592,49 +713,134 @@ const UsersManagement = () => {
     }
   };
 
-  const handleAddSchool = async () => {
-    if (!user?.uid) return;
+  // One school write at a time. The ref blocks a second click before React re-renders.
+  const runSchoolAction = async (action, name, work) => {
+    if (schoolBusyRef.current) return;
+    schoolBusyRef.current = true;
+    setSchoolBusy({ action, name });
     setSchoolListError('');
-    const added = newSchoolName.trim();
     try {
-      const names = await addMasterSchool(user.uid, added);
-      setMasterSchools(names);
+      await work();
+    } finally {
+      schoolBusyRef.current = false;
+      setSchoolBusy(null);
+    }
+  };
+
+  const applyUserSchoolCleanups = (cleanups) => {
+    if (!Array.isArray(cleanups) || cleanups.length === 0) return;
+    const byId = new Map(cleanups.map((item) => [item.id, item]));
+    const patch = (record, plan) => ({
+      ...record,
+      schools: [...(plan.schools || [])],
+      ...(plan.schoolChanges ? { school: plan.school } : {}),
+    });
+    setUsers((prev) => prev.map((item) => (
+      byId.has(item.id) ? patch(item, byId.get(item.id)) : item
+    )));
+    setEditDrafts((prev) => {
+      const next = { ...prev };
+      byId.forEach((plan, id) => {
+        if (next[id]) next[id] = patch(next[id], plan);
+      });
+      return next;
+    });
+  };
+
+  const handleAddSchool = () => runSchoolAction('add', newSchoolName.trim(), async () => {
+    if (!user?.uid) return;
+    const added = newSchoolName.trim();
+    setSuccess('');
+    try {
+      await addMasterSchool(user.uid, added, {
+        programAdministratorName: newProgramName,
+        programAdministratorContact: newProgramContact,
+      });
       setNewSchoolName('');
+      setNewProgramName('');
+      setNewProgramContact('');
+      await refreshMasterSchools();
       setSuccess(`Added school ${added}.`);
     } catch (err) {
       setSchoolListError(err.message || 'Failed to add school.');
     }
-  };
+  });
 
-  const handleRenameSchool = async () => {
+  const handleRenameSchool = () => runSchoolAction('save', editingSchool?.from, async () => {
     if (!user?.uid || !editingSchool) return;
-    setSchoolListError('');
+    setSuccess('');
+    const program = {
+      programAdministratorName: editingSchool.programAdministratorName || '',
+      programAdministratorContact: editingSchool.programAdministratorContact || '',
+    };
     try {
-      const names = await renameMasterSchool(user.uid, editingSchool.from, editingSchool.to);
-      setMasterSchools(names);
+      const nextName = (editingSchool.to || '').trim();
+      const renamed = nextName !== editingSchool.from;
+      if (renamed) {
+        await renameMasterSchool(user.uid, editingSchool.from, editingSchool.to, program);
+      } else {
+        await updateMasterSchoolProgram(user.uid, editingSchool.from, program);
+      }
       setEditingSchool(null);
-      setSuccess('School name updated. Existing user and fit-test records keep the old name.');
+      await refreshMasterSchools();
+      setSuccess(renamed
+        ? 'School name updated. Users and fit-test records still have the old name. Reassign users to the new name on their user card.'
+        : 'Saved the program administrator fields for this school.');
     } catch (err) {
-      setSchoolListError(err.message || 'Failed to rename school.');
+      setSchoolListError(err.message || 'Failed to update school.');
     }
-  };
+  });
 
-  const handleRemoveSchool = async (name) => {
+  const handleRemoveSchool = (name) => runSchoolAction('delete', name, async () => {
     if (!user?.uid) return;
-    const confirmed = window.confirm(
-      `Remove ${name} from the school list?\n\nExisting user and fit-test records keep this name.`
-    );
-    if (!confirmed) return;
-    setSchoolListError('');
+    setSuccess('');
     try {
-      const names = await removeMasterSchool(user.uid, name);
-      setMasterSchools(names);
+      const preview = await previewMasterSchoolRemoval(user.uid, name);
+      const confirmed = window.confirm(schoolRemovalConfirmText(name, preview));
+      if (!confirmed) return;
+      const result = await removeMasterSchool(user.uid, name);
       if (editingSchool?.from === name) setEditingSchool(null);
-      setSuccess(`Removed ${name} from the school list. Existing records keep that name.`);
+      applyUserSchoolCleanups(result?.users);
+      await refreshMasterSchools();
+      const updatedCount = result?.users?.length || 0;
+      const parts = [
+        `Removed ${name} from the school list and from ${peopleLabel(updatedCount)}. Fit-test records keep the name.`,
+        ...cleanupResultParts(result),
+      ];
+      setSuccess(parts.join(' '));
     } catch (err) {
       setSchoolListError(err.message || 'Failed to remove school.');
     }
-  };
+  });
+
+  const staleSchoolUsers = useMemo(() => (
+    superAdmin && schoolsLoaded
+      ? findUsersWithRemovedSchools(users, masterSchools, user?.uid)
+      : []
+  ), [superAdmin, schoolsLoaded, users, masterSchools, user?.uid]);
+
+  const handleRemoveStaleSchools = () => runSchoolAction('cleanup', '', async () => {
+    if (!user?.uid || staleSchoolUsers.length === 0) return;
+    setSuccess('');
+    const confirmed = window.confirm(
+      `Remove school names that are no longer on the school list from ${peopleLabel(staleSchoolUsers.length)}?\n\n${nameList(staleSchoolUsers)}\n\nFit-test records are not changed.`
+    );
+    if (!confirmed) return;
+    try {
+      const result = await removeStaleSchoolsFromUsers(user.uid, users);
+      applyUserSchoolCleanups(result?.users);
+      setSuccess([
+        `Removed old school names from ${peopleLabel(result?.users?.length || 0)}.`,
+        ...cleanupResultParts(result),
+      ].join(' '));
+    } catch (err) {
+      setSchoolListError(err.message || 'Failed to remove old school names.');
+    }
+  });
+
+  const schoolBusyAction = (action, name) => (
+    schoolBusy?.action === action && (name === undefined || schoolBusy?.name === name)
+  );
 
   if (!isAdmin) {
     return (
@@ -689,62 +895,150 @@ const UsersManagement = () => {
           <section className="form-section users-schools-section" aria-label="Master schools">
             <h3 className="section-title">Schools</h3>
             <p className="section-description">
-              Master list of school names. Renaming or removing a school does not change existing user or fit-test records.
+              Master list of school names. Program administrator name and contact are optional.
+              Sending an e-card copies them from the selected school. Removing a school also removes it from every user who has it. A user whose main school it was moves to their next school, or to Leave unset when they have none (faculty keep theirs). Fit-test records keep the name. Renaming a school does not change users or fit-test records.
             </p>
-            {schoolListError && <div className="users-error">{schoolListError}</div>}
+            {schoolListError && <div className="users-error" role="alert">{schoolListError}</div>}
+            {staleSchoolUsers.length > 0 && (
+              <div className="users-stale-schools" role="note">
+                <span>
+                  {`${peopleLabel(staleSchoolUsers.length)} still ${staleSchoolUsers.length === 1 ? 'has' : 'have'} a school that is no longer on this list.`}
+                </span>
+                <button
+                  type="button"
+                  className="users-secondary-button"
+                  onClick={handleRemoveStaleSchools}
+                  disabled={schoolBusy !== null}
+                  aria-busy={schoolBusyAction('cleanup') || undefined}
+                >
+                  {busyContent(schoolBusyAction('cleanup'), 'Removing…', 'Remove old school names')}
+                </button>
+              </div>
+            )}
             <div className="solution-profile-list">
-              {masterSchools.map((name) => (
-                <div key={name} className="solution-profile-item">
-                  {editingSchool?.from === name ? (
-                    <input
-                      className="users-search"
-                      aria-label="Edit school name"
-                      value={editingSchool.to}
-                      onChange={(e) => setEditingSchool({ from: name, to: e.target.value })}
-                    />
-                  ) : (
-                    <div className="solution-profile-details">
-                      <strong>{name}</strong>
-                    </div>
-                  )}
-                  <div className="solution-profile-actions">
-                    {editingSchool?.from === name ? (
-                      <button type="button" aria-label="Save school name" onClick={handleRenameSchool}>
-                        Save
-                      </button>
+              {masterSchoolRecords.map((record) => {
+                const name = record.name;
+                const editing = editingSchool?.from === name;
+                return (
+                  <div
+                    key={name}
+                    className={`solution-profile-item${editing ? ' school-edit-open' : ''}`}
+                  >
+                    {editing ? (
+                      <div className="school-edit-fields">
+                        <input
+                          className="users-search"
+                          aria-label="Edit school name"
+                          value={editingSchool.to}
+                          onChange={(e) => setEditingSchool((prev) => ({ ...prev, to: e.target.value }))}
+                          disabled={schoolBusy !== null}
+                        />
+                        <input
+                          className="users-search"
+                          aria-label="Program administrator name"
+                          placeholder="Program administrator name (optional)"
+                          value={editingSchool.programAdministratorName || ''}
+                          onChange={(e) => setEditingSchool((prev) => ({
+                            ...prev,
+                            programAdministratorName: e.target.value,
+                          }))}
+                          disabled={schoolBusy !== null}
+                        />
+                        <input
+                          className="users-search"
+                          aria-label="Program administrator contact"
+                          placeholder="Program administrator contact (optional)"
+                          value={editingSchool.programAdministratorContact || ''}
+                          onChange={(e) => setEditingSchool((prev) => ({
+                            ...prev,
+                            programAdministratorContact: e.target.value,
+                          }))}
+                          disabled={schoolBusy !== null}
+                        />
+                      </div>
                     ) : (
-                      <>
-                        <button
-                          type="button"
-                          aria-label={`Edit ${name}`}
-                          title="Edit"
-                          onClick={() => setEditingSchool({ from: name, to: name })}
-                        >
-                          ✎
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Remove ${name}`}
-                          title="Remove"
-                          onClick={() => handleRemoveSchool(name)}
-                        >
-                          🗑️
-                        </button>
-                      </>
+                      <div className="solution-profile-details">
+                        <strong>{name}</strong>
+                      </div>
                     )}
+                    <div className="solution-profile-actions">
+                      {editing ? (
+                        <button
+                          type="button"
+                          aria-label="Save school name"
+                          onClick={handleRenameSchool}
+                          disabled={schoolBusy !== null}
+                          aria-busy={schoolBusyAction('save', name) || undefined}
+                        >
+                          {busyContent(schoolBusyAction('save', name), 'Saving…', 'Save')}
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            aria-label={`Edit ${name}`}
+                            title="Edit"
+                            disabled={schoolBusy !== null}
+                            onClick={() => setEditingSchool({
+                              from: name,
+                              to: name,
+                              programAdministratorName: record.programAdministratorName || '',
+                              programAdministratorContact: record.programAdministratorContact || '',
+                            })}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${name}`}
+                            title="Remove"
+                            onClick={() => handleRemoveSchool(name)}
+                            disabled={schoolBusy !== null}
+                            aria-busy={schoolBusyAction('delete', name) || undefined}
+                          >
+                            {busyContent(schoolBusyAction('delete', name), 'Deleting…', '🗑️')}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-            <input
-              className="users-search"
-              aria-label="New school name"
-              placeholder="New school name"
-              value={newSchoolName}
-              onChange={(e) => setNewSchoolName(e.target.value)}
-            />
-            <button type="button" className="solution-add-button" onClick={handleAddSchool}>
-              + Add School
+            <div className="school-add-fields">
+              <input
+                className="users-search"
+                aria-label="New school name"
+                disabled={schoolBusy !== null}
+                placeholder="New school name"
+                value={newSchoolName}
+                onChange={(e) => setNewSchoolName(e.target.value)}
+              />
+              <input
+                className="users-search"
+                aria-label="New program administrator name"
+                disabled={schoolBusy !== null}
+                placeholder="Program administrator name (optional)"
+                value={newProgramName}
+                onChange={(e) => setNewProgramName(e.target.value)}
+              />
+              <input
+                className="users-search"
+                aria-label="New program administrator contact"
+                disabled={schoolBusy !== null}
+                placeholder="Program administrator contact (optional)"
+                value={newProgramContact}
+                onChange={(e) => setNewProgramContact(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              className="solution-add-button"
+              onClick={handleAddSchool}
+              disabled={schoolBusy !== null || !newSchoolName.trim()}
+              aria-busy={schoolBusyAction('add') || undefined}
+            >
+              {busyContent(schoolBusyAction('add'), 'Adding…', '+ Add School')}
             </button>
           </section>
         )}
@@ -791,6 +1085,34 @@ const UsersManagement = () => {
                   disabled={creating}
                 />
                 <FieldMessage message={createFieldErrors.name} />
+              </label>
+              <label>
+                Program administrator name
+                <input
+                  type="text"
+                  aria-label="Create program administrator name"
+                  placeholder="Optional"
+                  value={createForm.programAdministratorName}
+                  onChange={(e) => setCreateForm((prev) => ({
+                    ...prev,
+                    programAdministratorName: e.target.value,
+                  }))}
+                  disabled={creating}
+                />
+              </label>
+              <label>
+                Program administrator contact
+                <input
+                  type="text"
+                  aria-label="Create program administrator contact"
+                  placeholder="Optional"
+                  value={createForm.programAdministratorContact}
+                  onChange={(e) => setCreateForm((prev) => ({
+                    ...prev,
+                    programAdministratorContact: e.target.value,
+                  }))}
+                  disabled={creating}
+                />
               </label>
               <label>
                 Role
@@ -987,6 +1309,9 @@ const UsersManagement = () => {
                 masterSchools,
                 (schoolTagIsList || roleIsSuperAdmin) ? assignedSchools : [draft.school || ''],
               );
+              const removedSchools = superAdmin && schoolsLoaded
+                ? schoolChoices.filter((name) => name && !masterSchools.includes(name))
+                : [];
               const canEditSchoolTags = superAdmin && !isSelf && !roleIsSuperAdmin;
               const canEditSuperAdminSchools = superAdmin && !isSelf && roleIsSuperAdmin;
               const statusPill = accountStatusLabel(item);
@@ -1043,6 +1368,28 @@ const UsersManagement = () => {
                       <FieldMessage message={cardErrors.email} />
                     </label>
                     <label>
+                      Program administrator name
+                      <input
+                        type="text"
+                        aria-label="Program administrator name"
+                        placeholder="Optional"
+                        value={draft.programAdministratorName || ''}
+                        onChange={(e) => handleDraftChange(item.id, 'programAdministratorName', e.target.value)}
+                        disabled={locked || savingId === item.id}
+                      />
+                    </label>
+                    <label>
+                      Program administrator contact
+                      <input
+                        type="text"
+                        aria-label="Program administrator contact"
+                        placeholder="Optional"
+                        value={draft.programAdministratorContact || ''}
+                        onChange={(e) => handleDraftChange(item.id, 'programAdministratorContact', e.target.value)}
+                        disabled={locked || savingId === item.id}
+                      />
+                    </label>
+                    <label>
                       Role
                       {roleIsSuperAdmin ? (
                         <div className="user-role-readonly">{currentRole}</div>
@@ -1087,6 +1434,7 @@ const UsersManagement = () => {
                           <SchoolCheckboxGroup
                             schools={schoolChoices}
                             selected={assignedSchools}
+                            removedSchools={removedSchools}
                             disabled={savingId === item.id}
                             onChange={(schools) => handleDraftChange(item.id, 'schools', schools)}
                           />
@@ -1096,6 +1444,7 @@ const UsersManagement = () => {
                       <SchoolCheckboxGroup
                         schools={schoolChoices}
                         selected={assignedSchools}
+                        removedSchools={removedSchools}
                         disabled={savingId === item.id}
                         error={cardErrors.schools}
                         onChange={(schools) => handleDraftChange(item.id, 'schools', schools)}
@@ -1112,7 +1461,9 @@ const UsersManagement = () => {
                           >
                             {!editingFaculty && <option value="">Leave unset</option>}
                             {schoolChoices.map((school) => (
-                              <option key={school} value={school}>{school}</option>
+                              <option key={school} value={school}>
+                                {removedSchools.includes(school) ? `${school} (removed from list)` : school}
+                              </option>
                             ))}
                           </select>
                         ) : (
@@ -1163,16 +1514,18 @@ const UsersManagement = () => {
                       className="users-primary-button"
                       onClick={() => handleSave(item.id)}
                       disabled={locked || savingId === item.id || deletingId === item.id}
+                      aria-busy={savingId === item.id || undefined}
                     >
-                      {savingId === item.id ? 'Saving...' : 'Save'}
+                      {busyContent(savingId === item.id, 'Saving…', 'Save')}
                     </button>
                     <button
                       type="button"
                       className="users-danger-button"
                       onClick={() => handleDelete(item)}
                       disabled={locked || isSelf || savingId === item.id || deletingId === item.id}
+                      aria-busy={deletingId === item.id || undefined}
                     >
-                      {deletingId === item.id ? 'Deleting...' : 'Delete'}
+                      {busyContent(deletingId === item.id, 'Deleting…', 'Delete')}
                     </button>
                   </div>
                 </article>
