@@ -52,7 +52,8 @@ test('webpack fails a staging build when a Firebase value is missing', () => {
     Object.entries(stagingEnv).forEach(([key, value]) => {
       process.env[key] = value;
     });
-    delete process.env.FIREBASE_STORAGE_BUCKET;
+    // Empty string blocks .env.local refill (loadEnvLocal only fills undefined keys).
+    process.env.FIREBASE_STORAGE_BUCKET = '';
     expect(() => runWebpack()).toThrow(/FIREBASE_STORAGE_BUCKET/);
   } finally {
     restoreEnv(saved);
@@ -115,8 +116,9 @@ test('webpack development mode fails closed when NODE_ENV is unset', () => {
   const saved = snapshotEnv();
   const savedNodeEnv = process.env.NODE_ENV;
   try {
+    // Empty strings block .env.local refill (loadEnvLocal only fills undefined keys).
     ENV_KEYS.forEach((key) => {
-      delete process.env[key];
+      process.env[key] = '';
     });
     delete process.env.NODE_ENV;
     expect(() => runWebpack({ mode: 'development' })).toThrow(/FIREBASE_API_KEY/);
@@ -133,7 +135,7 @@ test('webpack development mode fails closed even when NODE_ENV is production', (
   const savedNodeEnv = process.env.NODE_ENV;
   try {
     ENV_KEYS.forEach((key) => {
-      delete process.env[key];
+      process.env[key] = '';
     });
     process.env.NODE_ENV = 'production';
     expect(() => runWebpack({ mode: 'development' })).toThrow(/FIREBASE_API_KEY/);
@@ -194,51 +196,66 @@ test('loading the webpack config does not read NODE_ENV before webpack passes mo
 test('webpack allows a production build with APP_ENV unset', () => {
   const saved = snapshotEnv();
   const savedNodeEnv = process.env.NODE_ENV;
+  const savedSentryToken = process.env.SENTRY_AUTH_TOKEN;
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
   try {
     ENV_KEYS.forEach((key) => {
       delete process.env[key];
     });
     delete process.env.NODE_ENV;
+    delete process.env.SENTRY_AUTH_TOKEN;
     expect(() => runWebpack({ mode: 'production' })).not.toThrow();
-    expect(runWebpack({ mode: 'production' }).mode).toBe('production');
-    expect(warn).not.toHaveBeenCalled();
+    const config = runWebpack({ mode: 'production' });
+    expect(config.mode).toBe('production');
+    expect(config.devtool).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/SENTRY_AUTH_TOKEN is unset/));
   } finally {
     warn.mockRestore();
     if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = savedNodeEnv;
+    if (savedSentryToken === undefined) delete process.env.SENTRY_AUTH_TOKEN;
+    else process.env.SENTRY_AUTH_TOKEN = savedSentryToken;
     restoreEnv(saved);
   }
 });
 
 test('webpack allows a build with APP_ENV unset when mode is omitted', () => {
   const saved = snapshotEnv();
+  const savedSentryToken = process.env.SENTRY_AUTH_TOKEN;
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
   try {
     ENV_KEYS.forEach((key) => {
       delete process.env[key];
     });
+    delete process.env.SENTRY_AUTH_TOKEN;
     expect(() => runWebpack({})).not.toThrow();
     expect(runWebpack({}).mode).toBe('production');
-    expect(warn).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/SENTRY_AUTH_TOKEN is unset/));
   } finally {
     warn.mockRestore();
+    if (savedSentryToken === undefined) delete process.env.SENTRY_AUTH_TOKEN;
+    else process.env.SENTRY_AUTH_TOKEN = savedSentryToken;
     restoreEnv(saved);
   }
 });
 
 test('webpack warns when APP_ENV is set but is not exactly staging', () => {
   const saved = snapshotEnv();
+  const savedSentryToken = process.env.SENTRY_AUTH_TOKEN;
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
   try {
     ENV_KEYS.forEach((key) => {
       delete process.env[key];
     });
+    delete process.env.SENTRY_AUTH_TOKEN;
     process.env.APP_ENV = 'Staging';
     expect(() => runWebpack({ mode: 'production' })).not.toThrow();
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/not exactly "staging"/));
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/SENTRY_AUTH_TOKEN is unset/));
   } finally {
     warn.mockRestore();
+    if (savedSentryToken === undefined) delete process.env.SENTRY_AUTH_TOKEN;
+    else process.env.SENTRY_AUTH_TOKEN = savedSentryToken;
     restoreEnv(saved);
   }
 });
