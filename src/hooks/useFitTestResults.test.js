@@ -6,8 +6,10 @@ import {
   ensureFitTestVerification,
   getFacultyFitTests,
   getUserFitTests,
+  markFitTestEmailSent,
   updateFitTest,
 } from '../services/firebaseDb';
+import { sendFitTestCard } from '../services/emailService';
 import { previewFitTestPdf } from '../utils/pdfUtils';
 import { useFitTestResults } from './useFitTestResults';
 
@@ -21,6 +23,7 @@ jest.mock('../services/firebaseDb', () => ({
   updateFitTest: jest.fn(),
   deleteFitTest: jest.fn(),
   ensureFitTestVerification: jest.fn(),
+  markFitTestEmailSent: jest.fn(),
 }));
 
 jest.mock('../services/emailService', () => ({
@@ -76,6 +79,9 @@ beforeEach(() => {
   useAuth.mockReturnValue({ user: { uid: 'admin-1', role: 'admin' } });
   getUserFitTests.mockResolvedValue([record]);
   updateFitTest.mockResolvedValue(undefined);
+  markFitTestEmailSent.mockResolvedValue('2026-11-16T15:00:00.000Z');
+  sendFitTestCard.mockResolvedValue(undefined);
+  ensureFitTestVerification.mockImplementation(async (test) => test);
 });
 
 afterEach(() => {
@@ -439,4 +445,20 @@ test('a Qualitative edit removes fitFactor from the list instead of keeping the 
   expect(previewFitTestPdf).toHaveBeenCalled();
   // A loader, not resolved data, so the preview tab opens before any await.
   expect(typeof previewFitTestPdf.mock.calls[0][0]).toBe('function');
+});
+
+test('sending an unsent result emails then marks emailSentAt on the card', async () => {
+  const unsent = { ...record, emailSentAt: null };
+  getUserFitTests.mockResolvedValue([unsent]);
+  const apiRef = { current: null };
+  await renderProbe(apiRef);
+
+  await act(async () => {
+    await apiRef.current.handleResend(unsent);
+  });
+
+  expect(sendFitTestCard).toHaveBeenCalledTimes(1);
+  expect(markFitTestEmailSent).toHaveBeenCalledWith('ft-1');
+  expect(apiRef.current.fitTests[0].emailSentAt).toBe('2026-11-16T15:00:00.000Z');
+  expect(apiRef.current.successMessage).toContain('sent successfully');
 });

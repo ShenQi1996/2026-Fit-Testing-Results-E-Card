@@ -14,6 +14,7 @@ import {
   formatDateWithTime,
   hasConsentOrSignature,
   hasTesterAttestation,
+  isFitTestEmailSent,
   medicalRestrictionsReceivedAnswer,
 } from './resultsUtils';
 import ResultCardEditForm from './ResultCardEditForm';
@@ -59,8 +60,15 @@ const ResultCardView = ({ test, expanded, onToggleExpand }) => (
       )}
       <ResultRow label="Fit Tester:" value={test.fitTester || 'N/A'} />
       {test.recipientEmail && (
-        <ResultRow label="Sent To:" value={test.recipientEmail} />
+        <ResultRow
+          label={isFitTestEmailSent(test) ? 'Sent To:' : 'Recipient:'}
+          value={test.recipientEmail}
+        />
       )}
+      <ResultRow
+        label="Email status:"
+        value={isFitTestEmailSent(test) ? 'Sent' : 'Not sent yet'}
+      />
       <ResultRow label="Created:" value={formatDate(test.createdAt)} />
     </div>
 
@@ -317,6 +325,7 @@ const ResultCard = ({
   const isEditing = editing === test.id;
   const busy = deleting || resending === test.id || editing !== null || (pdfLoading && pdfLoading.id === test.id);
   const facultyView = isFaculty(user);
+  const emailSent = isFitTestEmailSent(test);
 
   return (
     <div className={`result-card ${isEditing ? 'editing' : ''}`}>
@@ -436,9 +445,19 @@ const ResultCard = ({
                 onClick={() => onResend(test)}
                 className="resend-button"
                 disabled={busy || !test.recipientEmail}
-                title={!test.recipientEmail ? 'No recipient email available' : 'Resend e-card'}
+                title={
+                  !test.recipientEmail
+                    ? 'No recipient email available'
+                    : emailSent
+                      ? 'Resend e-card'
+                      : 'Send e-card email'
+                }
               >
-                {resending === test.id ? 'Sending...' : '📧 Resend'}
+                {resending === test.id
+                  ? 'Sending...'
+                  : emailSent
+                    ? '📧 Resend'
+                    : '📧 Send'}
               </button>
             )}
             {!isAdminOrAbove(user) && !facultyView && (

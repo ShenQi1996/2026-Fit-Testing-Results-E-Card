@@ -3,6 +3,19 @@ import { legacyFitFactorDisplay } from '../../utils/cardCopies';
 
 export const FILTER_ALL = '__all__';
 
+/**
+ * Whether the e-card email has been sent.
+ * Legacy records without emailSentAt are treated as sent.
+ * New records are created with emailSentAt: null until EmailJS succeeds.
+ */
+export const isFitTestEmailSent = (test) => {
+  if (!test || !Object.prototype.hasOwnProperty.call(test, 'emailSentAt')) {
+    return true;
+  }
+  const value = test.emailSentAt;
+  return value != null && value !== '';
+};
+
 export const hasConsentOrSignature = (test) => Boolean(
   test.printedName ||
   test.signatureDataUrl ||

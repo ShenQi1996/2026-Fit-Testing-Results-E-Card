@@ -44,6 +44,7 @@ jest.mock('../../services/masterSchools', () => ({
 
 jest.mock('../../services/firebaseDb', () => ({
   saveFitTest: jest.fn(),
+  markFitTestEmailSent: jest.fn(),
   getUserSolutionProfiles: jest.fn(() => Promise.resolve([])),
   saveUserSolutionProfile: jest.fn(),
 }));
