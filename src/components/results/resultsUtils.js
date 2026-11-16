@@ -5,14 +5,17 @@ export const FILTER_ALL = '__all__';
 
 /**
  * Whether the e-card email has been sent.
- * Legacy records without emailSentAt are treated as sent.
- * New records are created with emailSentAt: null until EmailJS succeeds.
+ * Legacy records without emailSentAt (or with undefined after mapping) are
+ * treated as sent. New records are created with emailSentAt: null until
+ * EmailJS succeeds.
  */
 export const isFitTestEmailSent = (test) => {
   if (!test || !Object.prototype.hasOwnProperty.call(test, 'emailSentAt')) {
     return true;
   }
   const value = test.emailSentAt;
+  // mapFitTestDoc used to set emailSentAt: undefined for missing fields.
+  if (value === undefined) return true;
   return value != null && value !== '';
 };
 
