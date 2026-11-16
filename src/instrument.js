@@ -1,3 +1,4 @@
+/* global process */
 import * as Sentry from '@sentry/react';
 
 // Public browser DSN (ingest only). Override with SENTRY_DSN at build time if needed.
