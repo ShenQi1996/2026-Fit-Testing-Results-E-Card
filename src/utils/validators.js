@@ -109,6 +109,10 @@ export const validateFitTestForm = (formData, hasStrokes = false, hasTesterStrok
     fieldErrors.recordDeliveryConfirmed = 'Please confirm record delivery to the email on this form.';
   }
 
+  if (!formData.verificationConsentConfirmed) {
+    fieldErrors.verificationConsentConfirmed = 'Please confirm e-card verification consent.';
+  }
+
   if (formData.optionalOrganizationRelease && !formData.organizationReleaseRecipient?.trim()) {
     fieldErrors.organizationReleaseRecipient = 'Please name the employer or school recipient.';
   }

@@ -46,6 +46,7 @@ export const INITIAL_FORM_DATA = {
   consentToFitTest: false,
   privacyPolicyAcknowledged: false,
   recordDeliveryConfirmed: false,
+  verificationConsentConfirmed: false,
   optionalOrganizationRelease: false,
   organizationReleaseRecipient: '',
   optionalMarketingEmail: false,

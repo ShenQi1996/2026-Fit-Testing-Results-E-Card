@@ -19,6 +19,7 @@ const validForm = () => ({
   consentToFitTest: true,
   privacyPolicyAcknowledged: true,
   recordDeliveryConfirmed: true,
+  verificationConsentConfirmed: true,
   testerAttestationProtocolFollowed: true,
   testerAttestationConsentWitnessed: true,
   testerAttestationRespiratorMatchesRecord: true,
@@ -46,6 +47,15 @@ describe('form validators', () => {
 
     const missingSignature = validateFitTestForm(validForm(), false, true);
     expect(missingSignature.fieldErrors.signature).toMatch(/signature/i);
+  });
+
+  test('validateFitTestForm requires e-card verification consent', () => {
+    const missing = validateFitTestForm({
+      ...validForm(),
+      verificationConsentConfirmed: false,
+    }, true, true);
+    expect(missing.isValid).toBe(false);
+    expect(missing.fieldErrors.verificationConsentConfirmed).toMatch(/verification/i);
   });
 
   test('solution expiration cannot be before the open date', () => {

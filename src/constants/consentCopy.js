@@ -38,6 +38,12 @@ export const PARTICIPANT_CONSENT_ITEMS = [
     required: true,
     text: 'Send my fit-test record to the email on this form. Ordinary email may be visible to others with access to that account. This is not marketing or a release to someone else.',
   },
+  {
+    key: 'verificationConsentConfirmed',
+    title: 'E-card verification',
+    required: true,
+    text: 'My e-card will include a verification link or QR code. Anyone who has that link can view my fit-test result details. This is not marketing, and it is not a release of my record to an employer or school.',
+  },
 ];
 
 export const OPTIONAL_CONSENT_ITEMS = [

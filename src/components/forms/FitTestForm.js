@@ -232,6 +232,7 @@ const FitTestForm = () => {
               !formData.consentToFitTest ||
               !formData.privacyPolicyAcknowledged ||
               !formData.recordDeliveryConfirmed ||
+              !formData.verificationConsentConfirmed ||
               (formData.optionalOrganizationRelease && !formData.organizationReleaseRecipient?.trim()) ||
               !hasTesterStrokes ||
               formData.testerAttestationProtocolFollowed === false ||
@@ -254,6 +255,7 @@ const FitTestForm = () => {
               !formData.consentToFitTest ||
               !formData.privacyPolicyAcknowledged ||
               !formData.recordDeliveryConfirmed ||
+              !formData.verificationConsentConfirmed ||
               (formData.optionalOrganizationRelease && !formData.organizationReleaseRecipient?.trim()) ||
               !hasTesterStrokes ||
               formData.testerAttestationProtocolFollowed === false ||
