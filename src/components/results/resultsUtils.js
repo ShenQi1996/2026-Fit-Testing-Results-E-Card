@@ -27,6 +27,7 @@ export const hasConsentOrSignature = (test) => Boolean(
   test.consentToFitTest !== undefined ||
   test.privacyPolicyAcknowledged !== undefined ||
   test.recordDeliveryConfirmed !== undefined ||
+  test.verificationConsentConfirmed !== undefined ||
   test.optionalOrganizationRelease !== undefined ||
   test.optionalMarketingEmail !== undefined ||
   test.testerAttestationProtocolFollowed !== undefined ||

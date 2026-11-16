@@ -95,6 +95,7 @@ const completeDraft = {
   consentToFitTest: true,
   privacyPolicyAcknowledged: true,
   recordDeliveryConfirmed: true,
+  verificationConsentConfirmed: true,
   testerMedicalRestrictionsReceived: true,
   testerMedicalRestrictionsNote: 'No strenuous exercise',
 };

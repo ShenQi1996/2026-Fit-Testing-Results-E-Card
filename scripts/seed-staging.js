@@ -190,6 +190,7 @@ const consentFields = (spec) => ({
   optionalOrganizationRelease: Boolean(spec.optionalOrganizationRelease),
   privacyPolicyAcknowledged: true,
   recordDeliveryConfirmed: true,
+  verificationConsentConfirmed: true,
   testerAttestationConsentWitnessed: true,
   testerMedicalRestrictionsReceived: Boolean(spec.testerMedicalRestrictionsReceived),
   organizationReleaseRecipient: spec.organizationReleaseRecipient || '',
