@@ -69,6 +69,8 @@ test('an unsent result shows Not sent yet, Recipient, and a Send button', () => 
   });
   const html = JSON.stringify(renderer.toJSON());
   expect(html).toContain('Not sent yet');
+  expect(html).toContain('Not sent');
+  expect(html).toContain('result-badge--unsent');
   expect(html).toContain('Recipient:');
   expect(html).not.toContain('Sent To:');
   const send = renderer.root.findAllByType('button')
@@ -102,6 +104,7 @@ test('a sent result shows Sent To and a Resend button', () => {
   const html = JSON.stringify(renderer.toJSON());
   expect(html).toContain('Sent To:');
   expect(html).toContain('"Sent"');
+  expect(html).not.toContain('result-badge--unsent');
   const resend = renderer.root.findAllByType('button')
     .find((node) => JSON.stringify(node.children).includes('Resend'));
   expect(resend).toBeDefined();
