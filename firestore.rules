@@ -612,9 +612,15 @@ service cloud.firestore {
             'updatedAt',
             'lookupKey',
             'verificationToken',
+            'emailSentAt',
             'testerMedicalRestrictionsReceived',
             'testerMedicalRestrictionsNote'
           ])
+          && (
+            !affected.hasAny(['emailSentAt'])
+            || request.resource.data.emailSentAt == null
+            || request.resource.data.emailSentAt is timestamp
+          )
           && (
             !affected.hasAny(['testerMedicalRestrictionsReceived', 'testerMedicalRestrictionsNote'])
             || (

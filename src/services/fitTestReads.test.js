@@ -23,6 +23,7 @@ import {
   lookupFitTestForResend,
   updateFitTest,
   lookupFitTestForVerification,
+  markFitTestEmailSent,
   saveFitTest,
 } from './firebaseDb';
 
@@ -308,6 +309,7 @@ test('saveFitTest stamps the creator profile and ignores a client stamp', async 
     schoolsList: 'Other School',
     creatorRole: 'admin',
     creatorSchool: 'Spoofed',
+    emailSentAt: 'spoofed',
   });
   const savedWrite = writeBatch.mock.results[0].value.set.mock.calls
     .find((call) => call[0].args[1] === 'fitTests');
@@ -317,6 +319,7 @@ test('saveFitTest stamps the creator profile and ignores a client stamp', async 
   expect(saved.creatorSchool).toBe('Helene College of Nursing');
   expect(saved.schoolsList).toBe('Other School');
   expect(saved.deletedAt).toBeNull();
+  expect(saved.emailSentAt).toBeNull();
 
   writeBatch.mockClear();
   addDoc.mockClear();
@@ -328,6 +331,18 @@ test('saveFitTest stamps the creator profile and ignores a client stamp', async 
     creatorRole: 'admin',
     creatorSchool: 'Helene College of Nursing',
   }));
+});
+
+test('markFitTestEmailSent stamps emailSentAt and updatedAt', async () => {
+  updateDoc.mockResolvedValue();
+  const sentAt = await markFitTestEmailSent('fit-9');
+  expect(typeof sentAt).toBe('string');
+  expect(updateDoc).toHaveBeenCalledTimes(1);
+  const patch = updateDoc.mock.calls[0][1];
+  expect(patch.emailSentAt).toEqual(expect.objectContaining({
+    toDate: expect.any(Function),
+  }));
+  expect(patch.updatedAt).toBe(patch.emailSentAt);
 });
 
 test('updateFitTest keeps a legacy quantitative method and fit factor', async () => {

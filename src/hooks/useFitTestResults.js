@@ -7,6 +7,7 @@ import {
   deleteFitTest,
   updateFitTest,
   ensureFitTestVerification,
+  markFitTestEmailSent,
 } from '../services/firebaseDb';
 import { isAccessWindowOpen, isFaculty } from '../utils/roles';
 import { sendFitTestCard } from '../services/emailService';
@@ -19,6 +20,7 @@ import {
   getMonthKeyFromTest,
   parseIssueDate,
   getEcardFormDataFromTest,
+  isFitTestEmailSent,
 } from '../components/results/resultsUtils';
 
 export const useFitTestResults = () => {
@@ -299,12 +301,28 @@ export const useFitTestResults = () => {
       return;
     }
 
+    const alreadySent = isFitTestEmailSent(test);
+
     try {
       setResending(test.id);
       setSuccessMessage('');
       setError('');
       await sendFitTestCard(await resolveCardFormData(test));
-      flashMessage(setSuccessMessage, `E-card resent successfully to ${test.recipientEmail}!`);
+      let sentAt = new Date().toISOString();
+      try {
+        sentAt = await markFitTestEmailSent(test.id);
+      } catch (markError) {
+        console.error('Error marking e-card as sent:', markError);
+      }
+      setFitTests((prev) => prev.map((item) => (
+        item.id === test.id ? { ...item, emailSentAt: sentAt } : item
+      )));
+      flashMessage(
+        setSuccessMessage,
+        alreadySent
+          ? `E-card resent successfully to ${test.recipientEmail}!`
+          : `E-card sent successfully to ${test.recipientEmail}!`,
+      );
     } catch (err) {
       console.error('Error resending e-card:', err);
       flashMessage(setError, err.message || 'Failed to resend e-card. Please try again.', 5000);
