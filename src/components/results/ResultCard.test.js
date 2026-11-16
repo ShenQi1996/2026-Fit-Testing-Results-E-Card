@@ -44,3 +44,65 @@ test('a legacy result card with no style shows a dash', () => {
   expect(html).toContain('Style:');
   expect(html).toContain('—');
 });
+
+test('an unsent result shows Not sent yet, Recipient, and a Send button', () => {
+  let renderer;
+  act(() => {
+    renderer = TestRenderer.create(
+      <ResultCard
+        test={{
+          id: 'ft-unsent',
+          clientName: 'Ada',
+          issueDate: '01/15/2026',
+          result: 'Pass',
+          recipientEmail: 'ada@example.com',
+          emailSentAt: null,
+        }}
+        user={{ uid: 'tester-1', role: 'tester' }}
+        editing={null}
+        editData={{}}
+        expanded={false}
+        onToggleExpand={() => {}}
+        onResend={() => {}}
+      />
+    );
+  });
+  const html = JSON.stringify(renderer.toJSON());
+  expect(html).toContain('Not sent yet');
+  expect(html).toContain('Recipient:');
+  expect(html).not.toContain('Sent To:');
+  const send = renderer.root.findAllByType('button')
+    .find((node) => JSON.stringify(node.children).includes('Send'));
+  expect(send).toBeDefined();
+  expect(JSON.stringify(send.children)).not.toContain('Resend');
+});
+
+test('a sent result shows Sent To and a Resend button', () => {
+  let renderer;
+  act(() => {
+    renderer = TestRenderer.create(
+      <ResultCard
+        test={{
+          id: 'ft-sent',
+          clientName: 'Ada',
+          issueDate: '01/15/2026',
+          result: 'Pass',
+          recipientEmail: 'ada@example.com',
+          emailSentAt: '2026-11-16T15:00:00.000Z',
+        }}
+        user={{ uid: 'tester-1', role: 'tester' }}
+        editing={null}
+        editData={{}}
+        expanded={false}
+        onToggleExpand={() => {}}
+        onResend={() => {}}
+      />
+    );
+  });
+  const html = JSON.stringify(renderer.toJSON());
+  expect(html).toContain('Sent To:');
+  expect(html).toContain('"Sent"');
+  const resend = renderer.root.findAllByType('button')
+    .find((node) => JSON.stringify(node.children).includes('Resend'));
+  expect(resend).toBeDefined();
+});

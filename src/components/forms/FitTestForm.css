@@ -856,3 +856,27 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+.save-without-send-button {
+  background: #fff;
+  color: var(--navy);
+  border: 2px solid var(--navy);
+  padding: 14px 24px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 10px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  margin-top: 8px;
+  font-family: inherit;
+  transition: all 0.3s ease;
+}
+
+.save-without-send-button:hover:not(:disabled) {
+  background: rgba(15, 45, 74, 0.08);
+}
+
+.save-without-send-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
