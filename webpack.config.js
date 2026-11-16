@@ -97,14 +97,42 @@ const applyFirebaseEnv = (mode) => {
     }
 };
 
-const environmentDefaults = { APP_ENV: '' };
+const environmentDefaults = { APP_ENV: '', SENTRY_DSN: '' };
 FIREBASE_ENV_KEYS.forEach((key) => {
     environmentDefaults[key] = '';
 });
 
 const stylesHandler = MiniCssExtractPlugin.loader;
 
-const buildConfig = () => ({
+const sentryAuthToken = () => String(process.env.SENTRY_AUTH_TOKEN || '').trim();
+
+// Upload hidden source maps on production builds when a CI auth token is present.
+// Without a token the build still succeeds; stack traces stay minified until Vercel
+// (or local) sets SENTRY_AUTH_TOKEN.
+const sentryUploadPlugins = (mode) => {
+    if (mode === 'development') return [];
+    const authToken = sentryAuthToken();
+    if (!authToken) {
+        console.warn(
+            'SENTRY_AUTH_TOKEN is unset. Production source maps will not upload to Sentry.'
+        );
+        return [];
+    }
+    // Lazy require so Jest webpack-config tests do not load the plugin's ESM deps.
+    const { sentryWebpackPlugin } = require('@sentry/webpack-plugin');
+    return [
+        sentryWebpackPlugin({
+            org: 'secure-fit',
+            project: 'fit-test-e-card',
+            authToken,
+            sourcemaps: {
+                filesToDeleteAfterUpload: ['./dist/**/*.map'],
+            },
+        }),
+    ];
+};
+
+const buildConfig = (mode) => ({
     entry: './src/index.js',
     output: {
         path: path.resolve(__dirname, 'dist'),
@@ -142,6 +170,7 @@ const buildConfig = () => ({
                 },
             ],
         }),
+        ...sentryUploadPlugins(mode),
     ],
     module: {
         rules: [
@@ -169,12 +198,17 @@ const buildConfig = () => ({
 module.exports = (env, argv) => {
     const mode = webpackMode(argv);
     applyFirebaseEnv(mode);
+    const isDevelopment = mode === 'development';
+    const uploadSourceMaps = !isDevelopment && Boolean(sentryAuthToken());
     return {
-        ...buildConfig(),
+        ...buildConfig(mode),
         mode: mode === 'none' ? 'none' : mode,
-        // Development source maps only. Production stays without source maps,
-        // matching webpack's default when devtool is unset.
-        devtool: mode === 'development' ? 'eval-cheap-module-source-map' : false,
+        // Local: cheap maps for debugging. Production with SENTRY_AUTH_TOKEN: hidden
+        // maps for Sentry upload (deleted after upload). Without a token, skip maps
+        // so Vercel does not publish .map files.
+        devtool: isDevelopment
+            ? 'eval-cheap-module-source-map'
+            : (uploadSourceMaps ? 'hidden-source-map' : false),
         cache: {
             type: 'filesystem',
             buildDependencies: {
