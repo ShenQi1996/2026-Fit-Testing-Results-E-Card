@@ -3,6 +3,7 @@ import { getEcardFormDataFromTest, isFitTestEmailSent } from './resultsUtils';
 test('isFitTestEmailSent treats legacy missing as sent, null as unsent, and a stamp as sent', () => {
   expect(isFitTestEmailSent({})).toBe(true);
   expect(isFitTestEmailSent({ clientName: 'Legacy' })).toBe(true);
+  expect(isFitTestEmailSent({ emailSentAt: undefined })).toBe(true);
   expect(isFitTestEmailSent({ emailSentAt: null })).toBe(false);
   expect(isFitTestEmailSent({ emailSentAt: '' })).toBe(false);
   expect(isFitTestEmailSent({ emailSentAt: '2026-11-16T15:00:00.000Z' })).toBe(true);

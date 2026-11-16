@@ -504,15 +504,22 @@ const indexRequiredError = (error) => {
 
 const mapFitTestDoc = (docSnap) => {
   const data = withoutMedicalNote(docSnap.data() || {});
-  return {
+  const mapped = {
     id: docSnap.id,
     ...data,
     createdAt: data.createdAt?.toDate?.()?.toISOString(),
     updatedAt: data.updatedAt?.toDate?.()?.toISOString(),
-    emailSentAt: data.emailSentAt == null
-      ? data.emailSentAt
-      : (data.emailSentAt?.toDate?.()?.toISOString() ?? data.emailSentAt),
   };
+  // Only stamp emailSentAt when the field exists. A missing key means legacy
+  // (treat as sent). null means saved but not emailed yet.
+  if (Object.prototype.hasOwnProperty.call(data, 'emailSentAt')) {
+    mapped.emailSentAt = data.emailSentAt == null
+      ? null
+      : (data.emailSentAt?.toDate?.()?.toISOString() ?? data.emailSentAt);
+  } else {
+    delete mapped.emailSentAt;
+  }
+  return mapped;
 };
 
 /**
