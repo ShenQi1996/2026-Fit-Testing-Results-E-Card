@@ -76,20 +76,6 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
       </div>
 
       <div className="form-row">
-        <FormSelect
-          id="style"
-          label="Style"
-          value={formData.style || ''}
-          onChange={(e) => onChange('style', e.target.value)}
-          options={RESPIRATOR_STYLE_OPTIONS}
-          placeholder="Select style"
-          required
-          disabled={isLoading}
-          error={fieldErrors?.style}
-        />
-      </div>
-
-      <div className="form-row">
         <div className="respirator-mfg-group">
           <FormSelect
             id="respiratorMfg"
@@ -145,6 +131,9 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           disabled={isLoading}
           error={fieldErrors?.maskSize}
         />
+      </div>
+
+      <div className="form-row">
         <FormInput
           id="model"
           label="Model"
@@ -155,6 +144,17 @@ const FitTestDetailsSection = ({ formData, onChange, isLoading, fieldErrors }) =
           required
           disabled={isLoading}
           error={fieldErrors?.model}
+        />
+        <FormSelect
+          id="style"
+          label="Style"
+          value={formData.style || ''}
+          onChange={(e) => onChange('style', e.target.value)}
+          options={RESPIRATOR_STYLE_OPTIONS}
+          placeholder="Select style"
+          required
+          disabled={isLoading}
+          error={fieldErrors?.style}
         />
       </div>
 

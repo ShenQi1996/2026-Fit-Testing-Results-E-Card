@@ -782,7 +782,7 @@ service cloud.firestore {
                 && editHistoryAfterOk()
                 && historyShapeOk()
                 && historyValuesOk()
-                && textOk(request.resource.data.get('style', ''), 100)
+                && styleValueOk(request.resource.data.get('style', ''))
                 && methodStillOk()
               )
               : (
@@ -870,10 +870,17 @@ service cloud.firestore {
         return !request.resource.data.keys().hasAny(['fitFactor']);
       }
 
-      // Style is required on create and on every material edit. A housekeeping
-      // write can refresh the token on a record that has no style.
+      // Creates and material edits store one of the three styles. onlyHousekeeping
+      // does not call this, so a legacy record with no style and no model can
+      // still refresh its token.
+      function styleValueOk(value) {
+        return value == 'Cup (molded)'
+          || value == 'Flat-fold'
+          || value == 'Duckbill';
+      }
+
       function styleRequired() {
-        return textOk(request.resource.data.get('style', ''), 100);
+        return styleValueOk(request.resource.data.get('style', ''));
       }
 
       function respiratorFieldsOkOnUpdate() {
