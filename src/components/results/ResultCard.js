@@ -341,24 +341,29 @@ const ResultCard = ({
         ) : (
           <h3 className="result-client-name">{test.clientName || 'N/A'}</h3>
         )}
-        {isEditing ? (
-          <select
-            className="edit-select edit-result-badge"
-            value={test.result || 'Pass'}
-            disabled
-            aria-disabled="true"
-            title="The result cannot be changed after the record is saved."
-            onChange={() => {}}
-          >
-            {RESULT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        ) : (
-          <span className={`result-badge ${test.result === 'Pass' ? 'pass' : 'fail'}`}>
-            {test.result}
-          </span>
-        )}
+        <div className="result-card-badges">
+          {isEditing ? (
+            <select
+              className="edit-select edit-result-badge"
+              value={test.result || 'Pass'}
+              disabled
+              aria-disabled="true"
+              title="The result cannot be changed after the record is saved."
+              onChange={() => {}}
+            >
+              {RESULT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          ) : (
+            <span className={`result-badge ${test.result === 'Pass' ? 'pass' : 'fail'}`}>
+              {test.result}
+            </span>
+          )}
+          {!emailSent && (
+            <span className="result-badge result-badge--unsent">Not sent</span>
+          )}
+        </div>
       </div>
       {isEditing ? (
         <ResultCardEditForm

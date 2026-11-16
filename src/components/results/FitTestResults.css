@@ -378,6 +378,18 @@
   color: #721c24;
 }
 
+.result-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.result-badge--unsent {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
 .result-card-body {
   display: flex;
   flex-direction: column;
