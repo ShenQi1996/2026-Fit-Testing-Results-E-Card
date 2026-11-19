@@ -360,3 +360,42 @@ test('faculty see no draft controls', async () => {
   expect(buttonWithText(renderer, 'Save as draft')).toBeUndefined();
   expect(listFitTestDrafts).not.toHaveBeenCalled();
 });
+
+describe('renewal reminder opt-in', () => {
+  const optIn = (renderer) => renderer.root.findByProps({ id: 'renewalReminderOptIn', type: 'checkbox' });
+
+  test('the optional box is unchecked by default and a send saves false', async () => {
+    listFitTestDrafts.mockResolvedValue([completeDraft]);
+    const renderer = await renderForm();
+    expect(optIn(renderer).props.checked).toBe(false);
+    expect(textOf(renderer)).toContain('Remind me next year when my fit test is due');
+    await openDraft(renderer);
+    expect(optIn(renderer).props.checked).toBe(false);
+    await signBoth(renderer);
+    await submit(renderer);
+    expect(saveFitTest.mock.calls[0][1].renewalReminderOptIn).toBe(false);
+  });
+
+  test('ticking the box saves renewalReminderOptIn: true on the record', async () => {
+    listFitTestDrafts.mockResolvedValue([completeDraft]);
+    const renderer = await renderForm();
+    await openDraft(renderer);
+    await act(async () => {
+      optIn(renderer).props.onChange({ target: { checked: true } });
+    });
+    expect(optIn(renderer).props.checked).toBe(true);
+    await signBoth(renderer);
+    await submit(renderer);
+    expect(saveFitTest.mock.calls[0][1].renewalReminderOptIn).toBe(true);
+  });
+
+  test('a draft keeps the choice when saved and reopened', async () => {
+    listFitTestDrafts.mockResolvedValue([{ ...completeDraft, renewalReminderOptIn: true }]);
+    const renderer = await renderForm();
+    await openDraft(renderer);
+    expect(optIn(renderer).props.checked).toBe(true);
+    saveFitTestDraft.mockResolvedValueOnce('draft-1');
+    await click(buttonWithText(renderer, 'Update draft'));
+    expect(saveFitTestDraft.mock.calls[0][1].renewalReminderOptIn).toBe(true);
+  });
+});

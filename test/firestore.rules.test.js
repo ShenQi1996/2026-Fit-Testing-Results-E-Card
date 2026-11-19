@@ -3528,3 +3528,96 @@ describe('removing a school removes it from users', () => {
     expect(after.directory.names).toEqual([HELENE, SECOND]);
   });
 });
+
+describe('renewal reminder opt-in', () => {
+  const seedPeople = (extra = []) => seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/super-1', approved('superadmin', 'sam@example.com')],
+    ...extra,
+  ]);
+
+  const newFitTest = (extra = {}) => ({
+    userId: 'tester-1',
+    schoolsList: HELENE,
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    deletedAt: null,
+    recipientEmail: 'worker@example.com',
+    ...respiratorRecord(),
+    ...extra,
+  });
+
+  test('a fit test create may store renewalReminderOptIn as true, false, or leave it off', async () => {
+    await seedPeople();
+    const db = testEnv.authenticatedContext('tester-1').firestore();
+    await assertSucceeds(setDoc(doc(db, 'fitTests/opt-in'), newFitTest({ renewalReminderOptIn: true })));
+    await assertSucceeds(setDoc(doc(db, 'fitTests/opt-out'), newFitTest({ renewalReminderOptIn: false })));
+    await assertSucceeds(setDoc(doc(db, 'fitTests/legacy'), newFitTest()));
+  });
+
+  test.each([
+    ['a string', { renewalReminderOptIn: 'yes' }],
+    ['a number', { renewalReminderOptIn: 1 }],
+    ['null', { renewalReminderOptIn: null }],
+    ['a preset sent year', { renewalReminderOptIn: true, renewalReminderSentFor: 2027 }],
+    ['a preset sent time', { renewalReminderOptIn: true, renewalReminderSentAt: serverTimestamp() }],
+  ])('a fit test create with %s is denied', async (_label, extra) => {
+    await seedPeople();
+    const db = testEnv.authenticatedContext('tester-1').firestore();
+    await assertFails(setDoc(doc(db, 'fitTests/bad'), newFitTest(extra)));
+  });
+
+  test('the owner and a super admin cannot change the choice or the sent markers after create', async () => {
+    await seedPeople([
+      ['fitTests/ft-1', newFitTest({ renewalReminderOptIn: false, emailSentAt: null })],
+    ]);
+    const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+    const superDb = testEnv.authenticatedContext('super-1').firestore();
+    await assertFails(updateDoc(doc(ownerDb, 'fitTests/ft-1'), { renewalReminderOptIn: true }));
+    await assertFails(updateDoc(doc(superDb, 'fitTests/ft-1'), {
+      renewalReminderOptIn: true,
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(superDb, 'fitTests/ft-1'), {
+      renewalReminderSentFor: 2027,
+      renewalReminderSentAt: serverTimestamp(),
+    }));
+    await assertFails(commitEdit(
+      superDb,
+      'ft-1',
+      'super-1',
+      'edit-opt-in',
+      { renewalReminderOptIn: { oldValue: false, newValue: true } },
+      { renewalReminderOptIn: true },
+    ));
+    // A housekeeping write (resend) still works on a record that has the field.
+    await assertSucceeds(updateDoc(doc(ownerDb, 'fitTests/ft-1'), {
+      emailSentAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  test('a draft may store the choice as a bool only', async () => {
+    await seedPeople();
+    const db = testEnv.authenticatedContext('tester-1').firestore();
+    const draft = (extra) => ({
+      ownerUid: 'tester-1',
+      clientName: 'Draft',
+      fitTestMethod: 'Qualitative',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...extra,
+    });
+    await assertSucceeds(setDoc(doc(db, 'fitTestDrafts/d-yes'), draft({ renewalReminderOptIn: true })));
+    await assertSucceeds(setDoc(doc(db, 'fitTestDrafts/d-no'), draft({ renewalReminderOptIn: false })));
+    await assertFails(setDoc(doc(db, 'fitTestDrafts/d-bad'), draft({ renewalReminderOptIn: 'yes' })));
+    await assertSucceeds(updateDoc(doc(db, 'fitTestDrafts/d-no'), {
+      renewalReminderOptIn: true,
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, 'fitTestDrafts/d-no'), {
+      renewalReminderOptIn: 'later',
+      updatedAt: serverTimestamp(),
+    }));
+  });
+});

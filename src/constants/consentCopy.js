@@ -57,6 +57,11 @@ export const OPTIONAL_CONSENT_ITEMS = [
     title: 'Email news and offers',
     text: 'I would like optional Secure Fit LLC news and offers by email. I can unsubscribe at any time. Not required to book or receive testing.',
   },
+  {
+    key: 'renewalReminderOptIn',
+    title: 'Renewal reminder',
+    text: 'Remind me next year when my fit test is due. Secure Fit LLC sends one email to the address on this form about a month before the due date, with booking links. Not marketing, and not required to book or receive testing.',
+  },
 ];
 
 export const RECORD_DISCLAIMER =
