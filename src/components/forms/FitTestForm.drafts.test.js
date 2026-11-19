@@ -1,7 +1,7 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../../context/AuthContext';
-import { saveFitTest } from '../../services/firebaseDb';
+import { markFitTestEmailSent, saveFitTest } from '../../services/firebaseDb';
 import { sendFitTestCard } from '../../services/emailService';
 import {
   deleteFitTestDraft,
@@ -41,6 +41,7 @@ jest.mock('../../services/masterSchools', () => ({
 
 jest.mock('../../services/firebaseDb', () => ({
   saveFitTest: jest.fn(),
+  markFitTestEmailSent: jest.fn(),
   getUserSolutionProfiles: jest.fn(() => Promise.resolve([])),
   saveUserSolutionProfile: jest.fn(),
 }));
@@ -94,6 +95,7 @@ const completeDraft = {
   consentToFitTest: true,
   privacyPolicyAcknowledged: true,
   recordDeliveryConfirmed: true,
+  verificationConsentConfirmed: true,
   testerMedicalRestrictionsReceived: true,
   testerMedicalRestrictionsNote: 'No strenuous exercise',
 };
@@ -157,6 +159,7 @@ beforeEach(() => {
   saveFitTestDraft.mockResolvedValue('draft-new');
   deleteFitTestDraft.mockResolvedValue();
   saveFitTest.mockResolvedValue('fit-1');
+  markFitTestEmailSent.mockResolvedValue('2026-11-16T15:00:00.000Z');
   sendFitTestCard.mockResolvedValue();
 });
 
@@ -166,6 +169,7 @@ test('a Save as draft button sits next to the send button', async () => {
   expect(save).toBeDefined();
   expect(save.props.type).toBe('button');
   expect(save.props.disabled).toBe(false);
+  expect(buttonWithText(renderer, "Save result (don't send)")).toBeDefined();
   expect(buttonWithText(renderer, 'Send Fit Test Results E-Card')).toBeDefined();
   expect(listFitTestDrafts).toHaveBeenCalledWith('tester-1');
 });
@@ -274,9 +278,25 @@ test('sending from a draft creates the record as usual, then deletes the draft',
   expect(deleteFitTestDraft).toHaveBeenCalledWith('draft-1');
   expect(saveFitTest.mock.invocationCallOrder[0]).toBeLessThan(deleteFitTestDraft.mock.invocationCallOrder[0]);
   expect(sendFitTestCard).toHaveBeenCalledTimes(1);
+  expect(markFitTestEmailSent).toHaveBeenCalledWith('fit-1');
   expect(textOf(renderer)).toContain('sent successfully');
   expect(renderer.root.findByType('form').props['data-draft']).toBe('false');
   expect(renderer.root.findAllByProps({ 'aria-label': 'Open draft for Ada Client' })).toHaveLength(0);
+});
+
+test('save without send creates the record but never emails', async () => {
+  listFitTestDrafts.mockResolvedValue([completeDraft]);
+  const renderer = await renderForm();
+  await openDraft(renderer);
+  await signBoth(renderer);
+  await click(buttonWithText(renderer, "Save result (don't send)"));
+
+  expect(saveFitTest).toHaveBeenCalledTimes(1);
+  expect(deleteFitTestDraft).toHaveBeenCalledWith('draft-1');
+  expect(sendFitTestCard).not.toHaveBeenCalled();
+  expect(markFitTestEmailSent).not.toHaveBeenCalled();
+  expect(textOf(renderer)).toContain('has not been emailed yet');
+  expect(renderer.root.findByType('form').props['data-draft']).toBe('false');
 });
 
 test('a failed send keeps the draft', async () => {
@@ -307,6 +327,7 @@ test('if the record saves but the email fails, the draft is still removed so it 
 
   expect(saveFitTest).toHaveBeenCalledTimes(1);
   expect(deleteFitTestDraft).toHaveBeenCalledWith('draft-1');
+  expect(markFitTestEmailSent).not.toHaveBeenCalled();
   expect(textOf(renderer)).toContain('You can resend it from Results');
   console.error.mockRestore();
 });
@@ -317,6 +338,7 @@ test('a draft missing the style cannot be sent: style is checked on send, not on
   await openDraft(renderer);
   await signBoth(renderer);
   expect(buttonWithText(renderer, 'Send Fit Test Results E-Card').props.disabled).toBe(true);
+  expect(buttonWithText(renderer, "Save result (don't send)").props.disabled).toBe(true);
   await submit(renderer);
   expect(saveFitTest).not.toHaveBeenCalled();
   expect(deleteFitTestDraft).not.toHaveBeenCalled();

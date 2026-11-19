@@ -18,7 +18,7 @@ A logged-in session does **not** take over `/`, `/verify`, or `/resend`. Staff w
 ## Features
 
 - Fit test form: client, respirator, protocol, hygiene, consent, and signatures
-- Participant consent (required): medical restrictions, participation, privacy, record delivery
+- Participant consent (required): medical restrictions, participation, privacy, record delivery, e-card verification
 - Optional: employer/school release, marketing email
 - Tester attestation, including required **Were medical restrictions received?** (Yes/No; Yes opens a note)
 - E-card QR points to `/verify/:token` (not booking). Booking is a separate follow-up link (Harlem or Brooklyn)

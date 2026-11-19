@@ -12,4 +12,17 @@ const SubmitButton = ({ isLoading, disabled }) => {
   );
 };
 
+export const SaveWithoutSendButton = ({ isSaving, disabled, onClick }) => {
+  return (
+    <button
+      type="button"
+      className="save-without-send-button"
+      onClick={onClick}
+      disabled={disabled || isSaving}
+    >
+      {isSaving ? 'Saving result…' : "Save result (don't send)"}
+    </button>
+  );
+};
+
 export default SubmitButton;

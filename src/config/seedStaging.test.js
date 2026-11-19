@@ -102,11 +102,12 @@ test('fit tests cover three generations, a failure, and the lookup and verify do
   expect(fitById.seedftnoloc000000001.respiratorMfg).toBe('Makrite sekura');
   expect(fitById.seedftnoloc000000001.expirationDate).toBe('08/20/2026');
 
-  expect(Object.keys(fitById.seedftnewest00000001)).toHaveLength(58);
+  expect(Object.keys(fitById.seedftnewest00000001)).toHaveLength(59);
   expect(fitById.seedftnewest00000001.testerAttestationConsentWitnessed).toBe(true);
   expect(fitById.seedftnewest00000001.testerAttestationMedicalClearanceVerified).toBeUndefined();
   expect(fitById.seedftnewest00000001.testLocation).toBe('Brooklyn');
   expect(fitById.seedftnewest00000001.consentToFitTest).toBe(true);
+  expect(fitById.seedftnewest00000001.verificationConsentConfirmed).toBe(true);
   expect(fitById.seedftnewest00000001.maskSize).toBe('Regular');
 
   expect(fitById.seedftfail0000000001.result).toBe('Fail');

@@ -5,6 +5,7 @@ import {
   deleteFitTest,
   updateFitTest,
   ensureFitTestVerification,
+  markFitTestEmailSent,
 } from '../services/firebaseDb';
 import {
   getFitTestListSnapshot,
@@ -27,6 +28,7 @@ import {
   getMonthKeyFromTest,
   parseIssueDate,
   getEcardFormDataFromTest,
+  isFitTestEmailSent,
 } from '../components/results/resultsUtils';
 
 export const useFitTestResults = () => {
@@ -283,13 +285,28 @@ export const useFitTestResults = () => {
       return;
     }
 
+    const alreadySent = isFitTestEmailSent(test);
+
     try {
       setResending(test.id);
       setSuccessMessage('');
       setActionError('');
       await sendFitTestCard(await resolveCardFormData(test));
-      notifyFitTestActivity();
-      flashMessage(setSuccessMessage, `E-card resent successfully to ${test.recipientEmail}!`);
+      let sentAt = new Date().toISOString();
+      try {
+        sentAt = await markFitTestEmailSent(test.id);
+      } catch (markError) {
+        console.error('Error marking e-card as sent:', markError);
+        // markFitTestEmailSent notifies on success; keep lists fresh on failure too.
+        notifyFitTestActivity();
+      }
+      patchFitTestListRecord(test.id, { emailSentAt: sentAt });
+      flashMessage(
+        setSuccessMessage,
+        alreadySent
+          ? `E-card resent successfully to ${test.recipientEmail}!`
+          : `E-card sent successfully to ${test.recipientEmail}!`,
+      );
     } catch (err) {
       console.error('Error resending e-card:', err);
       flashMessage(setActionError, err.message || 'Failed to resend e-card. Please try again.', 5000);

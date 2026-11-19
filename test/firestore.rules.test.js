@@ -1664,6 +1664,44 @@ test('a token refresh leaves a legacy inline note unchanged', async () => {
   ));
 });
 
+test('housekeeping may stamp emailSentAt after an e-card send', async () => {
+  await seed([
+    ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],
+    ['users/tester-2', approved('tester', 'other@example.com', { school: HELENE })],
+    ['users/admin-1', scopedAdmin([HELENE])],
+    ['users/faculty-1', approved('faculty', 'faculty@example.com', { school: HELENE })],
+    ['fitTests/unsent', {
+      userId: 'tester-1',
+      schoolsList: HELENE,
+      result: 'Pass',
+      emailSentAt: null,
+      ...respiratorRecord(),
+    }],
+  ]);
+  const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
+  const otherDb = testEnv.authenticatedContext('tester-2').firestore();
+  const adminDb = testEnv.authenticatedContext('admin-1').firestore();
+  const facultyDb = testEnv.authenticatedContext('faculty-1').firestore();
+  const stamp = (db) => updateDoc(doc(db, 'fitTests/unsent'), {
+    emailSentAt: Timestamp.now(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await assertSucceeds(stamp(ownerDb));
+  await assertSucceeds(stamp(adminDb));
+  await assertFails(stamp(facultyDb));
+  await assertFails(stamp(otherDb));
+  await assertFails(updateDoc(doc(ownerDb, 'fitTests/unsent'), {
+    emailSentAt: 'not-a-timestamp',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(updateDoc(doc(ownerDb, 'fitTests/unsent'), {
+    emailSentAt: Timestamp.now(),
+    clientName: 'Forged',
+    updatedAt: serverTimestamp(),
+  }));
+});
+
 test('a legacy missing or Locked to Qualitative method saves as Qualitative', async () => {
   await seed([
     ['users/tester-1', approved('tester', 'tester@example.com', { school: HELENE })],

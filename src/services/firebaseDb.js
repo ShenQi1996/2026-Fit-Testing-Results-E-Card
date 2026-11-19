@@ -433,6 +433,7 @@ export const saveFitTest = async (userId, fitTestData) => {
     const clientData = withoutMedicalNote(fitTestData || {});
     delete clientData[CREATOR_ROLE_FIELD];
     delete clientData[CREATOR_SCHOOL_FIELD];
+    delete clientData.emailSentAt;
     clientData.fitTestMethod = 'Qualitative';
     delete clientData.fitFactor;
     const lookupKey = await resolveLookupKey(clientData);
@@ -451,6 +452,7 @@ export const saveFitTest = async (userId, fitTestData) => {
       userId,
       ...recordToSave,
       lookupKey: lookupKey || null,
+      emailSentAt: null,
       deletedAt: null,
       createdAt,
       updatedAt: createdAt,
@@ -506,12 +508,41 @@ const indexRequiredError = (error) => {
 
 const mapFitTestDoc = (docSnap) => {
   const data = withoutMedicalNote(docSnap.data() || {});
-  return {
+  const mapped = {
     id: docSnap.id,
     ...data,
     createdAt: data.createdAt?.toDate?.()?.toISOString(),
     updatedAt: data.updatedAt?.toDate?.()?.toISOString(),
   };
+  // Only stamp emailSentAt when the field exists. A missing key means legacy
+  // (treat as sent). null means saved but not emailed yet.
+  if (Object.prototype.hasOwnProperty.call(data, 'emailSentAt')) {
+    mapped.emailSentAt = data.emailSentAt == null
+      ? null
+      : (data.emailSentAt?.toDate?.()?.toISOString() ?? data.emailSentAt);
+  } else {
+    delete mapped.emailSentAt;
+  }
+  return mapped;
+};
+
+/**
+ * Stamp a fit test as emailed after EmailJS succeeds.
+ * Housekeeping-only write: emailSentAt + updatedAt.
+ * @param {string} fitTestId
+ * @returns {Promise<string>} ISO timestamp that was written
+ */
+export const markFitTestEmailSent = async (fitTestId) => {
+  if (!fitTestId) {
+    throw new Error('Fit test id is required to mark an e-card as sent.');
+  }
+  const sentAt = Timestamp.now();
+  await updateDoc(doc(db, FIT_TESTS_COLLECTION, fitTestId), {
+    emailSentAt: sentAt,
+    updatedAt: sentAt,
+  });
+  notifyFitTestActivity();
+  return sentAt.toDate().toISOString();
 };
 
 // Expired-record deletion is disabled. Lists and counts hide records past the

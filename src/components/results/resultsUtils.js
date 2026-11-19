@@ -3,6 +3,22 @@ import { legacyFitFactorDisplay } from '../../utils/cardCopies';
 
 export const FILTER_ALL = '__all__';
 
+/**
+ * Whether the e-card email has been sent.
+ * Legacy records without emailSentAt (or with undefined after mapping) are
+ * treated as sent. New records are created with emailSentAt: null until
+ * EmailJS succeeds.
+ */
+export const isFitTestEmailSent = (test) => {
+  if (!test || !Object.prototype.hasOwnProperty.call(test, 'emailSentAt')) {
+    return true;
+  }
+  const value = test.emailSentAt;
+  // mapFitTestDoc used to set emailSentAt: undefined for missing fields.
+  if (value === undefined) return true;
+  return value != null && value !== '';
+};
+
 export const hasConsentOrSignature = (test) => Boolean(
   test.printedName ||
   test.signatureDataUrl ||
@@ -13,6 +29,7 @@ export const hasConsentOrSignature = (test) => Boolean(
   test.consentToFitTest !== undefined ||
   test.privacyPolicyAcknowledged !== undefined ||
   test.recordDeliveryConfirmed !== undefined ||
+  test.verificationConsentConfirmed !== undefined ||
   test.optionalOrganizationRelease !== undefined ||
   test.optionalMarketingEmail !== undefined ||
   test.testerAttestationProtocolFollowed !== undefined ||

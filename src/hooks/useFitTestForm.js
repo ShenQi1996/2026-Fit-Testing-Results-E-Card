@@ -11,6 +11,7 @@ import {
 } from '../utils/emailSendLimit';
 import {
   saveFitTest,
+  markFitTestEmailSent,
   getUserSolutionProfiles,
   saveUserSolutionProfile,
 } from '../services/firebaseDb';
@@ -79,6 +80,7 @@ export const useFitTestForm = () => {
   const [draftsLoading, setDraftsLoading] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isSavingWithoutSend, setIsSavingWithoutSend] = useState(false);
   const canUseDrafts = Boolean(user?.uid) && !isFaculty(user);
 
   const solutionProfilesState = useSelectableProfiles({
@@ -363,25 +365,25 @@ export const useFitTestForm = () => {
     clearSignatureCanvas(testerSignatureCanvasRef.current);
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
+  // Shared school / solution-profile / form validation for create paths.
+  // Returns false after setting status when the submit should stop.
+  const validateForCreate = () => {
     const shouldSaveProfile = solutionProfilesState.isAddingNew;
 
     if (masterSchoolsLoading) {
       setStatus({ type: 'error', message: 'Schools are still loading. Please try again.' });
-      return;
+      return false;
     }
     if (schoolChoice.blockedMessage) {
       setFieldErrors((prev) => ({ ...prev, schoolsList: schoolChoice.blockedMessage }));
       setStatus({ type: 'error', message: schoolChoice.blockedMessage });
-      return;
+      return false;
     }
     const chosenSchool = (formData.schoolsList || '').trim();
     if (!allowedSchools.includes(chosenSchool)) {
       setFieldErrors((prev) => ({ ...prev, schoolsList: SELECT_SCHOOL_MESSAGE }));
       setStatus({ type: 'error', message: SELECT_SCHOOL_MESSAGE });
-      return;
+      return false;
     }
 
     if (shouldSaveProfile) {
@@ -399,7 +401,7 @@ export const useFitTestForm = () => {
       if (Object.keys(profileFieldErrors).length > 0) {
         setFieldErrors((prev) => ({ ...prev, ...profileFieldErrors }));
         setStatus({ type: 'error', message: Object.values(profileFieldErrors)[0] });
-        return;
+        return false;
       }
     }
 
@@ -407,8 +409,109 @@ export const useFitTestForm = () => {
     if (!validation.isValid) {
       setFieldErrors(validation.fieldErrors);
       setStatus({ type: 'error', message: validation.error });
-      return;
+      return false;
     }
+
+    return true;
+  };
+
+  const buildFormDataWithSignature = () => {
+    const showFailureReasonUI =
+      formData.facialHairInterfering === true || formData.respiratorDonnedCorrectly === false;
+    const chosenForProgram = (formData.schoolsList || '').trim();
+    const program = programAdminForSchool(
+      schoolRecords.find((record) => record.name === chosenForProgram),
+      user,
+    );
+    const cleanedFormData = {
+      ...formData,
+      ...program,
+      printedName: formData.printedName.trim(),
+      testLocation: formData.testLocation?.trim() || '',
+      fitTester: user?.name || formData.fitTester || '',
+      model: (formData.model || '').trim(),
+      style: formData.style || '',
+      fitTestMethod: 'Qualitative',
+      failureReason: showFailureReasonUI ? formData.failureReason : '',
+      correctiveActionNote: showFailureReasonUI ? formData.correctiveActionNote : '',
+      testerMedicalRestrictionsNote: formData.testerMedicalRestrictionsReceived === true
+        ? (formData.testerMedicalRestrictionsNote || '').trim()
+        : '',
+    };
+    delete cleanedFormData.fitFactor;
+
+    const expirationDate = calculateExpirationDate(cleanedFormData.issueDate);
+    return {
+      ...cleanedFormData,
+      signatureDataUrl: captureSignatureDataUrl(signatureCanvasRef.current),
+      testerSignatureDataUrl: captureSignatureDataUrl(testerSignatureCanvasRef.current),
+      expirationDate,
+      verificationToken: cleanedFormData.verificationToken || createVerificationToken(),
+    };
+  };
+
+  // Saves solution profile if needed, writes the fit test, clears any draft.
+  // Returns { formDataWithSignature, fitTestId, latestSolutionProfiles } or null on save failure.
+  const saveValidatedRecord = async () => {
+    let latestSolutionProfiles = solutionProfilesState.profiles;
+    const shouldSaveProfile = solutionProfilesState.isAddingNew;
+
+    if (user?.uid && shouldSaveProfile) {
+      const savedProfileId = await saveUserSolutionProfile(
+        user.uid,
+        {
+          solutionType: formData.solutionType,
+          solutionOpenDate: formData.solutionOpenDate,
+          solutionExpirationDate: formData.solutionExpirationDate,
+        },
+        solutionProfilesState.setAsDefault
+      );
+
+      const refreshedProfiles = await solutionProfilesState.loadProfiles(user.uid);
+      latestSolutionProfiles = refreshedProfiles;
+      solutionProfilesState.applySelection(
+        `${PROFILE_SOLUTION_OPTION_PREFIX}${savedProfileId}`,
+        refreshedProfiles
+      );
+    }
+
+    const formDataWithSignature = buildFormDataWithSignature();
+    let fitTestId = null;
+
+    if (user && user.uid) {
+      try {
+        fitTestId = await saveFitTest(user.uid, formDataWithSignature);
+      } catch (dbError) {
+        console.error('Error saving to database:', dbError);
+        setStatus({
+          type: 'error',
+          message: 'Could not save the fit test record, so the e-card was not sent. Please try again.',
+        });
+        return null;
+      }
+      // The real record now exists, so the draft has done its job. A failed
+      // send before this point keeps the draft.
+      if (activeDraftId) {
+        const sentDraftId = activeDraftId;
+        setActiveDraftId(null);
+        try {
+          await deleteFitTestDraft(sentDraftId);
+        } catch (draftError) {
+          console.error('Could not delete the sent draft', draftError);
+        }
+        setDrafts((prev) => prev.filter((draft) => draft.id !== sentDraftId));
+      }
+    } else {
+      console.warn('User not logged in, skipping database save');
+    }
+
+    return { formDataWithSignature, fitTestId, latestSolutionProfiles };
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!validateForCreate()) return;
 
     setIsLoading(true);
     setStatus({ type: '', message: '' });
@@ -439,90 +542,10 @@ export const useFitTestForm = () => {
         }
       }
 
-      let latestSolutionProfiles = solutionProfilesState.profiles;
+      const saved = await saveValidatedRecord();
+      if (!saved) return;
 
-      if (user?.uid) {
-        if (shouldSaveProfile) {
-          const savedProfileId = await saveUserSolutionProfile(
-            user.uid,
-            {
-              solutionType: formData.solutionType,
-              solutionOpenDate: formData.solutionOpenDate,
-              solutionExpirationDate: formData.solutionExpirationDate,
-            },
-            solutionProfilesState.setAsDefault
-          );
-
-          const refreshedProfiles = await solutionProfilesState.loadProfiles(user.uid);
-          latestSolutionProfiles = refreshedProfiles;
-          solutionProfilesState.applySelection(
-            `${PROFILE_SOLUTION_OPTION_PREFIX}${savedProfileId}`,
-            refreshedProfiles
-          );
-        }
-
-      }
-
-      const showFailureReasonUI =
-        formData.facialHairInterfering === true || formData.respiratorDonnedCorrectly === false;
-      const chosenForProgram = (formData.schoolsList || '').trim();
-      const program = programAdminForSchool(
-        schoolRecords.find((record) => record.name === chosenForProgram),
-        user,
-      );
-      const cleanedFormData = {
-        ...formData,
-        ...program,
-        printedName: formData.printedName.trim(),
-        testLocation: formData.testLocation?.trim() || '',
-        fitTester: user?.name || formData.fitTester || '',
-        model: (formData.model || '').trim(),
-        style: formData.style || '',
-        fitTestMethod: 'Qualitative',
-        failureReason: showFailureReasonUI ? formData.failureReason : '',
-        correctiveActionNote: showFailureReasonUI ? formData.correctiveActionNote : '',
-        testerMedicalRestrictionsNote: formData.testerMedicalRestrictionsReceived === true
-          ? (formData.testerMedicalRestrictionsNote || '').trim()
-          : '',
-      };
-      delete cleanedFormData.fitFactor;
-
-      const expirationDate = calculateExpirationDate(cleanedFormData.issueDate);
-      const formDataWithSignature = {
-        ...cleanedFormData,
-        signatureDataUrl: captureSignatureDataUrl(signatureCanvasRef.current),
-        testerSignatureDataUrl: captureSignatureDataUrl(testerSignatureCanvasRef.current),
-        expirationDate,
-        verificationToken: cleanedFormData.verificationToken || createVerificationToken(),
-      };
-
-      if (user && user.uid) {
-        try {
-          await saveFitTest(user.uid, formDataWithSignature);
-        } catch (dbError) {
-          console.error('Error saving to database:', dbError);
-          setStatus({
-            type: 'error',
-            message: 'Could not save the fit test record, so the e-card was not sent. Please try again.',
-          });
-          setIsLoading(false);
-          return;
-        }
-        // The real record now exists, so the draft has done its job. A failed
-        // send before this point keeps the draft.
-        if (activeDraftId) {
-          const sentDraftId = activeDraftId;
-          setActiveDraftId(null);
-          try {
-            await deleteFitTestDraft(sentDraftId);
-          } catch (draftError) {
-            console.error('Could not delete the sent draft', draftError);
-          }
-          setDrafts((prev) => prev.filter((draft) => draft.id !== sentDraftId));
-        }
-      } else {
-        console.warn('User not logged in, skipping database save');
-      }
+      const { formDataWithSignature, fitTestId, latestSolutionProfiles } = saved;
 
       try {
         await sendFitTestCard(formDataWithSignature);
@@ -538,8 +561,15 @@ export const useFitTestForm = () => {
               ? 'Record saved, but the e-card email failed. You can resend it from Results.'
               : 'Failed to send e-card. Please try again later.',
         });
-        setIsLoading(false);
         return;
+      }
+
+      if (fitTestId) {
+        try {
+          await markFitTestEmailSent(fitTestId);
+        } catch (markError) {
+          console.error('Error marking e-card as sent:', markError);
+        }
       }
 
       if (user?.uid && isRateLimitedSender(user.email)) {
@@ -560,6 +590,38 @@ export const useFitTestForm = () => {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Same validation and Firestore write as Send, but skips EmailJS and rate limits.
+  const handleSaveWithoutSend = async () => {
+    if (!validateForCreate()) return;
+
+    if (!user?.uid) {
+      setStatus({ type: 'error', message: 'You must be signed in to save a result.' });
+      return;
+    }
+
+    setIsSavingWithoutSend(true);
+    setStatus({ type: '', message: '' });
+
+    try {
+      const saved = await saveValidatedRecord();
+      if (!saved) return;
+
+      setStatus({
+        type: 'success',
+        message: 'Result saved. E-card has not been emailed yet.',
+      });
+      applyDefaultSelections(saved.latestSolutionProfiles);
+    } catch (error) {
+      console.error('Error saving result without send:', error);
+      setStatus({
+        type: 'error',
+        message: 'Could not save the fit test record. Please try again.',
+      });
+    } finally {
+      setIsSavingWithoutSend(false);
     }
   };
 
@@ -663,6 +725,7 @@ export const useFitTestForm = () => {
   return {
     formData,
     isLoading,
+    isSavingWithoutSend,
     status,
     fieldErrors,
     solutionTypeOptions: solutionProfilesState.options,
@@ -683,6 +746,7 @@ export const useFitTestForm = () => {
     setSetSolutionProfileAsDefault: solutionProfilesState.setSetAsDefault,
     isAddingNewSolutionProfile: solutionProfilesState.isAddingNew,
     handleSubmit,
+    handleSaveWithoutSend,
     handleSignatureStroke,
     handleSignatureClear,
     handleTesterSignatureStroke,
