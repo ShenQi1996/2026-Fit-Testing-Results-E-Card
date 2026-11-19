@@ -1,6 +1,6 @@
 const noop = () => {};
 
-exports.collection = noop;
+exports.collection = jest.fn((_db, name) => ({ kind: 'collection', path: name }));
 exports.addDoc = jest.fn(async () => ({ id: "mock-id" }));
 exports.getDocs = jest.fn(async () => ({ docs: [], empty: true, forEach() {} }));
 exports.doc = jest.fn((...args) => ({
@@ -15,6 +15,7 @@ exports.query = jest.fn((...args) => ({ kind: 'query', args }));
 exports.where = jest.fn((field, op, value) => ({ kind: 'where', field, op, value }));
 exports.orderBy = jest.fn((field, direction) => ({ kind: 'orderBy', field, direction }));
 exports.limit = jest.fn((count) => ({ kind: 'limit', count }));
+exports.startAfter = jest.fn((docSnap) => ({ kind: 'startAfter', docSnap }));
 exports.getCountFromServer = jest.fn(async () => ({ data: () => ({ count: 0 }) }));
 exports.Timestamp = {
   now: () => ({ toDate: () => new Date(0) }),

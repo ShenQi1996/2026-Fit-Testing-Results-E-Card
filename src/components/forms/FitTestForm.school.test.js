@@ -120,8 +120,8 @@ test('a tester sees only their school, pre-selected and read-only', async () => 
   expect(JSON.stringify(renderer.toJSON())).not.toContain('Program administrator name');
   expect(renderer.root.findAllByProps({ id: 'programAdministratorName' })).toHaveLength(0);
   expect(renderer.root.findAllByProps({ id: 'programAdministratorContact' })).toHaveLength(0);
-  expect(listMasterSchoolRecords).not.toHaveBeenCalled();
-  expect(getMasterSchoolRecord).toHaveBeenCalledWith(HELENE);
+  expect(listMasterSchoolRecords).toHaveBeenCalled();
+  expect(getMasterSchoolRecord).not.toHaveBeenCalled();
 });
 
 test('an admin picks from their schools array and one school is pre-selected', async () => {

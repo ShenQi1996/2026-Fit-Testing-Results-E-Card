@@ -100,7 +100,7 @@ const testerAt = (school, extra = {}) => ({
 const respiratorRecord = (extra = {}) => ({
   respiratorMfg: '3M',
   model: '1860',
-  style: 'Filtering facepiece',
+  style: 'Cup (molded)',
   maskSize: 'Regular',
   fitTestMethod: 'Qualitative',
   ...extra,
@@ -950,7 +950,7 @@ test('renamed or removed school names stay readable until the field changes', as
     ['users/super-1', approved('superadmin', 'sam@example.com')],
     ['users/tester-1', testerAt(oldName, { status: 'approved', name: 'Tess' })],
     ['users/admin-1', scopedAdmin([oldName])],
-    ['fitTests/old-1', { userId: 'tester-1', schoolsList: oldName, style: 'Filtering facepiece' }],
+    ['fitTests/old-1', { userId: 'tester-1', schoolsList: oldName, style: 'Cup (molded)' }],
     ['schoolDirectory/names', { names: [HELENE] }],
   ]);
   const testerDb = testEnv.authenticatedContext('tester-1').firestore();
@@ -1052,7 +1052,7 @@ test('result and issue date cannot change, and edit history matches the diff', a
       issueDate: '01/15/2026',
       expirationDate: '01/15/2027',
       model: '1860',
-      style: 'Filtering facepiece',
+      style: 'Cup (molded)',
     }],
   ]);
   const ownerDb = testEnv.authenticatedContext('tester-1').firestore();
@@ -1212,7 +1212,7 @@ const wideFitTest = () => ({
   fitTestType: 'Initial',
   respiratorMfg: '3M',
   model: '1860',
-  style: 'Filtering facepiece',
+  style: 'Cup (molded)',
   maskSize: 'Regular',
   fitTestMethod: 'Qualitative',
   testingAgent: 'Bitrex',
@@ -1287,7 +1287,7 @@ test('an edit cannot blank or delete a stored fit test method', async () => {
       deletedAt: null,
       respiratorMfg: '3M',
       model: '1860',
-      style: 'Filtering facepiece',
+      style: 'Cup (molded)',
       maskSize: 'Regular',
     }],
   ]);
@@ -1341,7 +1341,7 @@ test('fit test records are soft-deleted with a reason and cannot be hard-deleted
       result: 'Pass',
       schoolsList: HELENE,
       deletedAt: null,
-      style: 'Filtering facepiece',
+      style: 'Cup (molded)',
     }],
     ['fitTestLookups/lookup-1', { userId: 'tester-1', fitTestId: 'own-1' }],
     ['fitTestVerifications/abc', { userId: 'tester-1', fitTestId: 'own-1', result: 'Pass' }],
@@ -1486,6 +1486,13 @@ test('new fit tests require make, model, style, and size, and are qualitative wi
     userId: 'tester-1',
     ...respiratorRecord({ fitFactor: 10 }),
   }));
+  await assertFails(setDoc(doc(testerDb, 'fitTests/old-style'), {
+    userId: 'tester-1',
+    creatorRole: 'tester',
+    creatorSchool: HELENE,
+    deletedAt: null,
+    ...respiratorRecord({ style: 'Filtering facepiece' }),
+  }));
   await assertFails(setDoc(doc(testerDb, 'fitTests/empty-style'), {
     userId: 'tester-1',
     creatorRole: 'tester',
@@ -1526,7 +1533,7 @@ test('an update cannot blank model or style, set a quantitative method, or add a
     'stamped',
     'tester-1',
     'blank-style',
-    { style: { oldValue: 'Filtering facepiece', newValue: '' } },
+    { style: { oldValue: 'Cup (molded)', newValue: '' } },
     { style: '' },
   ));
   await assertFails(commitEdit(
@@ -1534,7 +1541,7 @@ test('an update cannot blank model or style, set a quantitative method, or add a
     'stamped',
     'tester-1',
     'clear-style',
-    { style: { oldValue: 'Filtering facepiece', newValue: null } },
+    { style: { oldValue: 'Cup (molded)', newValue: null } },
     { style: deleteField() },
   ));
   await assertFails(commitEdit(
@@ -1575,6 +1582,10 @@ test('an update cannot blank model or style, set a quantitative method, or add a
     lookupKey: 'lookup-legacy',
     updatedAt: serverTimestamp(),
   }));
+  const legacyCard = await getDoc(doc(testerDb, 'fitTests/legacy'));
+  expect(legacyCard.data().style).toBeUndefined();
+  expect(legacyCard.data().model).toBeUndefined();
+  expect(legacyCard.data().verificationToken).toBe('tok-legacy');
   await assertFails(commitEdit(
     testerDb,
     'legacy',
@@ -1588,8 +1599,8 @@ test('an update cannot blank model or style, set a quantitative method, or add a
     'legacy',
     'tester-1',
     'edit-legacy',
-    { style: { oldValue: null, newValue: 'Filtering facepiece' } },
-    { style: 'Filtering facepiece' },
+    { style: { oldValue: null, newValue: 'Cup (molded)' } },
+    { style: 'Cup (molded)' },
   ));
   await assertSucceeds(commitEdit(
     testerDb,
@@ -1713,7 +1724,7 @@ test('a legacy missing or Locked to Qualitative method saves as Qualitative', as
       userId: 'tester-1',
       respiratorMfg: '3M',
       model: '1860',
-      style: 'Filtering facepiece',
+      style: 'Cup (molded)',
       maskSize: 'Regular',
     }],
     ['fitTests/legacy-factor', {

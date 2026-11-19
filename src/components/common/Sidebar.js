@@ -1,57 +1,38 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { countFacultyFitTests, countFitTestsForUser } from '../../services/firebaseDb';
-import { subscribeFitTestActivity } from '../../utils/fitTestActivity';
+import {
+  getFitTestListSnapshot,
+  loadFitTestList,
+  subscribeFitTestList,
+} from '../../services/fitTestListStore';
 import { isAccessWindowOpen, isAdminOrAbove, isFaculty } from '../../utils/roles';
 import './Sidebar.css';
-
-export const SIDEBAR_COUNT_CACHE_MS = 30 * 1000;
 
 const Sidebar = ({ currentPage, onNavigate, isOpen }) => {
   const { user } = useAuth();
   const isAdmin = isAdminOrAbove(user);
   const faculty = isFaculty(user);
-  const [testCount, setTestCount] = useState(null);
-  const countCache = useRef({ uid: '', at: 0 });
+  const [listSnapshot, setListSnapshot] = useState(getFitTestListSnapshot);
   const schoolKey = faculty ? (user?.school || '') : '';
+  const windowOpen = !faculty || isAccessWindowOpen(user);
+  const countReady = Boolean(user?.uid)
+    && windowOpen
+    && listSnapshot.loaded
+    && listSnapshot.key
+    && (
+      faculty
+        ? listSnapshot.key === `faculty:${user.uid}:${schoolKey}`
+        : listSnapshot.key === `tester:${user.uid}`
+    );
+  const testCount = countReady ? listSnapshot.count : null;
 
-  const loadTestCount = useCallback(async (force = false) => {
-    if (!user?.uid) {
-      setTestCount(null);
-      countCache.current = { uid: '', at: 0 };
-      return;
-    }
-
-    if (faculty && !isAccessWindowOpen(user)) {
-      setTestCount(null);
-      countCache.current = { uid: '', at: 0 };
-      return;
-    }
-
-    const cacheKey = faculty ? `${user.uid}:${schoolKey}` : user.uid;
-    const cached = countCache.current.uid === cacheKey
-      && Date.now() - countCache.current.at < SIDEBAR_COUNT_CACHE_MS;
-    if (!force && cached) return;
-
-    try {
-      const count = faculty
-        ? await countFacultyFitTests(user)
-        : await countFitTestsForUser(user.uid);
-      countCache.current = { uid: cacheKey, at: Date.now() };
-      setTestCount(count);
-    } catch (error) {
-      console.error('Error loading test results count:', error);
-      // Keep previous count if refresh fails.
-    }
-  }, [user, faculty, schoolKey]);
+  useEffect(() => subscribeFitTestList(setListSnapshot), []);
 
   useEffect(() => {
-    loadTestCount(false);
-  }, [currentPage, loadTestCount]);
-
-  useEffect(() => subscribeFitTestActivity(() => {
-    loadTestCount(true);
-  }), [loadTestCount]);
+    if (!user?.uid || !windowOpen) return undefined;
+    loadFitTestList(user);
+    return undefined;
+  }, [user, faculty, schoolKey, windowOpen, currentPage]);
 
   const testResultsLabel =
     testCount === null ? 'Test results' : `Test results (${testCount})`;

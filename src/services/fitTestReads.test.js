@@ -90,12 +90,26 @@ test('counts match the results list for 2 live records plus a 4-year-old issue d
   expect(writeBatch).not.toHaveBeenCalled();
 
   await expect(countFitTestsForUser('tester-1', { now: NOW })).resolves.toBe(2);
-  await expect(getFitTestCountsByUser('admin-1', ['tester-1', 'tester-2', 'tester-1'], { now: NOW })).resolves.toEqual({
-    'tester-1': 2,
-  });
 
   expect(where).toHaveBeenCalledWith('userId', '==', 'tester-1');
   expect(where).not.toHaveBeenCalledWith('createdAt', '<', expect.anything());
+});
+
+test('admin user counts match the results list filters, including a real zero', async () => {
+  getDoc.mockResolvedValue(userDoc('admin'));
+  getDocs.mockImplementation(async (q) => {
+    const userConstraint = (q?.args || []).find((arg) => arg?.kind === 'where' && arg.field === 'userId');
+    if (userConstraint?.value === 'tester-2') return { docs: [] };
+    return { docs: reproDocs };
+  });
+
+  await expect(getFitTestCountsByUser('admin-1', ['tester-1', 'tester-2', 'tester-1'], { now: NOW })).resolves.toEqual({
+    'tester-1': 2,
+    'tester-2': 0,
+  });
+  expect(getCountFromServer).not.toHaveBeenCalled();
+  expect(getDocs).toHaveBeenCalled();
+  expect(where).not.toHaveBeenCalledWith('deletedAt', '==', null);
 });
 
 test('getUserFitTests does not write lookup or verification documents', async () => {
@@ -639,20 +653,20 @@ test('medical restriction notes are stored apart from the fit test and preferred
       }),
     },
   ];
-  let reads = 0;
-  getDocs.mockImplementation(async () => {
-    reads += 1;
-    if (reads === 1) return { docs: fitDocs };
-    return {
-      docs: [{
-        id: 'ft-1',
-        data: () => ({
-          userId: 'tester-1',
-          testerMedicalRestrictionsReceived: true,
-          testerMedicalRestrictionsNote: 'side note',
-        }),
-      }],
-    };
+  const notes = {
+    docs: [{
+      id: 'ft-1',
+      data: () => ({
+        userId: 'tester-1',
+        testerMedicalRestrictionsReceived: true,
+        testerMedicalRestrictionsNote: 'side note',
+      }),
+    }],
+  };
+  getDocs.mockImplementation(async (q) => {
+    const path = q?.args?.[0]?.path;
+    if (path === 'fitTestMedicalNotes') return notes;
+    return { docs: fitDocs };
   });
 
   const listed = await getUserFitTests('tester-1', { now: NOW });
@@ -674,11 +688,10 @@ test('a failed medical-notes read still returns fit tests without inline notes',
       testerMedicalRestrictionsNote: 'legacy inline',
     }),
   }];
-  let reads = 0;
-  getDocs.mockImplementation(async () => {
-    reads += 1;
-    if (reads === 1) return { docs: fitDocs };
-    throw new Error('notes unavailable');
+  getDocs.mockImplementation(async (q) => {
+    const path = q?.args?.[0]?.path;
+    if (path === 'fitTestMedicalNotes') throw new Error('notes unavailable');
+    return { docs: fitDocs };
   });
 
   const listed = await getUserFitTests('tester-1', { now: NOW });

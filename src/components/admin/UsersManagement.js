@@ -7,11 +7,11 @@ import {
   USER_STATUSES,
   getAllUsers,
   getFitTestCountsByUser,
-  getPendingUsers,
   updateManagedUser,
   deleteManagedUser,
   updateUserApprovalStatus,
 } from '../../services/firebaseDb';
+import { visibleFitTestCountForUser } from '../../services/fitTestListStore';
 import { createManagedAuthUser } from '../../services/firebaseAuth';
 import {
   addMasterSchool,
@@ -280,6 +280,11 @@ const UsersManagement = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
   const [testCounts, setTestCounts] = useState({});
+  const [countingIds, setCountingIds] = useState(() => new Set());
+  const testCountsRef = useRef(testCounts);
+  const countingIdsRef = useRef(countingIds);
+  testCountsRef.current = testCounts;
+  countingIdsRef.current = countingIds;
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
@@ -293,8 +298,6 @@ const UsersManagement = () => {
   const [createForm, setCreateForm] = useState(EMPTY_CREATE_FORM);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [rosterView, setRosterView] = useState('all');
-  const [pendingUsers, setPendingUsers] = useState([]);
-  const [pendingLoading, setPendingLoading] = useState(false);
   const [pendingError, setPendingError] = useState('');
   const [pendingSuccess, setPendingSuccess] = useState('');
   const [approvingId, setApprovingId] = useState(null);
@@ -325,12 +328,7 @@ const UsersManagement = () => {
     setError('');
     try {
       const allUsers = await getAllUsers(user.uid);
-      const counts = await getFitTestCountsByUser(
-        user.uid,
-        allUsers.map((item) => item.id),
-      );
       setUsers(allUsers);
-      setTestCounts(counts || {});
 
       const drafts = {};
       allUsers.forEach((item) => {
@@ -359,6 +357,34 @@ const UsersManagement = () => {
     loadUsers();
   }, [loadUsers]);
 
+  const loadTestCount = useCallback(async (userId) => {
+    if (!user?.uid || !userId) return;
+    if (Object.prototype.hasOwnProperty.call(testCountsRef.current, userId)) return;
+    if (countingIdsRef.current.has(userId)) return;
+
+    const cached = visibleFitTestCountForUser(userId);
+    if (cached !== null) {
+      setTestCounts((prev) => ({ ...prev, [userId]: cached }));
+      return;
+    }
+
+    const nextCounting = new Set(countingIdsRef.current);
+    nextCounting.add(userId);
+    countingIdsRef.current = nextCounting;
+    setCountingIds(nextCounting);
+    try {
+      const counts = await getFitTestCountsByUser(user.uid, [userId]);
+      setTestCounts((prev) => ({ ...prev, [userId]: counts[userId] ?? 0 }));
+    } catch (err) {
+      setError(err.message || 'Failed to count test results. Please try again.');
+    } finally {
+      const remaining = new Set(countingIdsRef.current);
+      remaining.delete(userId);
+      countingIdsRef.current = remaining;
+      setCountingIds(remaining);
+    }
+  }, [user?.uid]);
+
   const refreshMasterSchools = useCallback(async () => {
     if (!user?.uid || !superAdmin) {
       setMasterSchools([]);
@@ -384,26 +410,6 @@ const UsersManagement = () => {
     [user, users],
   );
 
-  const loadPendingUsers = useCallback(async ({ quiet = false } = {}) => {
-    if (!user?.uid || !isAdmin) return;
-
-    if (!quiet) setPendingLoading(true);
-    setPendingError('');
-    try {
-      const nextUsers = await getPendingUsers(user.uid);
-      setPendingUsers(nextUsers);
-    } catch (err) {
-      console.error(err);
-      setPendingError(err.message || 'Failed to load pending users.');
-    } finally {
-      if (!quiet) setPendingLoading(false);
-    }
-  }, [user?.uid, isAdmin]);
-
-  useEffect(() => {
-    loadPendingUsers();
-  }, [loadPendingUsers]);
-
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
     return visibleUsers.filter((item) => {
@@ -419,10 +425,15 @@ const UsersManagement = () => {
   }, [visibleUsers, search, statusFilter, roleFilter]);
 
   const visiblePendingUsers = useMemo(() => (
-    filterUsersForActor(user, pendingUsers).filter((pendingUser) => (
-      canModifyManagedUser(user?.role, pendingUser.role || 'tester')
-    ))
-  ), [pendingUsers, user]);
+    filterUsersForActor(user, users)
+      .filter((pendingUser) => pendingUser.status === 'pending')
+      .filter((pendingUser) => canModifyManagedUser(user?.role, pendingUser.role || 'tester'))
+      .sort((a, b) => {
+        const dateA = a.requestedAt ? new Date(a.requestedAt).getTime() : 0;
+        const dateB = b.requestedAt ? new Date(b.requestedAt).getTime() : 0;
+        return dateA - dateB;
+      })
+  ), [users, user]);
 
   const handleDraftChange = (userId, field, value) => {
     const fixed = field === 'schools'
@@ -608,7 +619,6 @@ const UsersManagement = () => {
           ? 'User approved successfully.'
           : 'User rejected successfully.'
       );
-      await loadPendingUsers({ quiet: true });
     } catch (err) {
       setPendingError(err.message || 'Failed to update approval status.');
     } finally {
@@ -871,11 +881,10 @@ const UsersManagement = () => {
               className="users-secondary-button"
               onClick={() => {
                 loadUsers();
-                loadPendingUsers();
               }}
-              disabled={loading || pendingLoading || creating}
+              disabled={loading || creating}
             >
-              {loading || pendingLoading ? 'Refreshing...' : 'Refresh'}
+              {loading ? 'Refreshing...' : 'Refresh'}
             </button>
             <button
               type="button"
@@ -1270,7 +1279,7 @@ const UsersManagement = () => {
         {rosterView === 'pending' ? (
           <PendingApprovals
             users={visiblePendingUsers}
-            loading={pendingLoading}
+            loading={loading}
             error={pendingError}
             success={pendingSuccess}
             approvingId={approvingId}
@@ -1325,7 +1334,19 @@ const UsersManagement = () => {
                         Tester name: <strong>{item.name || '—'}</strong>
                       </p>
                       <p className="user-test-count">
-                        Test Results: <strong>{testCounts[item.id] || 0}</strong>
+                        Test Results:{' '}
+                        {Object.prototype.hasOwnProperty.call(testCounts, item.id) ? (
+                          <strong>{testCounts[item.id]}</strong>
+                        ) : (
+                          <button
+                            type="button"
+                            className="users-count-button"
+                            onClick={() => loadTestCount(item.id)}
+                            disabled={countingIds.has(item.id)}
+                          >
+                            {countingIds.has(item.id) ? 'Counting...' : 'Show count'}
+                          </button>
+                        )}
                       </p>
                       <p className="user-id">UID: {item.id}</p>
                     </div>

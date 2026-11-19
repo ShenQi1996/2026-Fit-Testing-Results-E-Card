@@ -2,14 +2,22 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { deleteField } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 import {
-  getUserFitTests,
-  getFacultyFitTests,
   deleteFitTest,
   updateFitTest,
   ensureFitTestVerification,
   markFitTestEmailSent,
 } from '../services/firebaseDb';
-import { isAccessWindowOpen, isFaculty } from '../utils/roles';
+import {
+  getFitTestListSnapshot,
+  loadFitTestList,
+  loadMoreFitTests,
+  patchFitTestListRecord,
+  removeFitTestListRecord,
+  subscribeFitTestList,
+  withSignatures,
+} from '../services/fitTestListStore';
+import { notifyFitTestActivity } from '../utils/fitTestActivity';
+import { isFaculty } from '../utils/roles';
 import { sendFitTestCard } from '../services/emailService';
 import { downloadFitTestPdf, previewFitTestPdf, schedulePdfPrefetch } from '../utils/pdfUtils';
 import { downloadFitTestsCsv } from '../utils/csvUtils';
@@ -25,10 +33,14 @@ import {
 
 export const useFitTestResults = () => {
   const { user } = useAuth();
-  const [fitTests, setFitTests] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [indexError, setIndexError] = useState(null);
+  const [listSnapshot, setListSnapshot] = useState(getFitTestListSnapshot);
+  const [actionError, setActionError] = useState('');
+  const fitTests = listSnapshot.records;
+  const loading = Boolean(user?.uid) && !listSnapshot.loaded;
+  const loadingMore = listSnapshot.loadingMore;
+  const hasMore = listSnapshot.hasMore;
+  const error = actionError || listSnapshot.error;
+  const indexError = listSnapshot.indexError;
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [resending, setResending] = useState(null);
@@ -50,47 +62,25 @@ export const useFitTestResults = () => {
 
   const loadFitTests = useCallback(async () => {
     if (!userId) return;
-    if (faculty && !isAccessWindowOpen(user)) {
-      setFitTests([]);
-      setLoading(false);
-      setError('');
-      setIndexError(null);
-      return;
-    }
-    try {
-      setLoading(true);
-      setError('');
-      setIndexError(null);
-      const tests = faculty
-        ? await getFacultyFitTests(user)
-        : await getUserFitTests(userId);
-      setFitTests(tests);
-    } catch (err) {
-      console.error('Error loading fit tests:', err);
+    setActionError('');
+    await loadFitTestList(user, { force: true });
+  }, [userId, user]);
 
-      if (err.message === 'FIREBASE_INDEX_REQUIRED') {
-        setIndexError({
-          url: err.indexUrl,
-          originalError: err.originalError,
-        });
-        setError('');
-      } else {
-        setError('Failed to load test results. Please try again.');
-        setIndexError(null);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [userId, faculty, facultySchoolsKey, user]);
+  const handleLoadMore = useCallback(async () => {
+    if (!userId) return;
+    await loadMoreFitTests(user);
+  }, [userId, user]);
+
+  useEffect(() => subscribeFitTestList(setListSnapshot), []);
 
   useEffect(() => {
     if (userId) {
-      loadFitTests();
+      setActionError('');
+      loadFitTestList(user);
     } else {
-      setLoading(false);
-      setError('You must be logged in to view test results.');
+      setActionError('You must be logged in to view test results.');
     }
-  }, [userId, loadFitTests]);
+  }, [userId, faculty, facultySchoolsKey, user]);
 
   const monthOptions = useMemo(() => {
     const map = new Map();
@@ -168,14 +158,14 @@ export const useFitTestResults = () => {
   const handleExportCsv = () => {
     try {
       setExportingCsv(true);
-      setError('');
+      setActionError('');
       const filename = downloadFitTestsCsv(filteredFitTests, buildExportFilenamePrefix());
       setSuccessMessage(
         `Exported ${filteredFitTests.length} result${filteredFitTests.length === 1 ? '' : 's'} to ${filename}.`
       );
     } catch (err) {
       console.error('Error exporting CSV:', err);
-      setError(err.message || 'Failed to export CSV. Please try again.');
+      setActionError(err.message || 'Failed to export CSV. Please try again.');
     } finally {
       setExportingCsv(false);
     }
@@ -213,7 +203,7 @@ export const useFitTestResults = () => {
     try {
       setDeleting(true);
       setSuccessMessage('');
-      setError('');
+      setActionError('');
 
       if (!user || !user.uid) {
         throw new Error('User must be logged in to delete records.');
@@ -224,13 +214,13 @@ export const useFitTestResults = () => {
       }
       await deleteFitTest(deleteConfirm.id, user.uid, reason);
 
-      setFitTests((prev) => prev.filter((test) => test.id !== deleteConfirm.id));
+      removeFitTestListRecord(deleteConfirm.id);
       setSuccessMessage(`Fit test record for "${deleteConfirm.clientName}" was hidden. The record is kept.`);
       setDeleteConfirm(null);
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
       console.error('Error deleting fit test:', err);
-      setError(err?.message || 'Failed to delete fit test record. Please try again.');
+      setActionError(err?.message || 'Failed to delete fit test record. Please try again.');
       setDeleteConfirm(null);
     } finally {
       setDeleting(false);
@@ -238,17 +228,11 @@ export const useFitTestResults = () => {
   };
 
   const resolveCardFormData = async (test) => {
-    let record = test;
+    let record = withSignatures(test);
     try {
-      record = await ensureFitTestVerification(test, user?.uid);
+      record = await ensureFitTestVerification(record, user?.uid);
       if (record?.verificationToken && record.verificationToken !== test.verificationToken) {
-        setFitTests((prev) =>
-          prev.map((item) =>
-            item.id === test.id
-              ? { ...item, verificationToken: record.verificationToken }
-              : item
-          )
-        );
+        patchFitTestListRecord(test.id, { verificationToken: record.verificationToken });
       }
     } catch (err) {
       console.error('Could not attach verification token:', err);
@@ -258,12 +242,12 @@ export const useFitTestResults = () => {
 
   const handlePreviewResultPdf = async (test) => {
     if (!test.clientName?.trim()) {
-      flashMessage(setError, 'Cannot preview PDF: client name is missing for this record.', 4000);
+      flashMessage(setActionError, 'Cannot preview PDF: client name is missing for this record.', 4000);
       return;
     }
     try {
       setPdfLoading({ id: test.id, action: 'preview' });
-      setError('');
+      setActionError('');
       // previewFitTestPdf opens the tab synchronously (Safari needs that inside
       // the click), then resolves the card data and the PDF chunk.
       const result = await previewFitTestPdf(() => resolveCardFormData(test));
@@ -272,7 +256,7 @@ export const useFitTestResults = () => {
       }
     } catch (err) {
       console.error('Error previewing PDF:', err);
-      flashMessage(setError, err.message || 'Failed to generate PDF preview. Please try again.', 5000);
+      flashMessage(setActionError, err.message || 'Failed to generate PDF preview. Please try again.', 5000);
     } finally {
       setPdfLoading(null);
     }
@@ -280,16 +264,16 @@ export const useFitTestResults = () => {
 
   const handleDownloadResultPdf = async (test) => {
     if (!test.clientName?.trim()) {
-      flashMessage(setError, 'Cannot download PDF: client name is missing for this record.', 4000);
+      flashMessage(setActionError, 'Cannot download PDF: client name is missing for this record.', 4000);
       return;
     }
     try {
       setPdfLoading({ id: test.id, action: 'download' });
-      setError('');
+      setActionError('');
       await downloadFitTestPdf(await resolveCardFormData(test));
     } catch (err) {
       console.error('Error downloading PDF:', err);
-      flashMessage(setError, err.message || 'Failed to download PDF. Please try again.', 5000);
+      flashMessage(setActionError, err.message || 'Failed to download PDF. Please try again.', 5000);
     } finally {
       setPdfLoading(null);
     }
@@ -297,7 +281,7 @@ export const useFitTestResults = () => {
 
   const handleResend = async (test) => {
     if (!test.recipientEmail) {
-      flashMessage(setError, 'Cannot resend: No recipient email found for this record.');
+      flashMessage(setActionError, 'Cannot resend: No recipient email found for this record.');
       return;
     }
 
@@ -306,17 +290,17 @@ export const useFitTestResults = () => {
     try {
       setResending(test.id);
       setSuccessMessage('');
-      setError('');
+      setActionError('');
       await sendFitTestCard(await resolveCardFormData(test));
       let sentAt = new Date().toISOString();
       try {
         sentAt = await markFitTestEmailSent(test.id);
       } catch (markError) {
         console.error('Error marking e-card as sent:', markError);
+        // markFitTestEmailSent notifies on success; keep lists fresh on failure too.
+        notifyFitTestActivity();
       }
-      setFitTests((prev) => prev.map((item) => (
-        item.id === test.id ? { ...item, emailSentAt: sentAt } : item
-      )));
+      patchFitTestListRecord(test.id, { emailSentAt: sentAt });
       flashMessage(
         setSuccessMessage,
         alreadySent
@@ -325,7 +309,7 @@ export const useFitTestResults = () => {
       );
     } catch (err) {
       console.error('Error resending e-card:', err);
-      flashMessage(setError, err.message || 'Failed to resend e-card. Please try again.', 5000);
+      flashMessage(setActionError, err.message || 'Failed to resend e-card. Please try again.', 5000);
     } finally {
       setResending(null);
     }
@@ -394,7 +378,7 @@ export const useFitTestResults = () => {
     try {
       setSaving(true);
       setSuccessMessage('');
-      setError('');
+      setActionError('');
 
       const keepQuantitative = original?.fitTestMethod === 'Quantitative';
       const updates = {
@@ -429,14 +413,11 @@ export const useFitTestResults = () => {
       // Local state mirrors the stored record, so a deleteField() sentinel
       // removes the field here instead of being kept and copied into a later
       // verification or lookup set().
-      setFitTests((prev) => prev.map((test) => {
-        if (test.id !== testId) return test;
-        const next = { ...test, ...updates };
-        Object.keys(next).forEach((field) => {
-          if (isDeleteFieldSentinel(next[field])) delete next[field];
-        });
-        return next;
-      }));
+      const patched = { ...(original || {}), ...updates };
+      Object.keys(patched).forEach((field) => {
+        if (isDeleteFieldSentinel(patched[field])) delete patched[field];
+      });
+      patchFitTestListRecord(testId, patched, { replace: true });
 
       setSuccessMessage('Record updated successfully!');
       setEditing(null);
@@ -445,7 +426,7 @@ export const useFitTestResults = () => {
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err) {
       console.error('Error updating fit test:', err);
-      flashMessage(setError, err.message || 'Failed to update record. Please try again.', 5000);
+      flashMessage(setActionError, err.message || 'Failed to update record. Please try again.', 5000);
     } finally {
       setSaving(false);
     }
@@ -482,6 +463,9 @@ export const useFitTestResults = () => {
     locationOptions,
     filteredFitTests,
     loadFitTests,
+    handleLoadMore,
+    hasMore,
+    loadingMore,
     handleExportCsv,
     toggleCardExpansion,
     isCardExpanded,

@@ -182,12 +182,10 @@ export const generateFitTestCard = (formData) => {
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Model:</td>
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${model || '[Model]'}</td>
                                 </tr>
-                                ${style ? `
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Style:</td>
-                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${escapeHtml(style)}</td>
+                                  <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${style ? escapeHtml(style) : '—'}</td>
                                 </tr>
-                                ` : ''}
                                 <tr>
                                   <td style="padding: 8px 0; color: #0B2D4A; font-weight: 600;">Fit Test Method:</td>
                                   <td style="padding: 8px 0; color: #4d6273; text-align: right; font-weight: 500;">${displayMethod}</td>

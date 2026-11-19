@@ -1,5 +1,6 @@
 module.exports = {
   testEnvironment: "node",
+  setupFilesAfterEnv: ["<rootDir>/test/resetSessionCaches.js"],
   testMatch: ["<rootDir>/src/**/*.test.js"],
   transform: {
     "\\.js$": [
