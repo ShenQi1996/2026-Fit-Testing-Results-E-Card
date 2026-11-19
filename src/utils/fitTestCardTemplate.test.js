@@ -62,7 +62,27 @@ test('the emailed e-card prints the respirator style, HTML-escaped', () => {
   expect(hostile).toContain('&lt;img src=x onerror=alert(1)&gt;');
 });
 
-test('a legacy e-card with no style has no Style row', () => {
-  const html = generateFitTestCard({ clientName: 'Ada' });
-  expect(html).not.toContain('Style:');
+test('the emailed e-card shows Style beside model, and a dash when a legacy card has none', () => {
+  const html = generateFitTestCard({
+    clientName: 'Ada',
+    respiratorMfg: '3M',
+    model: '1860',
+    maskSize: 'Regular',
+    style: 'Flat-fold',
+  });
+  expect(html).toContain('Respirator MFG:');
+  expect(html).toContain('Model:');
+  expect(html).toContain('Mask Size:');
+  expect(html.indexOf('Model:')).toBeLessThan(html.indexOf('Style:'));
+  expect(html).toContain('Flat-fold');
+
+  const legacy = generateFitTestCard({
+    clientName: 'Ada',
+    respiratorMfg: '3M',
+    model: '1860',
+    maskSize: 'Regular',
+  });
+  expect(legacy).toContain('Style:');
+  expect(legacy).toContain('—');
+  expect(legacy).not.toContain('[Style]');
 });
