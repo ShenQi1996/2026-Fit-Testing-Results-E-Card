@@ -62,3 +62,18 @@ test('card copies drop deleteField sentinels instead of copying them into set()'
     expect(copy.style).toBe('');
   });
 });
+
+test('public verify and resend copies never carry the renewal reminder fields', () => {
+  const record = {
+    ...legacy,
+    recipientEmail: 'ada@example.com',
+    renewalReminderOptIn: true,
+    renewalReminderSentFor: 2026,
+    renewalReminderSentAt: { seconds: 1 },
+  };
+  [toLookupCardData(record), toVerifyCardData(record)].forEach((copy) => {
+    expect(copy).not.toHaveProperty('renewalReminderOptIn');
+    expect(copy).not.toHaveProperty('renewalReminderSentFor');
+    expect(copy).not.toHaveProperty('renewalReminderSentAt');
+  });
+});

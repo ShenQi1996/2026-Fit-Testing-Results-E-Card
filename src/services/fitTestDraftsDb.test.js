@@ -114,3 +114,10 @@ test('deleting a draft hard deletes its doc', async () => {
   await deleteFitTestDraft('');
   expect(deleteDoc).toHaveBeenCalledTimes(1);
 });
+
+test('the renewal reminder opt-in is a draft field and defaults to false', () => {
+  expect(DRAFT_FORM_FIELDS).toContain('renewalReminderOptIn');
+  expect(toDraftFields(createInitialFormData()).renewalReminderOptIn).toBe(false);
+  expect(toDraftFields(createInitialFormData({ renewalReminderOptIn: true })).renewalReminderOptIn).toBe(true);
+  expect(draftToFormFields({ renewalReminderOptIn: true }).renewalReminderOptIn).toBe(true);
+});

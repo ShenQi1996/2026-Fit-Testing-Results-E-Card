@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Optional "Remind me next year when my fit test is due" box under Optional consent on the card form, unchecked by default and saved on the fit test as `renewalReminderOptIn`. Drafts keep it, the result card shows it, and the public verify and resend copies do not carry it
+- Daily renewal reminder job (`.github/workflows/renewal-reminders.yml`, 09:00 UTC, plus a manual run that is a dry run by default) running `scripts/send-renewal-reminders.js`. It emails opted-in workers whose passed, sent, not-deleted test is 335 to 365 days old through a new EmailJS renewal template, skips anyone with a later test on file, marks each record with `renewalReminderSentFor` and `renewalReminderSentAt` so it sends once, caps a run at 50 emails about one per second, and only emails `@example.com` on staging. Scheduled runs start only once the workflow is on `main`, and it does nothing until the `FIREBASE_SERVICE_ACCOUNT`, `EMAILJS_SERVICE_ID`, `EMAILJS_RENEWAL_TEMPLATE_ID`, and `EMAILJS_PUBLIC_KEY` secrets exist (`EMAILJS_PRIVATE_KEY` optional). Setup steps are in `docs/renewal-reminders.md`
+- `firestore.rules`: `renewalReminderOptIn` must be a bool on fit test create and on drafts, and a fit test create cannot set `renewalReminderSentFor` or `renewalReminderSentAt`. Edits and resends still cannot change these fields. Republish staging rules before deploying this build
+
 ### Changed
 
 - The app bundle is split by page. The form, results, users, account, verify, and resend pages each load their own chunk the first time they open, behind a small CSS loading indicator; a chunk that fails to download shows a reload message instead of a blank page. Login and the home page stay in the main bundle

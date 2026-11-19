@@ -30,6 +30,7 @@ export const hasConsentOrSignature = (test) => Boolean(
   test.verificationConsentConfirmed !== undefined ||
   test.optionalOrganizationRelease !== undefined ||
   test.optionalMarketingEmail !== undefined ||
+  test.renewalReminderOptIn !== undefined ||
   test.testerAttestationProtocolFollowed !== undefined ||
   test.testerAttestationConsentWitnessed !== undefined ||
   test.testerAttestationMedicalClearanceVerified !== undefined ||
