@@ -50,6 +50,7 @@ export const INITIAL_FORM_DATA = {
   optionalOrganizationRelease: false,
   organizationReleaseRecipient: '',
   optionalMarketingEmail: false,
+  renewalReminderOptIn: false,
   testerAttestationProtocolFollowed: true,
   testerAttestationConsentWitnessed: true,
   testerAttestationRespiratorMatchesRecord: true,

@@ -907,12 +907,22 @@ service cloud.firestore {
           && fitFactorAbsent();
       }
 
+      // Optional "remind me next year" choice, recorded at signing. Bool only;
+      // a missing field means no. The reminder job (Admin SDK) writes the sent
+      // markers, so a client create cannot preset them. Updates cannot change
+      // any of these fields: they are not edit-history fields or housekeeping.
+      function renewalReminderFieldsOkOnCreate() {
+        return request.resource.data.get('renewalReminderOptIn', false) is bool
+          && !request.resource.data.keys().hasAny(['renewalReminderSentFor', 'renewalReminderSentAt']);
+      }
+
       allow create: if
         isSignedIn() &&
         isApproved() &&
         !isFacultyRole() &&
         request.auth.uid == request.resource.data.userId
         && fitTestSchoolOkOnCreate()
+        && renewalReminderFieldsOkOnCreate()
         && request.resource.data.deletedAt == null
         && !request.resource.data.keys().hasAny(['deletedBy', 'deleteReason'])
         && respiratorRecordOk()
@@ -1249,6 +1259,7 @@ service cloud.firestore {
           && data.updatedAt == request.time
           && data.createdAt is timestamp
           && data.get('fitTestMethod', 'Qualitative') == 'Qualitative'
+          && data.get('renewalReminderOptIn', false) is bool
           && (
             !data.keys().hasAny(['testerMedicalRestrictionsNote'])
             || (

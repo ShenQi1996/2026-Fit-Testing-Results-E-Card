@@ -1,0 +1,63 @@
+name: Renewal reminders
+# Emails workers who ticked "Remind me next year" about 30 days before their
+# yearly fit test is due. See docs/renewal-reminders.md.
+#
+# GitHub runs scheduled workflows only from the default branch (main), and the
+# Run workflow button only appears once the file is on main too. Nothing here
+# runs from staging or a pull request; the daily run starts after merge to main.
+on:
+  schedule:
+    # 09:00 UTC daily (4 AM New York in winter, 5 AM in summer).
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: count and list masked emails only, send and write nothing"
+        type: boolean
+        default: true
+concurrency:
+  group: renewal-reminders
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      EMAILJS_SERVICE_ID: ${{ secrets.EMAILJS_SERVICE_ID }}
+      EMAILJS_RENEWAL_TEMPLATE_ID: ${{ secrets.EMAILJS_RENEWAL_TEMPLATE_ID }}
+      EMAILJS_PUBLIC_KEY: ${{ secrets.EMAILJS_PUBLIC_KEY }}
+      EMAILJS_PRIVATE_KEY: ${{ secrets.EMAILJS_PRIVATE_KEY }}
+      # Scheduled runs send. A manual run is a dry run unless dry_run is unticked.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+    steps:
+      - name: Check secrets
+        id: secrets
+        run: |
+          missing=""
+          [ -n "$FIREBASE_SERVICE_ACCOUNT" ] || missing="$missing FIREBASE_SERVICE_ACCOUNT"
+          if [ "$DRY_RUN" != "1" ]; then
+            [ -n "$EMAILJS_SERVICE_ID" ] || missing="$missing EMAILJS_SERVICE_ID"
+            [ -n "$EMAILJS_RENEWAL_TEMPLATE_ID" ] || missing="$missing EMAILJS_RENEWAL_TEMPLATE_ID"
+            [ -n "$EMAILJS_PUBLIC_KEY" ] || missing="$missing EMAILJS_PUBLIC_KEY"
+          fi
+          if [ -n "$missing" ]; then
+            echo "Renewal reminders are not set up yet. Missing secrets:$missing. Skipping; nothing was sent."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ready == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+        if: steps.secrets.outputs.ready == 'true'
+      - name: Send renewal reminders
+        if: steps.secrets.outputs.ready == 'true'
+        run: node scripts/send-renewal-reminders.js
