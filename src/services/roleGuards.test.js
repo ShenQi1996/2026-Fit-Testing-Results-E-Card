@@ -6,6 +6,7 @@ import {
   getPendingUsers,
   setUserRole,
   updateManagedUser,
+  clearUserProfileCache,
 } from './firebaseDb';
 
 const users = {};
@@ -320,11 +321,13 @@ test('scoped admin lists query testers and faculty in their own schools', async 
 
   getDocs.mockClear();
   users['admin-1'] = { ...users['admin-1'], schools: [] };
+  clearUserProfileCache('admin-1');
   await expect(getAllUsers('admin-1')).resolves.toEqual([]);
   expect(getDocs).not.toHaveBeenCalled();
 
   const manySchools = Array.from({ length: 31 }, (_, index) => `School ${index}`);
   users['admin-1'] = { ...users['admin-1'], schools: manySchools };
+  clearUserProfileCache('admin-1');
   getDocs.mockResolvedValue({ forEach() {} });
   await getAllUsers('admin-1');
   const inCalls = where.mock.calls.filter((call) => call[0] === 'school' && call[1] === 'in');

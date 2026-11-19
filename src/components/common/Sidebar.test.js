@@ -1,17 +1,28 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { useAuth } from '../../context/AuthContext';
-import { countFacultyFitTests, countFitTestsForUser } from '../../services/firebaseDb';
+import { getFacultyFitTests, getUserFitTestsPage } from '../../services/firebaseDb';
 import { notifyFitTestActivity } from '../../utils/fitTestActivity';
-import Sidebar, { SIDEBAR_COUNT_CACHE_MS } from './Sidebar';
+import { clearFitTestListStore } from '../../services/fitTestListStore';
+import Sidebar from './Sidebar';
 
 jest.mock('../../context/AuthContext', () => ({
   useAuth: jest.fn(),
 }));
 
 jest.mock('../../services/firebaseDb', () => ({
-  countFitTestsForUser: jest.fn(() => Promise.resolve(2)),
-  countFacultyFitTests: jest.fn(() => Promise.resolve(4)),
+  TESTER_RESULTS_PAGE_SIZE: 25,
+  getUserFitTestsPage: jest.fn(() => Promise.resolve({
+    records: [{ id: 'ft-1' }, { id: 'ft-2' }],
+    hasMore: false,
+    cursor: null,
+  })),
+  getFacultyFitTests: jest.fn(() => Promise.resolve([
+    { id: 'ft-a' },
+    { id: 'ft-b' },
+    { id: 'ft-c' },
+    { id: 'ft-d' },
+  ])),
 }));
 
 const renderSidebar = async (currentPage) => {
@@ -40,37 +51,28 @@ const updatePage = async (renderer, currentPage) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  clearFitTestListStore();
   useAuth.mockReturnValue({ user: { uid: 'tester-1', role: 'tester' } });
 });
 
-test('the sidebar recounts after a fit test is saved and skips navigation inside 30 seconds', async () => {
-  expect(SIDEBAR_COUNT_CACHE_MS).toBe(30 * 1000);
-  const now = jest.spyOn(Date, 'now');
-  let clock = 1_700_000_000_000;
-  now.mockImplementation(() => clock);
+test('the sidebar recounts after a fit test is saved and skips navigation refetch', async () => {
+  const renderer = await renderSidebar('form');
 
-  try {
-    const renderer = await renderSidebar('form');
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(1);
+  expect(getUserFitTestsPage).toHaveBeenCalledWith('tester-1', expect.objectContaining({
+    limit: 25,
+  }));
+  expect(JSON.stringify(renderer.toJSON())).toContain('Test results (2)');
 
-    expect(countFitTestsForUser).toHaveBeenCalledTimes(1);
-    expect(countFitTestsForUser).toHaveBeenCalledWith('tester-1');
-    expect(JSON.stringify(renderer.toJSON())).toContain('Test results (2)');
+  await updatePage(renderer, 'results');
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(1);
 
-    await updatePage(renderer, 'results');
-    expect(countFitTestsForUser).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      notifyFitTestActivity();
-      await Promise.resolve();
-    });
-    expect(countFitTestsForUser).toHaveBeenCalledTimes(2);
-
-    clock += SIDEBAR_COUNT_CACHE_MS;
-    await updatePage(renderer, 'form');
-    expect(countFitTestsForUser).toHaveBeenCalledTimes(3);
-  } finally {
-    now.mockRestore();
-  }
+  await act(async () => {
+    notifyFitTestActivity();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(getUserFitTestsPage).toHaveBeenCalledTimes(2);
 });
 
 test('faculty see results only and count by school', async () => {
@@ -82,9 +84,9 @@ test('faculty see results only and count by school', async () => {
   expect(json).not.toContain('Send e-card');
   expect(json).not.toContain('Users');
   expect(json).toContain('Test results (4)');
-  expect(countFacultyFitTests).toHaveBeenCalledWith(expect.objectContaining({
+  expect(getFacultyFitTests).toHaveBeenCalledWith(expect.objectContaining({
     role: 'faculty',
     school: 'Helene College of Nursing',
-  }));
-  expect(countFitTestsForUser).not.toHaveBeenCalled();
+  }), {});
+  expect(getUserFitTestsPage).not.toHaveBeenCalled();
 });

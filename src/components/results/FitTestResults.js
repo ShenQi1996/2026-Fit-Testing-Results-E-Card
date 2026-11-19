@@ -3,6 +3,7 @@ import { useFitTestResults } from '../../hooks/useFitTestResults';
 import { groupTestsByMonth } from './resultsUtils';
 import ResultsFilters from './ResultsFilters';
 import ResultCard from './ResultCard';
+import { withSignatures } from '../../services/fitTestListStore';
 import './FitTestResults.css';
 
 const FitTestResults = () => {
@@ -33,6 +34,9 @@ const FitTestResults = () => {
     locationOptions,
     filteredFitTests,
     loadFitTests,
+    handleLoadMore,
+    hasMore,
+    loadingMore,
     handleExportCsv,
     toggleCardExpansion,
     isCardExpanded,
@@ -213,7 +217,7 @@ const FitTestResults = () => {
                   {monthGroup.tests.map((test) => (
                     <ResultCard
                       key={test.id}
-                      test={test}
+                      test={isCardExpanded(test.id) ? withSignatures(test) : test}
                       user={user}
                       editing={editing}
                       editData={editData}
@@ -238,6 +242,19 @@ const FitTestResults = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {hasMore && (
+          <div className="results-load-more">
+            <button
+              type="button"
+              className="load-more-button"
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading more...' : 'Load more'}
+            </button>
           </div>
         )}
 

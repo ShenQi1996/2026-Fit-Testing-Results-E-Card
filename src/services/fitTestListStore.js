@@ -1,0 +1,398 @@
+import {
+  getFacultyFitTests,
+  getUserFitTestsPage,
+  TESTER_RESULTS_PAGE_SIZE,
+} from './firebaseDb';
+import { subscribeFitTestActivity } from '../utils/fitTestActivity';
+import { isAccessWindowOpen, isFaculty } from '../utils/roles';
+
+export { TESTER_RESULTS_PAGE_SIZE };
+
+// Stop filling a visible page after this many raw query batches so a long
+// stretch of hidden (deleted or past-retention) records cannot loop forever.
+export const TESTER_RESULTS_FILL_MAX_BATCHES = 8;
+
+const SIGNATURE_FIELDS = ['signatureDataUrl', 'testerSignatureDataUrl'];
+
+const emptySnapshot = () => ({
+  key: '',
+  records: [],
+  hasMore: false,
+  cursor: null,
+  loading: false,
+  loadingMore: false,
+  error: '',
+  indexError: null,
+  count: 0,
+  loaded: false,
+});
+
+let snapshot = emptySnapshot();
+let inflight = null;
+let rememberedUser = null;
+const signaturesById = new Map();
+const listeners = new Set();
+// Visible records already fetched past the current page, used so a fill
+// batch that overshoots 25 is not dropped (no gaps on Load more).
+let leftoverRecords = [];
+
+const listKeyFor = (user) => {
+  if (!user?.uid) return '';
+  if (isFaculty(user)) return `faculty:${user.uid}:${user.school || ''}`;
+  return `tester:${user.uid}`;
+};
+
+const emit = () => {
+  listeners.forEach((listener) => {
+    try {
+      listener(snapshot);
+    } catch (error) {
+      console.error('Fit test list listener failed:', error);
+    }
+  });
+};
+
+const setSnapshot = (next) => {
+  snapshot = {
+    ...snapshot,
+    ...next,
+    count: Array.isArray(next.records) ? next.records.length : snapshot.records.length,
+  };
+  if (Array.isArray(next.records)) {
+    snapshot.count = next.records.length;
+  }
+  emit();
+};
+
+const splitSignatures = (record) => {
+  const rest = { ...record };
+  const signatures = {};
+  SIGNATURE_FIELDS.forEach((field) => {
+    if (rest[field]) {
+      signatures[field] = rest[field];
+      delete rest[field];
+      if (field === 'signatureDataUrl') rest.hasSignatureData = true;
+      if (field === 'testerSignatureDataUrl') rest.hasTesterSignatureData = true;
+    }
+  });
+  if (Object.keys(signatures).length > 0) {
+    signaturesById.set(record.id, { ...(signaturesById.get(record.id) || {}), ...signatures });
+  }
+  return rest;
+};
+
+const stashRecords = (records, { append = false } = {}) => {
+  const mapped = records.map(splitSignatures);
+  const nextRecords = append
+    ? [...snapshot.records, ...mapped.filter((record) => !snapshot.records.some((item) => item.id === record.id))]
+    : mapped;
+  return nextRecords;
+};
+
+export const getFitTestListSnapshot = () => snapshot;
+
+export const subscribeFitTestList = (listener) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+
+export const withSignatures = (record) => {
+  if (!record?.id) return record;
+  const signatures = signaturesById.get(record.id);
+  return signatures ? { ...record, ...signatures } : record;
+};
+
+export const clearFitTestListStore = () => {
+  snapshot = emptySnapshot();
+  inflight = null;
+  rememberedUser = null;
+  signaturesById.clear();
+  leftoverRecords = [];
+};
+
+export const visibleFitTestCountForUser = (userId) => {
+  if (!userId || snapshot.key !== `tester:${userId}` || !snapshot.loaded) return null;
+  if (snapshot.hasMore || leftoverRecords.length > 0) return null;
+  return snapshot.count;
+};
+
+const collectVisiblePage = async (userId, {
+  now,
+  cursor,
+  target = TESTER_RESULTS_PAGE_SIZE,
+  existingIds = [],
+  maxBatches = TESTER_RESULTS_FILL_MAX_BATCHES,
+} = {}) => {
+  const collected = [];
+  const seen = new Set(existingIds);
+  let nextCursor = cursor;
+  let hasMore = true;
+  let batches = 0;
+
+  const takeFromLeftover = () => {
+    const kept = [];
+    leftoverRecords.forEach((record) => {
+      if (!record?.id || seen.has(record.id)) return;
+      seen.add(record.id);
+      if (collected.length < target) collected.push(record);
+      else kept.push(record);
+    });
+    leftoverRecords = kept;
+  };
+
+  takeFromLeftover();
+
+  while (collected.length < target && hasMore && batches < maxBatches) {
+    const page = await getUserFitTestsPage(userId, {
+      now,
+      limit: TESTER_RESULTS_PAGE_SIZE,
+      cursor: nextCursor,
+    });
+    batches += 1;
+    hasMore = Boolean(page.hasMore);
+    nextCursor = page.cursor || nextCursor || null;
+    (page.records || []).forEach((record) => {
+      if (!record?.id || seen.has(record.id)) return;
+      seen.add(record.id);
+      if (collected.length < target) collected.push(record);
+      else leftoverRecords.push(record);
+    });
+    if (!page.hasMore && !page.cursor) break;
+  }
+
+  return {
+    records: collected,
+    hasMore: leftoverRecords.length > 0 || hasMore,
+    cursor: nextCursor,
+  };
+};
+
+const cursorKey = (cursor) => {
+  if (!cursor) return '';
+  return cursor.id || String(cursor);
+};
+
+// Keep filling visible pages (each still capped at 8 raw batches) until
+// `target` records are collected, or until the end when loadAll is set.
+const collectVisibleUntil = async (userId, {
+  now,
+  cursor,
+  target = TESTER_RESULTS_PAGE_SIZE,
+  existingIds = [],
+  loadAll = false,
+} = {}) => {
+  const collected = [];
+  const seen = new Set(existingIds);
+  let nextCursor = cursor;
+  let hasMore = true;
+
+  while (hasMore && (loadAll || collected.length < target)) {
+    const pageTarget = loadAll
+      ? TESTER_RESULTS_PAGE_SIZE
+      : Math.min(TESTER_RESULTS_PAGE_SIZE, target - collected.length);
+    if (!loadAll && pageTarget <= 0) break;
+
+    const beforeCursor = nextCursor;
+    const beforeCount = collected.length;
+    const page = await collectVisiblePage(userId, {
+      now,
+      cursor: nextCursor,
+      target: pageTarget,
+      existingIds: [...seen],
+    });
+    (page.records || []).forEach((record) => {
+      if (!record?.id || seen.has(record.id)) return;
+      seen.add(record.id);
+      collected.push(record);
+    });
+    hasMore = Boolean(page.hasMore);
+    nextCursor = page.cursor || nextCursor || null;
+
+    if (!hasMore) break;
+    if (collected.length === beforeCount && cursorKey(page.cursor) === cursorKey(beforeCursor)) {
+      break;
+    }
+  }
+
+  return {
+    records: collected,
+    hasMore: leftoverRecords.length > 0 || hasMore,
+    cursor: nextCursor,
+  };
+};
+
+const loadErrorState = (error) => {
+  if (error?.message === 'FIREBASE_INDEX_REQUIRED') {
+    return {
+      indexError: {
+        url: error.indexUrl,
+        originalError: error.originalError,
+      },
+      error: '',
+    };
+  }
+  return {
+    error: 'Failed to load test results. Please try again.',
+    indexError: null,
+  };
+};
+
+const fetchList = async (user, { force = false, more = false, now } = {}) => {
+  const key = listKeyFor(user);
+  if (!user?.uid || !key) {
+    clearFitTestListStore();
+    emit();
+    return snapshot;
+  }
+
+  if (isFaculty(user) && !isAccessWindowOpen(user, now instanceof Date ? now : new Date())) {
+    rememberedUser = user;
+    signaturesById.clear();
+    leftoverRecords = [];
+    setSnapshot({
+      ...emptySnapshot(),
+      key,
+      loading: false,
+      loaded: true,
+    });
+    return snapshot;
+  }
+
+  rememberedUser = user;
+
+  const previousVisibleCount = snapshot.key === key ? snapshot.records.length : 0;
+  const reloadUntilEnd = Boolean(
+    force && snapshot.key === key && snapshot.loaded && !snapshot.hasMore
+  );
+
+  // Join an in-flight reload (including activity invalidation) before
+  // returning the cached snapshot, so callers wait for the restored depth.
+  if (inflight && snapshot.key === key && !force) {
+    return inflight;
+  }
+
+  if (!force && !more && snapshot.key === key && snapshot.loaded && !snapshot.loading) {
+    return snapshot;
+  }
+
+  if (more && (snapshot.loading || snapshot.loadingMore || !snapshot.hasMore || snapshot.key !== key)) {
+    return snapshot;
+  }
+
+  const isMore = Boolean(more && snapshot.key === key && snapshot.hasMore);
+  const keepRecords = isMore || snapshot.key === key;
+  const showLoading = !isMore && !keepRecords;
+  setSnapshot({
+    key,
+    loading: showLoading,
+    loadingMore: isMore,
+    error: isMore || force ? snapshot.error : '',
+    indexError: isMore || force ? snapshot.indexError : null,
+    records: keepRecords ? snapshot.records : [],
+    loaded: keepRecords ? snapshot.loaded : false,
+  });
+
+  const run = (async () => {
+    try {
+      if (isFaculty(user)) {
+        const records = await getFacultyFitTests(user, now instanceof Date ? { now } : {});
+        signaturesById.clear();
+        leftoverRecords = [];
+        setSnapshot({
+          key,
+          records: stashRecords(records),
+          hasMore: false,
+          cursor: null,
+          loading: false,
+          loadingMore: false,
+          loaded: true,
+          error: '',
+          indexError: null,
+        });
+        return snapshot;
+      }
+
+      if (!isMore) {
+        signaturesById.clear();
+        leftoverRecords = [];
+      }
+      const shouldRestoreDepth = Boolean(
+        force && (reloadUntilEnd || previousVisibleCount > TESTER_RESULTS_PAGE_SIZE)
+      );
+      const page = shouldRestoreDepth
+        ? await collectVisibleUntil(user.uid, {
+          now,
+          cursor: undefined,
+          target: reloadUntilEnd ? TESTER_RESULTS_PAGE_SIZE : previousVisibleCount,
+          existingIds: [],
+          loadAll: reloadUntilEnd,
+        })
+        : await collectVisiblePage(user.uid, {
+          now,
+          cursor: isMore ? snapshot.cursor : undefined,
+          target: TESTER_RESULTS_PAGE_SIZE,
+          existingIds: isMore ? snapshot.records.map((record) => record.id) : [],
+        });
+      setSnapshot({
+        key,
+        records: stashRecords(page.records, { append: isMore }),
+        hasMore: page.hasMore,
+        cursor: page.cursor,
+        loading: false,
+        loadingMore: false,
+        loaded: true,
+        error: '',
+        indexError: null,
+      });
+      return snapshot;
+    } catch (error) {
+      console.error('Error loading fit tests:', error);
+      setSnapshot({
+        loading: false,
+        loadingMore: false,
+        loaded: true,
+        ...loadErrorState(error),
+      });
+      return snapshot;
+    } finally {
+      if (inflight === run) inflight = null;
+    }
+  })();
+
+  inflight = run;
+  return run;
+};
+
+export const loadFitTestList = (user, options = {}) => fetchList(user, options);
+
+export const loadMoreFitTests = (user, options = {}) => fetchList(user, { ...options, more: true });
+
+export const patchFitTestListRecord = (id, updates, { replace = false } = {}) => {
+  if (!id) return;
+  setSnapshot({
+    records: snapshot.records.map((record) => (
+      record.id === id
+        ? splitSignatures(replace ? { id, ...updates } : { ...record, ...updates })
+        : record
+    )),
+  });
+};
+
+export const removeFitTestListRecord = (id) => {
+  if (!id) return;
+  signaturesById.delete(id);
+  setSnapshot({
+    records: snapshot.records.filter((record) => record.id !== id),
+  });
+};
+
+subscribeFitTestActivity(() => {
+  if (!rememberedUser?.uid) {
+    snapshot = emptySnapshot();
+    signaturesById.clear();
+    leftoverRecords = [];
+    emit();
+    return;
+  }
+  fetchList(rememberedUser, { force: true });
+});

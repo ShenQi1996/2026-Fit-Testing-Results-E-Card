@@ -194,9 +194,10 @@ const cardText = (card) => card.findAllByType('p').map((node) => node.children.j
 
 const renderPage = async (user, pendingUsers = USERS.filter((item) => item.status === 'pending'), users = USERS) => {
   useAuth.mockReturnValue({ user });
-  getAllUsers.mockResolvedValue(users);
+  const byId = new Map(users.map((item) => [item.id, item]));
+  pendingUsers.forEach((item) => byId.set(item.id, item));
+  getAllUsers.mockResolvedValue([...byId.values()]);
   getFitTestCountsByUser.mockResolvedValue({});
-  getPendingUsers.mockResolvedValue(pendingUsers);
   let renderer;
   await act(async () => {
     renderer = TestRenderer.create(<UsersManagement />);
@@ -258,6 +259,53 @@ const fillCreateIdentity = async (renderer, {
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+test('Users page does not count results until Show count is clicked, and a zero is shown as 0', async () => {
+  const testers = [
+    {
+      id: 'tester-1',
+      name: 'Tess',
+      email: 'tess@example.com',
+      role: 'tester',
+      status: 'approved',
+      school: HELENE,
+    },
+    {
+      id: 'tester-2',
+      name: 'Other School',
+      email: 'other-school@example.com',
+      role: 'tester',
+      status: 'approved',
+      school: SECOND,
+    },
+  ];
+  const renderer = await renderPage({
+    uid: 'super-1',
+    role: 'superadmin',
+    email: 'sam@example.com',
+  }, [], testers);
+  expect(getFitTestCountsByUser).not.toHaveBeenCalled();
+  expect(buttonWithText(renderer, 'Show count')).toBeTruthy();
+  expect(renderer.root.findAllByProps({ className: 'user-test-count' }).every((node) => (
+    !node.findAllByType('strong').length
+  ))).toBe(true);
+
+  getFitTestCountsByUser.mockResolvedValue({ 'tester-1': 0, 'tester-2': 48 });
+  await act(async () => {
+    cardFor(renderer, 'tester-1').findByProps({ className: 'users-count-button' }).props.onClick();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(getFitTestCountsByUser).toHaveBeenCalledTimes(1);
+  expect(getFitTestCountsByUser).toHaveBeenCalledWith('super-1', ['tester-1']);
+  const tessCount = cardFor(renderer, 'tester-1').findByProps({ className: 'user-test-count' });
+  expect(tessCount.findByType('strong').children.join('')).toBe('0');
+  expect(cardFor(renderer, 'tester-2').findAllByType('button').some((button) => (
+    button.children.includes('Show count')
+  ))).toBe(true);
 });
 
 test('role choices are tester or admin, and an existing superadmin stays read-only', async () => {
@@ -411,7 +459,8 @@ test('pending approval tab lists users an admin can approve and hides other admi
   const admin = await renderPage(heleneAdmin, PENDING_USERS);
   await openPendingTab(admin);
 
-  expect(getPendingUsers).toHaveBeenCalledWith('admin-1');
+  expect(getAllUsers).toHaveBeenCalledWith('admin-1');
+  expect(getPendingUsers).not.toHaveBeenCalled();
   expect(pendingCards(admin).map(cardText).join('\n')).toContain('tess@example.com');
   expect(pendingCards(admin).map(cardText).join('\n')).not.toContain('pat@example.com');
   expect(admin.root.findByProps({ className: 'users-filters' }).props.hidden).toBe(true);
@@ -445,9 +494,6 @@ test('approve and reject on the pending tab call updateUserApprovalStatus', asyn
   await openPendingTab(renderer);
 
   const tessCard = pendingCards(renderer).find((card) => cardText(card).includes('tess@example.com'));
-  getPendingUsers.mockResolvedValueOnce(
-    PENDING_USERS.filter((item) => item.id !== 'tester-1')
-  );
   const approve = tessCard.findAllByType('button').find((button) => button.children.includes('Approve'));
   await act(async () => {
     approve.props.onClick();

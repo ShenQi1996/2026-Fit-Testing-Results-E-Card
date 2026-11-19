@@ -24,7 +24,9 @@ import {
   getUserAccessProfile,
   createManagedUserProfile,
   normalizeUserStatus,
+  clearUserProfileCache,
 } from './firebaseDb';
+import { clearFitTestListStore } from './fitTestListStore';
 import {
   isAdminOrAbove,
   isSuperAdmin,
@@ -236,8 +238,10 @@ export const signInWithGoogle = async () => {
  */
 export const logout = async () => {
   try {
+    clearUserProfileCache();
+    clearFitTestListStore();
     await signOut(auth);
-  } catch (error) {
+  } catch (_error) {
     throw new Error('Failed to sign out. Please try again.');
   }
 };
@@ -311,6 +315,8 @@ export const onAuthStateChange = (callback) => {
         callback(null);
       }
     } else {
+      clearUserProfileCache();
+      clearFitTestListStore();
       callback(null);
     }
   });

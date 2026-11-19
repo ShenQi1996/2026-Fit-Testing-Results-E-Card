@@ -15,7 +15,7 @@ import {
   getUserSolutionProfiles,
   saveUserSolutionProfile,
 } from '../services/firebaseDb';
-import { getMasterSchoolRecord, listMasterSchoolRecords } from '../services/masterSchools';
+import { listMasterSchoolRecords } from '../services/masterSchools';
 import {
   deleteFitTestDraft,
   draftToFormFields,
@@ -122,14 +122,34 @@ export const useFitTestForm = () => {
     }
     let cancelled = false;
     setMasterSchoolsLoading(true);
-    const loadRecords = superAdmin
-      ? listMasterSchoolRecords()
-      : Promise.all(schoolsForSignedInUser(user, []).map((name) => getMasterSchoolRecord(name)));
-    loadRecords
+    listMasterSchoolRecords()
       .then((records) => {
         if (cancelled) return;
-        setSchoolRecords(records);
-        setMasterSchools(superAdmin ? records.map((record) => record.name) : []);
+        if (superAdmin) {
+          setSchoolRecords(records);
+          setMasterSchools(records.map((record) => record.name));
+          return;
+        }
+        const allowed = schoolsForSignedInUser(user, []);
+        const found = new Set();
+        const scoped = [];
+        records.forEach((record) => {
+          if (allowed.includes(record.name)) {
+            scoped.push(record);
+            found.add(record.name);
+          }
+        });
+        allowed.forEach((name) => {
+          if (!found.has(name)) {
+            scoped.push({
+              name,
+              programAdministratorName: '',
+              programAdministratorContact: '',
+            });
+          }
+        });
+        setSchoolRecords(scoped);
+        setMasterSchools([]);
       })
       .catch((error) => {
         console.error('Could not load schools', error);

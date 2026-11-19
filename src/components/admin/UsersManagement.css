@@ -452,6 +452,24 @@
   font-weight: 700;
 }
 
+.users-count-button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-blue);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.users-count-button:disabled {
+  color: var(--text-secondary);
+  cursor: wait;
+  text-decoration: none;
+}
+
 .user-id {
   margin: 6px 0 0;
   font-size: 12px;
