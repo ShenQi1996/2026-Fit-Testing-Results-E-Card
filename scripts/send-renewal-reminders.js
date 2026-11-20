@@ -17,10 +17,11 @@
 // records (deletedAt set) are skipped, and so is a test whose worker already has
 // a later test on file under the same email.
 //
-// Dedupe: after a successful send the record gets
-// renewalReminderSentFor = <due year> and renewalReminderSentAt = server time.
-// A record whose renewalReminderSentFor already equals its due year is skipped,
-// so the 30-day window plus daily runs never send twice.
+// Dedupe: before each email is sent, a Firestore transaction reads the
+// record, verifies renewalReminderSentFor is not yet set for this due year, and
+// writes renewalReminderSentFor = <due year> and renewalReminderSentAt = server
+// time. EmailJS is called only after the transaction commits, so a send failure
+// after stamping skips that year's reminder rather than duplicating it.
 //
 // Quota: at most MAX_SENDS_PER_RUN (50) sends per run, about 1 per second, so
 // the EmailJS free plan (200 requests a month, shared with e-card emails) is
@@ -311,6 +312,7 @@ const runReminders = async ({
   Object.keys(skipped).sort().forEach((reason) => log(`  skipped ${reason}: ${skipped[reason]}`));
 
   let attempts = 0;
+  let sendAttempts = 0;
   for (let index = 0; index < selected.length; index += 1) {
     const candidate = selected[index];
     if (attempts >= maxSends) {
@@ -337,23 +339,30 @@ const runReminders = async ({
       log(`  would remind fitTests/${candidate.id} (${masked}), due ${params.due_date}.`);
       continue;
     }
-    if (attempts > 1 && throttleMs > 0) await wait(throttleMs);
+    let claimed;
+    try {
+      claimed = await markSent(candidate.id, candidate.dueYear);
+    } catch (error) {
+      summary.failed += 1;
+      log(`  FAILED to stamp fitTests/${candidate.id} (${masked}); skipping send: ${error.message}`);
+      continue;
+    }
+    if (claimed === false) {
+      summary.skipped['already-reminded'] = (summary.skipped['already-reminded'] || 0) + 1;
+      log(`  skip fitTests/${candidate.id} (${masked}): already stamped for ${candidate.dueYear}.`);
+      continue;
+    }
+    sendAttempts += 1;
+    if (sendAttempts > 1 && throttleMs > 0) await wait(throttleMs);
     try {
       await send(params);
     } catch (error) {
       summary.failed += 1;
-      log(`  FAILED fitTests/${candidate.id} (${masked}): ${error.message}`);
+      log(`  FAILED fitTests/${candidate.id} (${masked}) after stamping for ${candidate.dueYear}; skipping retry this year: ${error.message}`);
       if (error.status === 429 || error.status === 402) {
         log('EmailJS rate limit or quota reached; stopping this run.');
         break;
       }
-      continue;
-    }
-    try {
-      await markSent(candidate.id, candidate.dueYear);
-    } catch (error) {
-      summary.failed += 1;
-      log(`  SENT but could not mark fitTests/${candidate.id} (${masked}); it may be emailed again: ${error.message}`);
       continue;
     }
     summary.sent += 1;
@@ -365,6 +374,28 @@ const runReminders = async ({
     : `Sent ${summary.sent} reminder(s); ${summary.failed} failed.`);
   return summary;
 };
+
+// Atomically claim the due-year reminder stamp before calling EmailJS so a
+// concurrent run or a send failure after commit never duplicates an email.
+const claimReminderStamp = ({ db, fitTests, serverTimestamp }) => (id, dueYear) =>
+  db.runTransaction(async (tx) => {
+    const ref = fitTests.doc(id);
+    const snap = await tx.get(ref);
+    const data = snap.exists ? (snap.data() || {}) : null;
+    if (
+      !data ||
+      data.deletedAt != null ||
+      data.renewalReminderOptIn !== true ||
+      data.renewalReminderSentFor === dueYear
+    ) {
+      return false;
+    }
+    tx.update(ref, {
+      renewalReminderSentFor: dueYear,
+      renewalReminderSentAt: serverTimestamp(),
+    });
+    return true;
+  });
 
 const main = async () => {
   const { dryRun } = parseArgs();
@@ -393,9 +424,10 @@ const main = async () => {
     loadOptedIn: async () => toEntries(await fitTests.where('renewalReminderOptIn', '==', true).get()),
     loadByEmail: async (email) => toEntries(await fitTests.where('recipientEmail', '==', email).get()),
     send: (params) => sendViaEmailJs(config, params),
-    markSent: (id, dueYear) => fitTests.doc(id).update({
-      renewalReminderSentFor: dueYear,
-      renewalReminderSentAt: admin.firestore.FieldValue.serverTimestamp(),
+    markSent: claimReminderStamp({
+      db,
+      fitTests,
+      serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
     }),
   });
   if (summary.failed > 0) {
@@ -422,6 +454,7 @@ module.exports = {
   WINDOW_MIN_DAYS,
   buildEmailJsBody,
   buildTemplateParams,
+  claimReminderStamp,
   classifyFitTest,
   hasLaterTest,
   maskEmail,
