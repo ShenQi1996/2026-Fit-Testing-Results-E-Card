@@ -1,13 +1,16 @@
+## Goal
+
+Write one short sentence explaining the main change and why this update exists.
+
+## Impact
+
+Who or what does this change help?
+
 ## What changed
 
-Describe the change in a few sentences.
+Briefly describe what was added, updated, or removed in plain words.
 
-## How to test
+## QA approved
 
-- [ ] `npm ci && npm run build` passes locally
-
-## Checklist
-
-- [ ] Branched from `main` with a `snake_case` name like `name_yyyy_mm_dd_purpose`
-- [ ] Pull request is small and focused
-- [ ] No secrets or `.env` files are included
+- [ ] Yes
+- [ ] No
