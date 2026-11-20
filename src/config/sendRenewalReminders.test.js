@@ -5,6 +5,7 @@ import {
   STAGING_RECIPIENT,
   buildEmailJsBody,
   buildTemplateParams,
+  claimReminderStamp,
   classifyFitTest,
   hasLaterTest,
   maskEmail,
@@ -212,15 +213,28 @@ describe('runReminders', () => {
     ...extra,
   });
 
-  test('sends, then marks each record with its due year, throttled between sends', async () => {
+  test('stamps each record before sending with its due year, throttled between sends', async () => {
+    const events = [];
     const d = deps([
       { id: 'a', data: record() },
       { id: 'b', data: record({ recipientEmail: 'b@example.com' }) },
       { id: 'c', data: record({ renewalReminderSentFor: 2026, recipientEmail: 'c@example.com' }) },
-    ]);
+    ], {
+      markSent: jest.fn(async (id, dueYear) => {
+        events.push(`mark:${id}:${dueYear}`);
+        return true;
+      }),
+      send: jest.fn(async (params) => {
+        events.push(`send:${params.to_email}`);
+      }),
+    });
     const summary = await runReminders(d);
-    expect(d.send).toHaveBeenCalledTimes(2);
-    expect(d.markSent.mock.calls).toEqual([['a', 2026], ['b', 2026]]);
+    expect(events).toEqual([
+      'mark:a:2026',
+      'send:worker@example.com',
+      'mark:b:2026',
+      'send:b@example.com',
+    ]);
     expect(d.wait).toHaveBeenCalledTimes(1);
     expect(summary).toMatchObject({ sent: 2, failed: 0, eligible: 2, skipped: { 'already-reminded': 1 } });
   });
@@ -254,7 +268,7 @@ describe('runReminders', () => {
     expect(summary.retested).toBe(1);
   });
 
-  test('a failed send is not marked, is counted, and other sends continue', async () => {
+  test('a failed send keeps the stamp so it is skipped rather than duplicated on rerun, and other sends continue', async () => {
     const send = jest.fn()
       .mockRejectedValueOnce(new EmailJsError(400, 'bad template'))
       .mockResolvedValueOnce(undefined);
@@ -263,8 +277,14 @@ describe('runReminders', () => {
       { id: 'b', data: record({ recipientEmail: 'b@example.com' }) },
     ], { send });
     const summary = await runReminders(d);
-    expect(d.markSent.mock.calls).toEqual([['b', 2026]]);
+    expect(d.markSent.mock.calls).toEqual([['a', 2026], ['b', 2026]]);
     expect(summary).toMatchObject({ sent: 1, failed: 1 });
+
+    // Next day's run sees renewalReminderSentFor: 2026 on `a` and skips it.
+    const rerun = deps([{ id: 'a', data: record({ issueDate: '12/01/2025', renewalReminderSentFor: 2026 }) }]);
+    const rerunSummary = await runReminders(rerun);
+    expect(rerun.send).not.toHaveBeenCalled();
+    expect(rerunSummary).toMatchObject({ sent: 0, skipped: { 'already-reminded': 1 } });
   });
 
   test('a 429 from EmailJS stops the run', async () => {
@@ -278,12 +298,22 @@ describe('runReminders', () => {
     expect(summary.failed).toBe(1);
   });
 
-  test('a failed marker write counts as a failure', async () => {
+  test('a failed transaction stamp counts as a failure and skips sending the email', async () => {
     const d = deps([{ id: 'a', data: record() }], {
       markSent: jest.fn().mockRejectedValue(new Error('PERMISSION_DENIED')),
     });
     const summary = await runReminders(d);
+    expect(d.send).not.toHaveBeenCalled();
     expect(summary).toMatchObject({ sent: 0, failed: 1 });
+  });
+
+  test('skips sending when the transaction sees the record was already stamped', async () => {
+    const d = deps([{ id: 'a', data: record() }], {
+      markSent: jest.fn().mockResolvedValue(false),
+    });
+    const summary = await runReminders(d);
+    expect(d.send).not.toHaveBeenCalled();
+    expect(summary).toMatchObject({ sent: 0, failed: 0, skipped: { 'already-reminded': 1 } });
   });
 
   test('a recipient the run does not allow (staging) is skipped and not sent', async () => {
@@ -295,5 +325,47 @@ describe('runReminders', () => {
     expect(d.send).toHaveBeenCalledTimes(1);
     expect(d.send.mock.calls[0][0].to_email).toBe('qa@example.com');
     expect(summary.skipped['staging-recipient']).toBe(1);
+  });
+});
+
+describe('claimReminderStamp', () => {
+  const makeHarness = (docData, exists = true) => {
+    const ref = { id: 'ft-1' };
+    const fitTests = { doc: jest.fn(() => ref) };
+    const tx = {
+      get: jest.fn(async () => ({ exists, data: () => docData })),
+      update: jest.fn(),
+    };
+    const db = {
+      runTransaction: jest.fn(async (fn) => fn(tx)),
+    };
+    const serverTimestamp = jest.fn(() => 'SERVER_TS');
+    return { ref, fitTests, tx, db, serverTimestamp };
+  };
+
+  test('reads doc, checks dueYear, and writes stamp inside a transaction when unset', async () => {
+    const h = makeHarness({ renewalReminderOptIn: true, deletedAt: null });
+    const markSent = claimReminderStamp({ db: h.db, fitTests: h.fitTests, serverTimestamp: h.serverTimestamp });
+    const claimed = await markSent('ft-1', 2026);
+    expect(claimed).toBe(true);
+    expect(h.db.runTransaction).toHaveBeenCalledTimes(1);
+    expect(h.tx.get).toHaveBeenCalledWith(h.ref);
+    expect(h.tx.update).toHaveBeenCalledWith(h.ref, {
+      renewalReminderSentFor: 2026,
+      renewalReminderSentAt: 'SERVER_TS',
+    });
+  });
+
+  test.each([
+    ['already stamped for this year', { renewalReminderOptIn: true, deletedAt: null, renewalReminderSentFor: 2026 }, true],
+    ['soft deleted', { renewalReminderOptIn: true, deletedAt: { seconds: 1 } }, true],
+    ['not opted in', { renewalReminderOptIn: false, deletedAt: null }, true],
+    ['missing document', null, false],
+  ])('returns false without writing when %s', async (_label, data, exists) => {
+    const h = makeHarness(data, exists);
+    const markSent = claimReminderStamp({ db: h.db, fitTests: h.fitTests, serverTimestamp: h.serverTimestamp });
+    const claimed = await markSent('ft-1', 2026);
+    expect(claimed).toBe(false);
+    expect(h.tx.update).not.toHaveBeenCalled();
   });
 });

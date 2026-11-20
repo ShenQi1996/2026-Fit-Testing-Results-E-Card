@@ -14,9 +14,11 @@ Manhattan and Brooklyn booking links.
   335 to 365 days ago, result Pass, a recipient email, the e-card was sent
   (`emailSentAt` set), not soft deleted (`deletedAt` empty), and no later fit
   test on file for the same email. One email per address per run.
-- No repeats: after a send the record gets `renewalReminderSentFor` (the due
-  year) and `renewalReminderSentAt`. A record already marked for its due year
-  is skipped, so daily runs inside the 30-day window send once.
+- No repeats: before each send, a Firestore transaction verifies
+  `renewalReminderSentFor` is not already set for the due year and stamps
+  `renewalReminderSentFor` and `renewalReminderSentAt` first. If the email send
+  fails after the transaction commits, that year's reminder is skipped rather
+  than duplicated.
 - Quota: at most 50 emails per run, about one per second. Extras wait for the
   next day. The EmailJS free plan is 200 requests a month **shared with e-card
   emails**, so watch the EmailJS usage page in busy months; Personal ($9/month)
